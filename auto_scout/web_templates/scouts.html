@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}スカウト履歴 - AutoScout{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="fw-bold mb-0"><i class="bi bi-people me-2"></i>スカウト履歴</h4>
+  <a href="/export.csv?platform={{ filters.platform }}&position={{ filters.position }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}"
+     class="btn btn-sm btn-outline-success">
+    <i class="bi bi-download me-1"></i>CSV エクスポート
+  </a>
+</div>
+
+<!-- フィルタ -->
+<div class="card shadow-sm mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-md-2">
+        <label class="form-label small fw-semibold mb-1">候補者名</label>
+        <input type="text" name="search" class="form-control form-control-sm" placeholder="名前で検索" value="{{ filters.search }}">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small fw-semibold mb-1">プラットフォーム</label>
+        <select name="platform" class="form-select form-select-sm">
+          <option value="">すべて</option>
+          {% for p in platform_choices %}
+          <option value="{{ p }}" {% if filters.platform == p %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small fw-semibold mb-1">ポジション</label>
+        <select name="position" class="form-select form-select-sm">
+          <option value="">すべて</option>
+          {% for pos in position_choices %}
+          <option value="{{ pos }}" {% if filters.position == pos %}selected{% endif %}>{{ pos }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small fw-semibold mb-1">送信日（from）</label>
+        <input type="date" name="date_from" class="form-control form-control-sm" value="{{ filters.date_from }}">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small fw-semibold mb-1">送信日（to）</label>
+        <input type="date" name="date_to" class="form-control form-control-sm" value="{{ filters.date_to }}">
+      </div>
+      <div class="col-md-2">
+        <button type="submit" class="btn btn-primary btn-sm w-100">
+          <i class="bi bi-search me-1"></i>絞り込み
+        </button>
+        <a href="/scouts" class="btn btn-outline-secondary btn-sm w-100 mt-1">リセット</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 件数表示 -->
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <small class="text-muted">{{ total }} 件中 {{ (page-1)*30+1 }}〜{{ [page*30, total]|min }} 件表示</small>
+</div>
+
+<!-- テーブル -->
+<div class="card shadow-sm">
+  <div class="card-body p-0">
+    <table class="table table-hover mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>候補者名</th>
+          <th>プラットフォーム</th>
+          <th>ポジション</th>
+          <th>タグ</th>
+          <th>ステータス</th>
+          <th>送信日時</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in rows %}
+      <tr>
+        <td class="fw-semibold">{{ r.candidate_name or '(不明)' }}</td>
+        <td><span class="badge bg-secondary badge-platform">{{ r.platform }}</span></td>
+        <td class="small">{{ r.position or '-' }}</td>
+        <td class="small text-muted">{{ r.tag or '-' }}</td>
+        <td>
+          {% if r.success %}
+            <span class="badge bg-success">成功</span>
+          {% else %}
+            <span class="badge bg-danger" title="{{ r.error or '' }}">失敗</span>
+          {% endif %}
+        </td>
+        <td class="small text-muted">{{ (r.sent_at or '')[:16].replace('T',' ') }}</td>
+        <td><a href="/scouts/{{ r.id }}" class="btn btn-sm btn-outline-secondary" style="font-size:.75rem;padding:2px 8px;">文面</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="text-center text-muted py-4">該当データがありません</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ページネーション -->
+{% if total_pages > 1 %}
+<nav class="mt-3">
+  <ul class="pagination pagination-sm">
+    {% if page > 1 %}
+    <li class="page-item"><a class="page-link" href="?{{ request.query_string.decode().replace('page='+page|string, 'page='+(page-1)|string) or request.query_string.decode()+'&page='+(page-1)|string }}">«</a></li>
+    {% endif %}
+    {% for p in range([1, page-2]|max, [total_pages+1, page+3]|min) %}
+    <li class="page-item {% if p==page %}active{% endif %}">
+      <a class="page-link" href="?platform={{ filters.platform }}&position={{ filters.position }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&search={{ filters.search }}&page={{ p }}">{{ p }}</a>
+    </li>
+    {% endfor %}
+    {% if page < total_pages %}
+    <li class="page-item"><a class="page-link" href="?platform={{ filters.platform }}&position={{ filters.position }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&search={{ filters.search }}&page={{ page+1 }}">»</a></li>
+    {% endif %}
+  </ul>
+</nav>
+{% endif %}
+{% endblock %}

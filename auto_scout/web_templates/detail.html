@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}スカウト詳細 #{{ scout.id }} - AutoScout{% endblock %}
+{% block content %}
+<div class="mb-3">
+  <a href="/scouts" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>一覧に戻る</a>
+</div>
+
+<h5 class="fw-bold mb-3"><i class="bi bi-envelope-open me-2"></i>スカウト詳細 #{{ scout.id }}</h5>
+
+<div class="row g-3">
+  <!-- 候補者情報 -->
+  <div class="col-md-4">
+    <div class="card shadow-sm h-100">
+      <div class="card-header fw-semibold">候補者情報</div>
+      <div class="card-body">
+        <dl class="mb-0">
+          <dt class="small text-muted">候補者名</dt>
+          <dd class="fw-semibold">{{ scout.candidate_name or '(不明)' }}</dd>
+          <dt class="small text-muted">候補者ID</dt>
+          <dd class="small font-monospace">{{ scout.candidate_id }}</dd>
+          <dt class="small text-muted">プラットフォーム</dt>
+          <dd><span class="badge bg-secondary">{{ scout.platform }}</span></dd>
+          <dt class="small text-muted">タグ</dt>
+          <dd class="small">{{ scout.tag or '-' }}</dd>
+          <dt class="small text-muted">ポジション</dt>
+          <dd class="small">{{ scout.position or '-' }}</dd>
+          <dt class="small text-muted">送信日時</dt>
+          <dd class="small">{{ (scout.sent_at or '')[:19].replace('T',' ') }}</dd>
+          <dt class="small text-muted">ステータス</dt>
+          <dd>
+            {% if scout.success %}
+              <span class="badge bg-success">成功</span>
+            {% else %}
+              <span class="badge bg-danger">失敗</span>
+            {% endif %}
+          </dd>
+          {% if scout.error %}
+          <dt class="small text-muted">エラー詳細</dt>
+          <dd class="small text-danger">{{ scout.error }}</dd>
+          {% endif %}
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  <!-- 送信文面 -->
+  <div class="col-md-8">
+    <div class="card shadow-sm h-100">
+      <div class="card-header d-flex justify-content-between align-items-center fw-semibold">
+        送信文面
+        <button class="btn btn-sm btn-outline-secondary" onclick="copyMessage()">
+          <i class="bi bi-clipboard me-1"></i>コピー
+        </button>
+      </div>
+      <div class="card-body">
+        {% if scout.message %}
+        <pre id="message-text" style="white-space:pre-wrap;font-family:inherit;font-size:.9rem;line-height:1.7;background:#f8f9fa;padding:1rem;border-radius:8px;margin:0;">{{ scout.message }}</pre>
+        {% else %}
+        <p class="text-muted">文面データなし</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyMessage() {
+  const text = document.getElementById('message-text');
+  if (!text) return;
+  navigator.clipboard.writeText(text.innerText).then(() => {
+    const btn = event.target.closest('button');
+    btn.innerHTML = '<i class="bi bi-check me-1"></i>コピー済み';
+    setTimeout(() => { btn.innerHTML = '<i class="bi bi-clipboard me-1"></i>コピー'; }, 2000);
+  });
+}
+</script>
+{% endblock %}

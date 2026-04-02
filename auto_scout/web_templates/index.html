@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}ダッシュボード - AutoScout{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h4 class="fw-bold mb-0"><i class="bi bi-speedometer2 me-2"></i>ダッシュボード</h4>
+  <small class="text-muted">最終更新: {{ now }}</small>
+</div>
+
+<!-- サマリーカード -->
+<div class="row g-3 mb-4">
+  {% set total_all = namespace(n=0) %}
+  {% set success_all = namespace(n=0) %}
+  {% for p, s in stats.items() %}
+    {% set total_all.n = total_all.n + s.total %}
+    {% set success_all.n = success_all.n + s.succeeded %}
+  {% endfor %}
+
+  <div class="col-md-3">
+    <div class="card stat-card shadow-sm text-center p-3">
+      <div class="fs-1 fw-bold text-primary">{{ total_all.n }}</div>
+      <div class="text-muted small">累計送信数</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card stat-card shadow-sm text-center p-3">
+      <div class="fs-1 fw-bold text-success">{{ success_all.n }}</div>
+      <div class="text-muted small">成功数</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card stat-card shadow-sm text-center p-3">
+      {% set today_total = namespace(n=0) %}
+      {% for p, c in today_counts.items() %}{% set today_total.n = today_total.n + c %}{% endfor %}
+      <div class="fs-1 fw-bold text-warning">{{ today_total.n }}</div>
+      <div class="text-muted small">本日の送信数</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card stat-card shadow-sm text-center p-3">
+      <div class="fs-1 fw-bold text-info">{{ stats|length }}</div>
+      <div class="text-muted small">利用プラットフォーム数</div>
+    </div>
+  </div>
+</div>
+
+<!-- プラットフォーム別統計 -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold">プラットフォーム別 送信数</div>
+      <div class="card-body p-0">
+        {% if stats %}
+        <table class="table table-sm mb-0">
+          <thead class="table-light"><tr><th>プラットフォーム</th><th class="text-center">合計</th><th class="text-center">成功</th><th class="text-center">今日</th><th>最終送信</th></tr></thead>
+          <tbody>
+          {% for platform, s in stats.items() %}
+          <tr>
+            <td><span class="badge bg-secondary badge-platform">{{ platform }}</span></td>
+            <td class="text-center">{{ s.total }}</td>
+            <td class="text-center text-success fw-semibold">{{ s.succeeded }}</td>
+            <td class="text-center">{{ today_counts.get(platform, 0) }}</td>
+            <td class="text-muted small">{{ (s.last_sent or '')[:10] }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted p-3 mb-0">まだ送信履歴がありません。</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- 直近のスカウト -->
+  <div class="col-md-6">
+    <div class="card shadow-sm">
+      <div class="card-header d-flex justify-content-between align-items-center fw-semibold">
+        直近のスカウト
+        <a href="/scouts" class="btn btn-sm btn-outline-primary">すべて見る</a>
+      </div>
+      <div class="card-body p-0">
+        {% if recent %}
+        <table class="table table-sm mb-0">
+          <thead class="table-light"><tr><th>候補者名</th><th>プラットフォーム</th><th>ポジション</th><th>送信日時</th><th></th></tr></thead>
+          <tbody>
+          {% for r in recent %}
+          <tr>
+            <td>{{ r.candidate_name or '(不明)' }}</td>
+            <td><span class="badge bg-secondary badge-platform">{{ r.platform }}</span></td>
+            <td class="small text-muted">{{ r.position or '-' }}</td>
+            <td class="small text-muted">{{ (r.sent_at or '')[:16].replace('T',' ') }}</td>
+            <td>
+              {% if r.success %}
+                <span class="badge bg-success">成功</span>
+              {% else %}
+                <span class="badge bg-danger">失敗</span>
+              {% endif %}
+              <a href="/scouts/{{ r.id }}" class="btn btn-xs btn-outline-secondary btn-sm ms-1" style="font-size:.7rem;padding:1px 6px;">詳細</a>
+            </td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted p-3 mb-0">まだ送信履歴がありません。</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

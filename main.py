@@ -17,9 +17,13 @@
 
   # 送信統計を表示
   python main.py stats
+
+  # Webダッシュボード起動
+  python main.py dashboard
 """
 import asyncio
 import logging
+import os
 import sys
 
 import click
@@ -28,6 +32,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from auto_scout.config import load_config
 from auto_scout.database import Database
 from auto_scout.runner import ScoutRunner
+
+os.makedirs("data", exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,6 +58,15 @@ def cli():
 def run(platform: str, dry_run: bool):
     """スカウト送信を一度だけ実行する。"""
     config = load_config()
+
+    enabled = [name for name, pc in config.platforms.items() if pc.enabled]
+    if not enabled:
+        click.echo(
+            "警告: 有効なプラットフォームがありません。\n"
+            ".env で DODA_ENABLED=true などを設定してください。"
+        )
+        return
+
     runner = ScoutRunner(config, dry_run=dry_run)
 
     if dry_run:
@@ -75,16 +90,28 @@ def run(platform: str, dry_run: bool):
 
 @cli.command()
 def schedule():
-    """定期実行モードで起動する。"""
+    """定期実行モードで起動する。Ctrl+C で停止。"""
     config = load_config()
+
+    enabled = [name for name, pc in config.platforms.items() if pc.enabled]
+    if not enabled:
+        click.echo(
+            "警告: 有効なプラットフォームがありません。\n"
+            ".env で DODA_ENABLED=true などを設定してください。"
+        )
+        return
+
     runner = ScoutRunner(config)
+    scheduler = AsyncIOScheduler()
 
     async def _job():
         logger.info("スケジュール実行開始")
-        await runner.run_all()
+        try:
+            await runner.run_all()
+        except Exception as e:
+            logger.error("スケジュール実行中にエラー: %s", e, exc_info=True)
 
     async def _start():
-        scheduler = AsyncIOScheduler()
         scheduler.add_job(
             _job,
             "interval",
@@ -98,14 +125,19 @@ def schedule():
         )
         # 初回はすぐに実行
         await _job()
-        # 無限ループ
         try:
             while True:
                 await asyncio.sleep(60)
-        except (KeyboardInterrupt, SystemExit):
-            scheduler.shutdown()
+        except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
+            pass
+        finally:
+            scheduler.shutdown(wait=False)
+            logger.info("スケジューラーを停止しました。")
 
-    asyncio.run(_start())
+    try:
+        asyncio.run(_start())
+    except KeyboardInterrupt:
+        pass
 
 
 @cli.command()
@@ -122,10 +154,23 @@ def stats():
     click.echo("\n=== スカウト送信統計 ===")
     for platform, stat in data.items():
         click.echo(
-            f"  {platform:20s}  合計: {stat['total']:4d} 件  "
+            f"  {platform:22s}  合計: {stat['total']:4d} 件  "
             f"成功: {stat['succeeded']:4d} 件  "
             f"最終送信: {stat['last_sent'] or 'なし'}"
         )
+
+
+@cli.command()
+@click.option("--host", default="127.0.0.1", help="ホスト（デフォルト: 127.0.0.1）")
+@click.option("--port", default=5000, help="ポート（デフォルト: 5000）")
+@click.option("--debug", is_flag=True, default=False, help="デバッグモード")
+def dashboard(host: str, port: int, debug: bool):
+    """Webダッシュボードを起動する。"""
+    from auto_scout.web import create_app
+    config = load_config()
+    app = create_app(config)
+    click.echo(f"ダッシュボード起動: http://{host}:{port}")
+    app.run(host=host, port=port, debug=debug)
 
 
 if __name__ == "__main__":
