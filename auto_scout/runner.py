@@ -39,6 +39,21 @@ class ScoutRunner:
             all_results.extend(results)
         return all_results
 
+    def _resolve_tag_mappings(self, platform_name: str) -> dict:
+        """
+        タグ→テンプレートのマッピングを解決する。
+        DBに登録があればDBを優先し、なければ .env の設定を使う。
+        """
+        db_mappings = self.db.get_tag_to_position(platform_name)
+        if db_mappings:
+            logger.debug("%s: DBのマッピングを使用 (%d件)", platform_name, len(db_mappings))
+            return db_mappings
+        # DB未登録の場合は .env のマッピングにフォールバック
+        env_mappings = self.config.platforms[platform_name].tag_to_position
+        if env_mappings:
+            logger.debug("%s: .envのマッピングを使用 (%d件)", platform_name, len(env_mappings))
+        return env_mappings
+
     async def run_platform(self, platform_name: str) -> List[ScoutResult]:
         """指定プラットフォームのスカウト処理を実行する。"""
         platform_config = self.config.platforms[platform_name]
@@ -46,6 +61,17 @@ class ScoutRunner:
         if not platform_cls:
             logger.error("未知のプラットフォーム: %s", platform_name)
             return []
+
+        # DBまたは.envからマッピングを取得してplatform_configに反映
+        merged_mappings = self._resolve_tag_mappings(platform_name)
+        if not merged_mappings:
+            logger.warning(
+                "%s: タグマッピングが設定されていません。"
+                "ダッシュボードの「マッピング設定」から登録してください。",
+                platform_name,
+            )
+            return []
+        platform_config.tag_to_position = merged_mappings
 
         results: List[ScoutResult] = []
         sent_count = 0

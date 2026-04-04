@@ -1,11 +1,10 @@
 """
-送信済みスカウトの追跡とログ管理。
-重複送信を防ぐことが主目的。
+送信済みスカウトの追跡とログ管理、およびタグ→テンプレートのマッピング管理。
 """
 import sqlite3
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Dict, List, Optional
 from .models import ScoutResult
 
 
@@ -40,6 +39,18 @@ class Database:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_platform_candidate
                 ON sent_scouts(platform, candidate_id)
+            """)
+            # タグ → テンプレートのマッピング（ダッシュボードから管理）
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tag_mappings (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    platform   TEXT NOT NULL,
+                    tag        TEXT NOT NULL,
+                    position   TEXT NOT NULL,
+                    note       TEXT,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(platform, tag)
+                )
             """)
 
     def already_sent(self, platform: str, candidate_id: str) -> bool:
@@ -83,6 +94,48 @@ class Database:
                 (platform, f"{today}%"),
             ).fetchone()
         return row[0] if row else 0
+
+    # ------------------------------------------------------------------
+    # タグ→テンプレート マッピング管理
+    # ------------------------------------------------------------------
+
+    def get_tag_mappings(self, platform: Optional[str] = None) -> List[dict]:
+        """マッピング一覧を返す。platform を指定するとそのプラットフォームのみ。"""
+        with self._connect() as conn:
+            if platform:
+                rows = conn.execute(
+                    "SELECT * FROM tag_mappings WHERE platform=? ORDER BY platform, tag",
+                    (platform,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM tag_mappings ORDER BY platform, tag"
+                ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_tag_to_position(self, platform: str) -> Dict[str, str]:
+        """指定プラットフォームの {タグ名: テンプレート名} 辞書を返す。"""
+        rows = self.get_tag_mappings(platform)
+        return {r["tag"]: r["position"] for r in rows}
+
+    def upsert_tag_mapping(self, platform: str, tag: str, position: str, note: str = "") -> None:
+        """マッピングを追加または更新する。"""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO tag_mappings (platform, tag, position, note, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(platform, tag) DO UPDATE SET
+                    position=excluded.position,
+                    note=excluded.note
+                """,
+                (platform, tag, position, note, datetime.now().isoformat()),
+            )
+
+    def delete_tag_mapping(self, mapping_id: int) -> None:
+        """マッピングを削除する。"""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM tag_mappings WHERE id=?", (mapping_id,))
 
     def get_stats(self) -> dict:
         """プラットフォームごとの送信統計を返す。"""

@@ -2,18 +2,23 @@
 Webダッシュボード（Flask）。
 
 機能:
-  /            - サマリーダッシュボード（プラットフォーム別統計・直近のスカウト）
-  /scouts      - 送信済みスカウト一覧（プラットフォーム・ポジション・日付でフィルタ可）
-  /scouts/<id> - スカウト詳細（送信文面全文）
-  /export.csv  - CSV エクスポート
+  /                  - サマリーダッシュボード
+  /scouts            - 送信済みスカウト一覧
+  /scouts/<id>       - スカウト詳細
+  /export.csv        - CSV エクスポート
+  /mappings          - タグ→テンプレート マッピング管理
+  /mappings/add      - マッピング追加（POST）
+  /mappings/<id>/delete - マッピング削除（POST）
 """
 import csv
 import io
+import os
 import sqlite3
 from datetime import datetime, date
+from pathlib import Path
 from typing import Optional
 
-from flask import Flask, render_template, request, Response, abort
+from flask import Flask, render_template, request, Response, abort, redirect, url_for, flash
 
 from .config import Config
 from .database import Database
@@ -21,6 +26,7 @@ from .database import Database
 
 def create_app(config: Config) -> Flask:
     app = Flask(__name__, template_folder="web_templates")
+    app.secret_key = os.urandom(24)
     db = Database(config.db_path)
 
     # ------------------------------------------------------------------
@@ -221,5 +227,49 @@ def create_app(config: Config) -> Flask:
             mimetype="text/csv",
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
+
+    # ------------------------------------------------------------------
+    # マッピング管理
+    # ------------------------------------------------------------------
+
+    def _available_templates() -> list[str]:
+        """templates/ 以下の .txt ファイル名（拡張子なし）を返す。"""
+        d = Path(config.templates_dir)
+        if not d.exists():
+            return []
+        return sorted(p.stem for p in d.glob("*.txt"))
+
+    @app.route("/mappings")
+    def mappings():
+        all_mappings = db.get_tag_mappings()
+        templates = _available_templates()
+        platforms = list(config.platforms.keys())
+        return render_template(
+            "mappings.html",
+            mappings=all_mappings,
+            templates=templates,
+            platforms=platforms,
+        )
+
+    @app.route("/mappings/add", methods=["POST"])
+    def mappings_add():
+        platform = request.form.get("platform", "").strip()
+        tag = request.form.get("tag", "").strip()
+        position = request.form.get("position", "").strip()
+        note = request.form.get("note", "").strip()
+
+        if not platform or not tag or not position:
+            flash("プラットフォーム・タグ名・テンプレートはすべて必須です。", "danger")
+            return redirect(url_for("mappings"))
+
+        db.upsert_tag_mapping(platform, tag, position, note)
+        flash(f"「{platform} / {tag}」→「{position}」を登録しました。", "success")
+        return redirect(url_for("mappings"))
+
+    @app.route("/mappings/<int:mapping_id>/delete", methods=["POST"])
+    def mappings_delete(mapping_id: int):
+        db.delete_tag_mapping(mapping_id)
+        flash("マッピングを削除しました。", "success")
+        return redirect(url_for("mappings"))
 
     return app
