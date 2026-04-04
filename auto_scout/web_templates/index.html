@@ -6,6 +6,47 @@
   <small class="text-muted">最終更新: {{ now }}</small>
 </div>
 
+<!-- スケジュール・有効プラットフォーム情報 -->
+<div class="row g-3 mb-3">
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm" style="background:linear-gradient(135deg,#1a1a2e,#16213e);color:#fff;">
+      <div class="card-body py-3">
+        <div class="d-flex align-items-center gap-3">
+          <i class="bi bi-clock-history fs-2 text-warning"></i>
+          <div>
+            <div class="fw-semibold">スケジュール設定</div>
+            <div class="small opacity-75">{{ schedule_info.mode }} — {{ schedule_info.desc }}</div>
+            {% if schedule_info.allowed_hours %}
+            <div class="small opacity-75 mt-1">
+              <i class="bi bi-moon-stars me-1"></i>夜間送信モード（{{ schedule_info.allowed_hours }}時台）
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm" style="background:linear-gradient(135deg,#0f3460,#16213e);color:#fff;">
+      <div class="card-body py-3">
+        <div class="d-flex align-items-center gap-3">
+          <i class="bi bi-toggles fs-2 text-info"></i>
+          <div>
+            <div class="fw-semibold">有効なプラットフォーム</div>
+            {% if enabled_platforms %}
+              {% for p in enabled_platforms %}
+              <span class="badge bg-info text-dark me-1 mt-1" style="font-size:.75rem;">{{ p }}</span>
+              {% endfor %}
+            {% else %}
+              <div class="small opacity-75 mt-1">なし（.envで設定してください）</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- サマリーカード -->
 <div class="row g-3 mb-4">
   {% set total_all = namespace(n=0) %}

@@ -3,7 +3,7 @@
 すべての設定は .env ファイル または環境変数から読み込まれます。
 """
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
 import os
 from dotenv import load_dotenv
 
@@ -35,8 +35,16 @@ class Config:
     # データベース
     db_path: str
 
-    # スケジュール（分）
+    # スケジュール（分）- 時間帯指定なしの場合に使用
     interval_minutes: int
+
+    # 送信を許可する時間帯（APScheduler の cron hour 書式）
+    # 例: "19-23" → 19〜23時のみ送信、"" → 終日
+    allowed_hours: str
+
+    # allowed_hours が設定されている場合の実行分（cron minute 書式）
+    # 例: "0" → 各時刻の0分に実行、"0,30" → 0分と30分に実行
+    cron_minute: str
 
     # テンプレートディレクトリ
     templates_dir: str
@@ -70,6 +78,8 @@ def load_config() -> Config:
         claude_model=os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001"),
         db_path=os.getenv("DB_PATH", "data/scouts.db"),
         interval_minutes=int(os.getenv("SCHEDULE_INTERVAL_MINUTES", "60")),
+        allowed_hours=os.getenv("SCHEDULE_ALLOWED_HOURS", ""),
+        cron_minute=os.getenv("SCHEDULE_CRON_MINUTE", "0"),
         templates_dir=os.getenv("TEMPLATES_DIR", "templates"),
         headless=os.getenv("HEADLESS", "true").lower() == "true",
         slow_mo_ms=int(os.getenv("SLOW_MO_MS", "800")),

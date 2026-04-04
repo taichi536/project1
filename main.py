@@ -97,7 +97,7 @@ def schedule():
     if not enabled:
         click.echo(
             "警告: 有効なプラットフォームがありません。\n"
-            ".env で DODA_ENABLED=true などを設定してください。"
+            ".env で RECRUIT_DIRECT_ENABLED=true などを設定してください。"
         )
         return
 
@@ -111,20 +111,46 @@ def schedule():
         except Exception as e:
             logger.error("スケジュール実行中にエラー: %s", e, exc_info=True)
 
+    def _describe_schedule() -> str:
+        if config.allowed_hours:
+            return (
+                f"時間帯指定モード: {config.allowed_hours} 時台の {config.cron_minute} 分に実行"
+            )
+        return f"インターバルモード: {config.interval_minutes} 分ごとに実行"
+
     async def _start():
-        scheduler.add_job(
-            _job,
-            "interval",
-            minutes=config.interval_minutes,
-            id="auto_scout",
-        )
+        if config.allowed_hours:
+            # 時間帯指定: APScheduler の cron トリガーを使用
+            scheduler.add_job(
+                _job,
+                "cron",
+                hour=config.allowed_hours,
+                minute=config.cron_minute,
+                id="auto_scout",
+            )
+        else:
+            # 時間帯指定なし: インターバルトリガー
+            scheduler.add_job(
+                _job,
+                "interval",
+                minutes=config.interval_minutes,
+                id="auto_scout",
+            )
+
         scheduler.start()
-        logger.info(
-            "スケジューラー起動: %d 分ごとに実行します。Ctrl+C で停止。",
-            config.interval_minutes,
-        )
-        # 初回はすぐに実行
-        await _job()
+
+        # 次回実行予定を表示
+        job = scheduler.get_job("auto_scout")
+        next_run = job.next_run_time.strftime("%Y-%m-%d %H:%M") if job and job.next_run_time else "不明"
+
+        logger.info("スケジューラー起動: %s。Ctrl+C で停止。", _describe_schedule())
+        click.echo(f"\n{_describe_schedule()}")
+        click.echo(f"次回実行予定: {next_run}\n")
+
+        if not config.allowed_hours:
+            # 時間帯指定なしの場合のみ初回即時実行
+            await _job()
+
         try:
             while True:
                 await asyncio.sleep(60)

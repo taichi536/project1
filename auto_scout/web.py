@@ -109,17 +109,32 @@ def create_app(config: Config) -> Flask:
     # ルート
     # ------------------------------------------------------------------
 
+    def _schedule_info() -> dict:
+        """スケジュール設定の表示用情報を返す。"""
+        if config.allowed_hours:
+            desc = f"{config.allowed_hours} 時台の {config.cron_minute} 分"
+            mode = "時間帯指定"
+        else:
+            desc = f"{config.interval_minutes} 分ごと（終日）"
+            mode = "インターバル"
+        return {"mode": mode, "desc": desc, "allowed_hours": config.allowed_hours}
+
     @app.route("/")
     def index():
         stats = db.get_stats()
         today_counts = _today_counts()
         recent, _ = _query(limit=10)
+        enabled_platforms = [
+            name for name, pc in config.platforms.items() if pc.enabled
+        ]
         return render_template(
             "index.html",
             stats=stats,
             today_counts=today_counts,
             recent=recent,
             now=datetime.now().strftime("%Y-%m-%d %H:%M"),
+            schedule_info=_schedule_info(),
+            enabled_platforms=enabled_platforms,
         )
 
     @app.route("/scouts")
