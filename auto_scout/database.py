@@ -47,11 +47,17 @@ class Database:
                     platform   TEXT NOT NULL,
                     tag        TEXT NOT NULL,
                     position   TEXT NOT NULL,
+                    scout_type TEXT NOT NULL DEFAULT 'normal',
                     note       TEXT,
                     created_at TEXT NOT NULL,
                     UNIQUE(platform, tag)
                 )
             """)
+            # 既存テーブルに scout_type カラムがない場合はマイグレーション
+            try:
+                conn.execute("ALTER TABLE tag_mappings ADD COLUMN scout_type TEXT NOT NULL DEFAULT 'normal'")
+            except Exception:
+                pass  # 既にカラムが存在する場合は無視
             # タグ機能がないプラットフォーム向けのURLキュー
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS scout_queue (
@@ -133,18 +139,25 @@ class Database:
         rows = self.get_tag_mappings(platform)
         return {r["tag"]: r["position"] for r in rows}
 
-    def upsert_tag_mapping(self, platform: str, tag: str, position: str, note: str = "") -> None:
+    def get_tag_to_scout_type(self, platform: str) -> Dict[str, str]:
+        """指定プラットフォームの {タグ名: scout_type} 辞書を返す。"""
+        rows = self.get_tag_mappings(platform)
+        return {r["tag"]: r.get("scout_type", "normal") for r in rows}
+
+    def upsert_tag_mapping(self, platform: str, tag: str, position: str,
+                           scout_type: str = "normal", note: str = "") -> None:
         """マッピングを追加または更新する。"""
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO tag_mappings (platform, tag, position, note, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO tag_mappings (platform, tag, position, scout_type, note, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(platform, tag) DO UPDATE SET
                     position=excluded.position,
+                    scout_type=excluded.scout_type,
                     note=excluded.note
                 """,
-                (platform, tag, position, note, datetime.now().isoformat()),
+                (platform, tag, position, scout_type, note, datetime.now().isoformat()),
             )
 
     def delete_tag_mapping(self, mapping_id: int) -> None:

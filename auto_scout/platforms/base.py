@@ -108,8 +108,13 @@ class BasePlatform(ABC):
         """候補者の詳細プロフィールを取得して返す。"""
 
     @abstractmethod
-    async def send_scout(self, candidate_id: str, message: str) -> None:
-        """スカウトメッセージを送信する。失敗時は例外を raise する。"""
+    async def send_scout(self, candidate_id: str, message: str,
+                         scout_type: str = "normal") -> None:
+        """
+        スカウトメッセージを送信する。失敗時は例外を raise する。
+        scout_type: "normal" | "platinum" | "diamond"
+        ダイヤ/プラチナ対応プラットフォームはこの値で送信フローを切り替える。
+        """
 
     async def get_profile_from_url(self, profile_url: str) -> CandidateProfile:
         """

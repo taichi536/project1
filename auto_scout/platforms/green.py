@@ -87,7 +87,7 @@ class GreenPlatform(BasePlatform):
             career_summary=await _t(".career-detail"),   # TODO
         )
 
-    async def send_scout(self, candidate_id: str, message: str) -> None:
+    async def send_scout(self, candidate_id: str, message: str, scout_type: str = "normal") -> None:
         url = f"https://green-japan.com/companies/scouts/new?user_id={candidate_id}"  # TODO
         await self.page.goto(url)
         await self.page.wait_for_load_state("networkidle")

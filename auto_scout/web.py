@@ -256,14 +256,16 @@ def create_app(config: Config) -> Flask:
         platform = request.form.get("platform", "").strip()
         tag = request.form.get("tag", "").strip()
         position = request.form.get("position", "").strip()
+        scout_type = request.form.get("scout_type", "normal").strip()
         note = request.form.get("note", "").strip()
 
         if not platform or not tag or not position:
             flash("プラットフォーム・タグ名・テンプレートはすべて必須です。", "danger")
             return redirect(url_for("mappings"))
 
-        db.upsert_tag_mapping(platform, tag, position, note)
-        flash(f"「{platform} / {tag}」→「{position}」を登録しました。", "success")
+        db.upsert_tag_mapping(platform, tag, position, scout_type, note)
+        type_label = {"normal": "通常", "platinum": "プラチナ", "diamond": "ダイヤ"}.get(scout_type, scout_type)
+        flash(f"「{platform} / {tag}」→「{position}」({type_label}スカウト) を登録しました。", "success")
         return redirect(url_for("mappings"))
 
     @app.route("/mappings/<int:mapping_id>/delete", methods=["POST"])

@@ -101,7 +101,7 @@ class BizreachPlatform(BasePlatform):
             career_summary=career_summary,
         )
 
-    async def send_scout(self, candidate_id: str, message: str) -> None:
+    async def send_scout(self, candidate_id: str, message: str, scout_type: str = "normal") -> None:
         # TODO: ビズリーチのスカウト送信フローに変更
         url = f"https://br-navi.bizreach.co.jp/scout/send/{candidate_id}"
         await self.page.goto(url)

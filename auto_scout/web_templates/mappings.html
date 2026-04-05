@@ -60,6 +60,17 @@
             {% endif %}
           </div>
           <div class="mb-3">
+            <label class="form-label small fw-semibold">
+              スカウト種別
+              <span class="text-muted fw-normal ms-1">（doda のダイヤ・プラチナ等）</span>
+            </label>
+            <select name="scout_type" class="form-select form-select-sm">
+              <option value="normal">通常スカウト</option>
+              <option value="platinum">プラチナスカウト</option>
+              <option value="diamond">ダイヤスカウト</option>
+            </select>
+          </div>
+          <div class="mb-3">
             <label class="form-label small fw-semibold">メモ（任意）</label>
             <input type="text" name="note" class="form-control form-control-sm"
                    placeholder="例: Webバックエンド 5年以上">
@@ -108,6 +119,7 @@
               <th>プラットフォーム</th>
               <th>タグ名<br><small class="text-muted fw-normal">（サービス上のラベル）</small></th>
               <th>→ テンプレート<br><small class="text-muted fw-normal">（templates/*.txt）</small></th>
+              <th>スカウト種別</th>
               <th>メモ</th>
               <th>登録日</th>
               <th></th>
@@ -122,6 +134,16 @@
               <span class="badge bg-success-subtle text-success border border-success-subtle font-monospace" style="font-size:.8rem;">
                 {{ m.position }}.txt
               </span>
+            </td>
+            <td>
+              {% set st = m.get('scout_type', 'normal') %}
+              {% if st == 'diamond' %}
+                <span class="badge" style="background:#1a6ee0;">💎 ダイヤ</span>
+              {% elif st == 'platinum' %}
+                <span class="badge" style="background:#7c3aed;">🏅 プラチナ</span>
+              {% else %}
+                <span class="badge bg-secondary">通常</span>
+              {% endif %}
             </td>
             <td class="small text-muted">{{ m.note or '-' }}</td>
             <td class="small text-muted">{{ (m.created_at or '')[:10] }}</td>

@@ -177,19 +177,19 @@ class ScoutRunner:
         return result
 
     def _resolve_tag_mappings(self, platform_name: str) -> dict:
-        """
-        タグ→テンプレートのマッピングを解決する。
-        DBに登録があればDBを優先し、なければ .env の設定を使う。
-        """
+        """タグ→テンプレートのマッピングを解決する（DB優先、.envフォールバック）。"""
         db_mappings = self.db.get_tag_to_position(platform_name)
         if db_mappings:
             logger.debug("%s: DBのマッピングを使用 (%d件)", platform_name, len(db_mappings))
             return db_mappings
-        # DB未登録の場合は .env のマッピングにフォールバック
         env_mappings = self.config.platforms[platform_name].tag_to_position
         if env_mappings:
             logger.debug("%s: .envのマッピングを使用 (%d件)", platform_name, len(env_mappings))
         return env_mappings
+
+    def _resolve_scout_types(self, platform_name: str) -> dict:
+        """タグ→scout_type の辞書を返す。DBにない場合は全タグ "normal"。"""
+        return self.db.get_tag_to_scout_type(platform_name)
 
     async def run_platform(self, platform_name: str) -> List[ScoutResult]:
         """指定プラットフォームのスカウト処理を実行する。"""
@@ -260,9 +260,15 @@ class ScoutRunner:
             )
             return results
 
+        # タグから scout_type を解決して Candidate に付与
+        scout_type_map = self._resolve_scout_types(platform.PLATFORM_NAME)
+        for c in candidates:
+            c.scout_type = scout_type_map.get(c.tag, "normal")
+
         logger.info(
-            "%s: タグ '%s' の候補者 %d 名を処理開始",
+            "%s: タグ '%s' の候補者 %d 名を処理開始 (scout_type=%s)",
             platform.PLATFORM_NAME, tag, len(candidates),
+            candidates[0].scout_type if candidates else "normal",
         )
 
         for candidate in candidates:
@@ -323,14 +329,16 @@ class ScoutRunner:
         # ドライランモード（送信しない）
         if self.dry_run:
             logger.info(
-                "[DRY RUN] %s: 候補者 %s へのスカウト文面:\n%s",
-                candidate.platform, candidate.name, message,
+                "[DRY RUN] %s: 候補者 %s へのスカウト文面 (scout_type=%s):\n%s",
+                candidate.platform, candidate.name, candidate.scout_type, message,
             )
             return ScoutResult(candidate=candidate, success=True, sent_message=message)
 
-        # スカウト送信
+        # スカウト送信（scout_type を渡す）
         try:
-            await platform.send_scout(candidate.candidate_id, message)
+            await platform.send_scout(
+                candidate.candidate_id, message, scout_type=candidate.scout_type
+            )
             result = ScoutResult(candidate=candidate, success=True, sent_message=message)
         except Exception as e:
             logger.error(

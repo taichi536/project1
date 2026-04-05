@@ -11,6 +11,9 @@ class Candidate:
     tag: str           # プラットフォーム上のタグ名
     position: str      # タグから解決したポジション名（テンプレート選択に使用）
     profile_url: str
+    # スカウト種別: "normal" | "platinum" | "diamond"
+    # ダイヤ・プラチナ対応プラットフォーム（doda等）で使用
+    scout_type: str = "normal"
 
 
 @dataclass

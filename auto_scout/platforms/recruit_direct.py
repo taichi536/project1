@@ -210,7 +210,7 @@ class RecruitDirectPlatform(BasePlatform):
     # スカウト送信
     # ------------------------------------------------------------------
 
-    async def send_scout(self, candidate_id: str, message: str) -> None:
+    async def send_scout(self, candidate_id: str, message: str, scout_type: str = "normal") -> None:
         """
         右ペインの「スカウトを送る」ボタンを押してモーダルに文面を入力・送信する。
         事前に _click_candidate_card() でカードを選択しておくこと。

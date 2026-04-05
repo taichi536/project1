@@ -117,24 +117,77 @@ class DodaPlatform(BasePlatform):
             career_summary=career_summary,
         )
 
-    async def send_scout(self, candidate_id: str, message: str) -> None:
-        """スカウトメッセージを送信する。"""
-        # TODO: 実際のスカウト送信 URL・フローに変更
-        url = f"https://recruiter.doda.jp/scout/send/{candidate_id}"
+    async def send_scout(self, candidate_id: str, message: str,
+                         scout_type: str = "normal") -> None:
+        """
+        スカウトを送信する。scout_type に応じてダイヤ・プラチナ・通常を使い分ける。
+
+        scout_type:
+          "normal"   → 通常スカウト
+          "platinum" → プラチナスカウト
+          "diamond"  → ダイヤスカウト
+
+        【確認が必要な点】
+        doda のダイヤ/プラチナ送信フローは通常と異なる可能性があります。
+        HEADLESS=false でドライランしながら以下を確認してください。
+          A) 送信ページの URL 自体が異なる場合 → _send_url() を修正
+          B) 同一ページで送信種別をドロップダウン等で選択する場合
+             → _select_scout_type() 内のセレクターを修正
+          C) 候補者プロフィール上に「ダイヤで送る」ボタンが別途ある場合
+             → ボタンセレクターを scout_type 別に定義して修正
+        """
+        url = self._send_url(candidate_id, scout_type)
         await self.page.goto(url)
         await self.page.wait_for_load_state("networkidle")
 
-        # メッセージ入力
+        # 種別選択が同一ページ内の場合（パターンB）
+        if scout_type in ("platinum", "diamond"):
+            await self._select_scout_type(scout_type)
+
+        # 文面入力
         await self._safe_fill("textarea.scout-message-body", message)  # TODO
 
-        # 送信ボタンクリック
+        # 送信
         await self._safe_click("button.scout-submit-btn")  # TODO
 
-        # 送信完了確認
         try:
-            await self.page.wait_for_selector(".scout-sent-confirmation", timeout=10000)  # TODO
+            await self.page.wait_for_selector(".scout-sent-confirmation", timeout=15000)  # TODO
         except PlaywrightTimeoutError:
-            await self._take_screenshot(f"send_failed_{candidate_id}")
-            raise RuntimeError(f"doda: 候補者 {candidate_id} へのスカウト送信確認ができませんでした。")
+            await self._take_screenshot(f"send_failed_{scout_type}_{candidate_id}")
+            raise RuntimeError(
+                f"doda: 候補者 {candidate_id} ({scout_type}) への送信確認ができませんでした。"
+            )
 
-        logger.info("doda: 候補者 %s へスカウト送信完了", candidate_id)
+        logger.info("doda: 候補者 %s へ %s スカウト送信完了", candidate_id, scout_type)
+
+    def _send_url(self, candidate_id: str, scout_type: str) -> str:
+        """
+        scout_type に応じた送信ページ URL を返す。
+
+        TODO: 実際の doda 採用管理画面で以下を確認してください。
+          - 通常 / プラチナ / ダイヤで URL が分かれているか
+          - 同じ URL でパラメータが異なるだけか
+        現状は同じ URL に仮設定しています。
+        """
+        base = f"https://recruiter.doda.jp/scout/send/{candidate_id}"
+        # URL がスカウト種別で分かれる場合の例:
+        # if scout_type == "diamond":
+        #     return f"https://recruiter.doda.jp/diamond/send/{candidate_id}"
+        # if scout_type == "platinum":
+        #     return f"https://recruiter.doda.jp/platinum/send/{candidate_id}"
+        return base  # TODO: 確認後に修正
+
+    async def _select_scout_type(self, scout_type: str) -> None:
+        """
+        送信ページ内でスカウト種別を選択する（ドロップダウン等）。
+
+        TODO: 実際の UI に合わせて実装してください。
+        例: ラジオボタンで選ぶ場合
+          label_text = "ダイヤスカウト" if scout_type == "diamond" else "プラチナスカウト"
+          await self._safe_click(f'label:has-text("{label_text}")')
+        例: セレクトボックスの場合
+          await self.page.select_option('select#scoutType', scout_type)
+        """
+        # TODO: 実際のセレクターに変更
+        logger.debug("doda: scout_type=%s を選択中...", scout_type)
+        # await self._safe_click(f'input[value="{scout_type}"]')
