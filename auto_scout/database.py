@@ -52,6 +52,21 @@ class Database:
                     UNIQUE(platform, tag)
                 )
             """)
+            # タグ機能がないプラットフォーム向けのURLキュー
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS scout_queue (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    platform       TEXT NOT NULL,
+                    profile_url    TEXT NOT NULL,
+                    candidate_name TEXT,
+                    position       TEXT NOT NULL,
+                    note           TEXT,
+                    status         TEXT NOT NULL DEFAULT 'pending',
+                    added_at       TEXT NOT NULL,
+                    processed_at   TEXT,
+                    UNIQUE(platform, profile_url)
+                )
+            """)
 
     def already_sent(self, platform: str, candidate_id: str) -> bool:
         """このプラットフォームのこの候補者にすでにスカウトを送信済みか確認する。"""
@@ -136,6 +151,79 @@ class Database:
         """マッピングを削除する。"""
         with self._connect() as conn:
             conn.execute("DELETE FROM tag_mappings WHERE id=?", (mapping_id,))
+
+    # ------------------------------------------------------------------
+    # スカウトキュー管理（タグ機能のないプラットフォーム向け）
+    # ------------------------------------------------------------------
+
+    def queue_add(self, platform: str, profile_url: str, position: str,
+                  candidate_name: str = "", note: str = "") -> int:
+        """キューにURLを追加する。重複の場合は pendingにリセットして更新。"""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO scout_queue
+                    (platform, profile_url, candidate_name, position, note, status, added_at)
+                VALUES (?, ?, ?, ?, ?, 'pending', ?)
+                ON CONFLICT(platform, profile_url) DO UPDATE SET
+                    candidate_name = excluded.candidate_name,
+                    position       = excluded.position,
+                    note           = excluded.note,
+                    status         = 'pending',
+                    added_at       = excluded.added_at,
+                    processed_at   = NULL
+                """,
+                (platform, profile_url, candidate_name, position, note,
+                 datetime.now().isoformat()),
+            )
+            row = conn.execute(
+                "SELECT id FROM scout_queue WHERE platform=? AND profile_url=?",
+                (platform, profile_url),
+            ).fetchone()
+        return row["id"] if row else -1
+
+    def queue_get_pending(self, platform: Optional[str] = None) -> List[dict]:
+        """処理待ちのキューアイテムを返す。"""
+        with self._connect() as conn:
+            if platform:
+                rows = conn.execute(
+                    "SELECT * FROM scout_queue WHERE status='pending' AND platform=?"
+                    " ORDER BY added_at",
+                    (platform,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM scout_queue WHERE status='pending' ORDER BY platform, added_at"
+                ).fetchall()
+        return [dict(r) for r in rows]
+
+    def queue_get_all(self, platform: Optional[str] = None, limit: int = 100) -> List[dict]:
+        """全キューアイテムを返す（ダッシュボード表示用）。"""
+        with self._connect() as conn:
+            if platform:
+                rows = conn.execute(
+                    "SELECT * FROM scout_queue WHERE platform=?"
+                    " ORDER BY added_at DESC LIMIT ?",
+                    (platform, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM scout_queue ORDER BY added_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        return [dict(r) for r in rows]
+
+    def queue_update_status(self, queue_id: int, status: str) -> None:
+        """ステータスを更新する。status: 'sent' | 'error' | 'skipped'"""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE scout_queue SET status=?, processed_at=? WHERE id=?",
+                (status, datetime.now().isoformat(), queue_id),
+            )
+
+    def queue_delete(self, queue_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM scout_queue WHERE id=?", (queue_id,))
 
     def get_stats(self) -> dict:
         """プラットフォームごとの送信統計を返す。"""

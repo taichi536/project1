@@ -272,4 +272,62 @@ def create_app(config: Config) -> Flask:
         flash("マッピングを削除しました。", "success")
         return redirect(url_for("mappings"))
 
+    # ------------------------------------------------------------------
+    # スカウトキュー（タグ機能のないプラットフォーム向け）
+    # ------------------------------------------------------------------
+
+    @app.route("/queue")
+    def queue():
+        items = db.queue_get_all()
+        templates = _available_templates()
+        platforms = list(config.platforms.keys())
+        pending_count = sum(1 for i in items if i["status"] == "pending")
+        return render_template(
+            "queue.html",
+            items=items,
+            templates=templates,
+            platforms=platforms,
+            pending_count=pending_count,
+        )
+
+    @app.route("/queue/add", methods=["POST"])
+    def queue_add():
+        platform = request.form.get("platform", "").strip()
+        profile_url = request.form.get("profile_url", "").strip()
+        position = request.form.get("position", "").strip()
+        candidate_name = request.form.get("candidate_name", "").strip()
+        note = request.form.get("note", "").strip()
+
+        if not platform or not profile_url or not position:
+            flash("プラットフォーム・URL・ポジションはすべて必須です。", "danger")
+            return redirect(url_for("queue"))
+
+        db.queue_add(platform, profile_url, position, candidate_name, note)
+        label = candidate_name or profile_url
+        flash(f"「{label}」をキューに追加しました。", "success")
+        return redirect(url_for("queue"))
+
+    @app.route("/queue/bulk_add", methods=["POST"])
+    def queue_bulk_add():
+        """複数URLを一括登録する（改行区切り）。"""
+        platform = request.form.get("platform", "").strip()
+        urls_raw = request.form.get("profile_urls", "").strip()
+        position = request.form.get("position", "").strip()
+
+        if not platform or not urls_raw or not position:
+            flash("プラットフォーム・URL・ポジションはすべて必須です。", "danger")
+            return redirect(url_for("queue"))
+
+        urls = [u.strip() for u in urls_raw.splitlines() if u.strip()]
+        for url in urls:
+            db.queue_add(platform, url, position)
+        flash(f"{len(urls)} 件をキューに追加しました。", "success")
+        return redirect(url_for("queue"))
+
+    @app.route("/queue/<int:queue_id>/delete", methods=["POST"])
+    def queue_delete(queue_id: int):
+        db.queue_delete(queue_id)
+        flash("キューから削除しました。", "success")
+        return redirect(url_for("queue"))
+
     return app

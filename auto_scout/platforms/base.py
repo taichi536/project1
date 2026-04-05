@@ -111,6 +111,18 @@ class BasePlatform(ABC):
     async def send_scout(self, candidate_id: str, message: str) -> None:
         """スカウトメッセージを送信する。失敗時は例外を raise する。"""
 
+    async def get_profile_from_url(self, profile_url: str) -> CandidateProfile:
+        """
+        プロフィールURLに直接アクセスしてプロフィールを取得する。
+        タグ機能のないプラットフォーム（RDS等）でキュー処理に使用。
+        デフォルト実装: URLからcandidate_idを末尾パスとして抽出して
+        get_candidate_profile() を呼ぶ。プラットフォームごとにオーバーライド可。
+        """
+        candidate_id = profile_url.rstrip("/").split("/")[-1]
+        await self.page.goto(profile_url)
+        await self.page.wait_for_load_state("networkidle")
+        return await self.get_candidate_profile(candidate_id)
+
     # ------------------------------------------------------------------
     # 共通ロジック（オーバーライド可）
     # ------------------------------------------------------------------
