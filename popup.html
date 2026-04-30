@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>パーソナライズ生成</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 420px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Yu Gothic', sans-serif;
+      font-size: 13px;
+      color: #2c2c2a;
+      background: #fff;
+    }
+
+    .header {
+      padding: 11px 16px;
+      border-bottom: 0.5px solid #e0ddd6;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .logo {
+      width: 28px; height: 28px;
+      background: #EEEDFE; border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; color: #3C3489; flex-shrink: 0;
+    }
+    .header-text .title { font-size: 13px; font-weight: 500; }
+    .header-text .sub { font-size: 10px; color: #888780; margin-top: 1px; }
+
+    .api-section { padding: 10px 16px; border-bottom: 0.5px solid #e0ddd6; }
+    .label { font-size: 10px; font-weight: 500; color: #5F5E5A; margin-bottom: 4px; letter-spacing: .03em; }
+    .api-row { display: flex; gap: 6px; }
+    input[type="password"], input[type="text"], input[type="number"] {
+      flex: 1; padding: 7px 10px;
+      border: 0.5px solid #d3d1c7; border-radius: 6px;
+      font-size: 12px; color: #2c2c2a; background: #fff; outline: none;
+      transition: border-color .15s;
+    }
+    input[type="password"]:focus,
+    input[type="text"]:focus,
+    input[type="number"]:focus { border-color: #7F77DD; }
+    .save-btn {
+      padding: 7px 12px;
+      background: #EEEDFE; color: #3C3489;
+      border: 0.5px solid #AFA9EC; border-radius: 6px;
+      font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap;
+    }
+    .save-btn:hover { background: #CECBF6; }
+
+    .tabs { display: flex; border-bottom: 0.5px solid #e0ddd6; }
+    .tab-btn {
+      flex: 1; padding: 8px 4px;
+      background: none; border: none; cursor: pointer;
+      font-size: 11px; font-weight: 500; color: #888780;
+      border-bottom: 2px solid transparent;
+      transition: all .15s;
+    }
+    .tab-btn.active { color: #534AB7; border-bottom-color: #534AB7; }
+    .tab-btn:hover:not(.active) { color: #5F5E5A; background: #F8F7F3; }
+
+    .tab-content { display: none; padding: 12px 16px; }
+    .tab-content.active { display: block; }
+
+    select {
+      width: 100%; padding: 7px 10px;
+      border: 0.5px solid #d3d1c7; border-radius: 6px;
+      font-size: 12px; color: #2c2c2a; background: #fff;
+      outline: none; cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888780' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+    }
+    select:focus { border-color: #7F77DD; }
+
+    textarea {
+      width: 100%; padding: 7px 10px;
+      border: 0.5px solid #d3d1c7; border-radius: 6px;
+      font-size: 12px; color: #2c2c2a; background: #fff; outline: none;
+      resize: vertical; min-height: 60px; line-height: 1.5;
+      transition: border-color .15s;
+    }
+    textarea:focus { border-color: #7F77DD; }
+
+    .primary-btn {
+      width: 100%; padding: 10px;
+      background: #534AB7; color: #fff;
+      border: none; border-radius: 8px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer; transition: background .15s;
+    }
+    .primary-btn:hover { background: #3C3489; }
+    .primary-btn:disabled { background: #AFA9EC; cursor: not-allowed; }
+
+    .status {
+      font-size: 12px; min-height: 18px;
+      display: flex; align-items: center; gap: 6px;
+      margin: 8px 0 6px;
+    }
+    .status.loading { color: #534AB7; }
+    .status.error   { color: #A32D2D; }
+    .status.success { color: #085041; }
+    .status.idle    { color: #888780; }
+    .spinner {
+      width: 11px; height: 11px;
+      border: 2px solid #CECBF6; border-top-color: #534AB7;
+      border-radius: 50%; animation: spin .6s linear infinite; flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .result-box {
+      background: #F8F7F3; border: 0.5px solid #d3d1c7;
+      border-radius: 8px; padding: 11px;
+      font-size: 13px; line-height: 1.7; color: #2c2c2a;
+      min-height: 70px; white-space: pre-wrap; word-break: break-all;
+    }
+
+    .action-row { display: flex; gap: 6px; margin-top: 7px; }
+    .copy-btn {
+      flex: 1; padding: 7px;
+      background: #E1F5EE; color: #085041;
+      border: 0.5px solid #5DCAA5; border-radius: 6px;
+      font-size: 11px; font-weight: 500; cursor: pointer;
+    }
+    .copy-btn:hover, .copy-btn.copied { background: #9FE1CB; }
+    .copy-template-btn {
+      flex: 1; padding: 7px;
+      background: #534AB7; color: #fff;
+      border: none; border-radius: 6px;
+      font-size: 11px; font-weight: 500; cursor: pointer;
+    }
+    .copy-template-btn:hover { background: #3C3489; }
+    .copy-template-btn.copied { background: #085041; }
+    .regen-btn {
+      padding: 7px 12px;
+      background: #fff; color: #534AB7;
+      border: 0.5px solid #AFA9EC; border-radius: 6px;
+      font-size: 11px; font-weight: 500; cursor: pointer; white-space: nowrap;
+    }
+    .regen-btn:hover { background: #EEEDFE; }
+
+    .hint { font-size: 10px; color: #888780; margin-top: 4px; line-height: 1.5; }
+
+    /* 一次選定 */
+    .screening-result {
+      margin-top: 10px;
+    }
+    .overall-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border-radius: 20px;
+      font-size: 14px; font-weight: 700; margin-bottom: 10px;
+    }
+    .overall-badge.ok   { background: #E1F5EE; color: #085041; border: 1px solid #5DCAA5; }
+    .overall-badge.ng   { background: #FDE8E8; color: #A32D2D; border: 1px solid #F0A0A0; }
+    .overall-badge.warn { background: #FEF3E2; color: #7A4E00; border: 1px solid #F5C26B; }
+
+    .criteria-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; }
+    .criterion-row {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 7px 10px; border-radius: 6px;
+      background: #F8F7F3; border: 0.5px solid #e0ddd6;
+      font-size: 12px;
+    }
+    .criterion-row.ok   { background: #F0FBF7; border-color: #A8E4CE; }
+    .criterion-row.ng   { background: #FEF5F5; border-color: #F0A0A0; }
+    .criterion-row.skip { background: #F8F7F3; border-color: #e0ddd6; opacity: 0.7; }
+    .criterion-icon { font-size: 13px; flex-shrink: 0; margin-top: 1px; }
+    .criterion-body { flex: 1; }
+    .criterion-name { font-weight: 600; color: #2c2c2a; }
+    .criterion-detail { color: #5F5E5A; margin-top: 1px; font-size: 11px; }
+
+    .screening-comment {
+      background: #F8F7F3; border: 0.5px solid #d3d1c7;
+      border-radius: 6px; padding: 9px 11px;
+      font-size: 12px; line-height: 1.6; color: #5F5E5A;
+    }
+    .comment-label { font-size: 10px; font-weight: 600; color: #888780; margin-bottom: 3px; }
+
+    /* 設定タブ */
+    .setting-group { margin-bottom: 14px; }
+    .setting-group .label { margin-bottom: 6px; }
+    .range-row { display: flex; align-items: center; gap: 6px; }
+    .range-row input[type="number"] { flex: 1; }
+    .range-sep { color: #888780; font-size: 12px; flex-shrink: 0; }
+
+    .checkbox-group { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+    .checkbox-item {
+      display: flex; align-items: center; gap: 4px;
+      padding: 4px 10px;
+      border: 0.5px solid #d3d1c7; border-radius: 20px;
+      font-size: 11px; cursor: pointer;
+      transition: all .15s; user-select: none;
+    }
+    .checkbox-item input { display: none; }
+    .checkbox-item.checked {
+      background: #EEEDFE; color: #3C3489;
+      border-color: #AFA9EC; font-weight: 500;
+    }
+    .checkbox-item:hover { background: #F8F7F3; }
+    .checkbox-item.checked:hover { background: #CECBF6; }
+
+    .settings-save-btn {
+      width: 100%; padding: 9px;
+      background: #534AB7; color: #fff;
+      border: none; border-radius: 8px;
+      font-size: 12px; font-weight: 500; cursor: pointer;
+      margin-top: 4px;
+    }
+    .settings-save-btn:hover { background: #3C3489; }
+    .settings-saved { color: #085041; font-size: 11px; text-align: center; margin-top: 5px; display: none; }
+
+    /* ポジション提案カード */
+    .suggest-card {
+      border: 0.5px solid #d3d1c7; border-radius: 8px;
+      padding: 10px 12px; margin-bottom: 8px; background: #fff;
+    }
+    .suggest-card.best { border-color: #7F77DD; background: #FAFAFF; }
+    .suggest-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .suggest-rank { font-size: 11px; font-weight: 600; color: #534AB7; }
+    .suggest-score {
+      font-size: 11px; font-weight: 600;
+      background: #EEEDFE; color: #3C3489;
+      padding: 2px 7px; border-radius: 10px;
+    }
+    .suggest-position { font-size: 13px; font-weight: 600; color: #2c2c2a; margin-bottom: 5px; }
+    .suggest-reason { font-size: 11px; color: #5F5E5A; line-height: 1.6; margin-bottom: 7px; }
+    .use-position-btn {
+      width: 100%; padding: 6px;
+      background: #EEEDFE; color: #3C3489;
+      border: 0.5px solid #AFA9EC; border-radius: 6px;
+      font-size: 11px; font-weight: 500; cursor: pointer;
+    }
+    .use-position-btn:hover { background: #CECBF6; }
+
+    .debug-btn {
+      width: 100%; padding: 5px;
+      background: #fff; color: #aaa;
+      border: 0.5px solid #e0ddd6; border-radius: 6px;
+      font-size: 10px; cursor: pointer; margin-top: 8px;
+    }
+    .debug-btn:hover { color: #5F5E5A; background: #F8F7F3; }
+    .debug-output {
+      background: #F8F7F3; border: 0.5px solid #d3d1c7;
+      border-radius: 6px; padding: 7px; margin-top: 5px;
+      font-size: 10px; font-family: monospace;
+      line-height: 1.5; color: #5F5E5A;
+      white-space: pre-wrap; word-break: break-all;
+      max-height: 180px; overflow-y: auto;
+    }
+
+    .position-row { margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">S</div>
+  <div class="header-text">
+    <div class="title">パーソナライズ文ジェネレーター</div>
+    <div class="sub">Snow-we.Inc — v1.12.0</div>
+  </div>
+</div>
+
+<div class="api-section">
+  <div class="label">Claude API Key</div>
+  <div class="api-row">
+    <input type="password" id="api-key" placeholder="sk-ant-api03-..." />
+    <button class="save-btn" id="save-btn">保存</button>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab-btn active" data-tab="generate">✍️ 文生成</button>
+  <button class="tab-btn" data-tab="suggest">🎯 ポジション</button>
+  <button class="tab-btn" data-tab="screening">🔍 一次選定</button>
+  <button class="tab-btn" data-tab="settings">⚙️ 設定</button>
+</div>
+
+<!-- タブ1: パーソナライズ文生成 -->
+<div class="tab-content active" id="tab-generate">
+  <select id="position-select" style="display:none;">
+    <option>戦略コンサルタント（ストラテジー）</option>
+    <option>ビジネスコンサルタント（業務変革）</option>
+    <option selected>営業戦略コンサルタント（セールス＆コマース）</option>
+    <option>CFO・ファイナンスコンサルタント</option>
+    <option>財務・経営管理コンサルタント（CFO&amp;EV）</option>
+    <option>組織・人事コンサルタント（タレント＆オーガニゼーション）</option>
+    <option>サプライチェーン＆オペレーションズコンサルタント（SC&amp;O）</option>
+    <option>サステナビリティ・ESGコンサルタント</option>
+    <option>チェンジマネジメント・コンサルタント</option>
+    <option>リスク・コンプライアンスコンサルタント</option>
+    <option>ITコンサルタント・システムコンサルタント</option>
+    <option>DX・デジタル変革コンサルタント</option>
+    <option>クラウドコンサルタント・クラウドエンジニア</option>
+    <option>データ＆AIコンサルタント・データサイエンティスト</option>
+    <option>サイバーセキュリティコンサルタント</option>
+    <option>プロジェクトマネージャー・PMOコンサルタント</option>
+    <option>Salesforceコンサルタント</option>
+    <option>インフラエンジニア・クラウドエンジニア（テクノロジー）</option>
+    <option>金融インダストリーコンサルタント（銀行・証券・保険）</option>
+    <option>公共・官公庁コンサルタント</option>
+    <option>ヘルスケア・ライフサイエンスコンサルタント</option>
+    <option>マーケティングコンサルタント（アクセンチュア ソング）</option>
+    <option>UIUXデザイナー（ソング）</option>
+    <option>オペレーションズコンサルタント（BPO・業務アウトソーシング）</option>
+    <option>製造業・物流プロセスDXコンサルタント（インダストリーX）</option>
+    <option>自動車領域DXコンサルタント（SDV・インダストリーX）</option>
+  </select>
+
+  <button class="primary-btn" id="generate-btn">プロフィールを取得してパーソナライズ文を生成</button>
+  <div class="status idle" id="status">候補者のプロフィールページで実行してください</div>
+
+  <div id="result-section" style="display:none;">
+    <div class="label">生成されたパーソナライズ文</div>
+    <div class="result-box" id="result-text"></div>
+    <div class="action-row">
+      <button class="copy-btn" id="copy-btn">文のみコピー</button>
+      <button class="copy-template-btn" id="copy-template-btn">テンプレ全文をコピー</button>
+      <button class="regen-btn" id="regen-btn">再生成</button>
+    </div>
+    <div class="hint">「テンプレ全文をコピー」でポジション名入り全文をコピーできます</div>
+  </div>
+
+  <button class="debug-btn" id="debug-btn">🔍 診断情報を取得（不具合時）</button>
+  <div id="debug-section" style="display:none;">
+    <div class="debug-output" id="debug-output"></div>
+  </div>
+</div>
+
+<!-- タブ2: ポジション提案 -->
+<div class="tab-content" id="tab-suggest">
+  <div style="margin-bottom:10px; font-size:12px; color:#5F5E5A; line-height:1.6;">
+    候補者の経歴を分析し、最適なアクセンチュアポジションを提案します。
+  </div>
+  <button class="primary-btn" id="suggest-btn">🎯 最適ポジションを分析・提案する</button>
+  <div class="status idle" id="suggest-status">候補者のプロフィールページで実行してください</div>
+  <div id="suggest-result" style="display:none;">
+    <div class="label" style="margin-bottom:8px;">推奨ポジション</div>
+    <div id="suggest-cards"></div>
+    <div class="hint">「このポジションで生成」を押すとパーソナライズ文タブに移動して生成開始します</div>
+  </div>
+</div>
+
+<!-- タブ3: 一次選定 -->
+<div class="tab-content" id="tab-screening">
+  <div style="margin-bottom:10px; font-size:12px; color:#5F5E5A; line-height:1.6;">
+    設定した選定基準で候補者を自動判定します。基準は⚙️設定タブで変更できます。
+  </div>
+  <button class="primary-btn" id="screening-btn">🔍 一次選定を実行する</button>
+  <div class="status idle" id="screening-status">候補者のプロフィールページで実行してください</div>
+  <div class="screening-result" id="screening-result" style="display:none;">
+    <div id="overall-badge-wrap"></div>
+    <div class="criteria-list" id="criteria-list"></div>
+    <div class="comment-label">AIコメント</div>
+    <div class="screening-comment" id="screening-comment"></div>
+  </div>
+</div>
+
+<!-- タブ4: 設定 -->
+<div class="tab-content" id="tab-settings">
+
+  <div class="setting-group">
+    <div class="label">年齢（歳）</div>
+    <div class="range-row">
+      <input type="number" id="age-min" placeholder="下限（例: 28）" min="18" max="70">
+      <span class="range-sep">〜</span>
+      <input type="number" id="age-max" placeholder="上限（例: 50）" min="18" max="70">
+    </div>
+  </div>
+
+  <div class="setting-group">
+    <div class="label">最低年収（万円）</div>
+    <input type="number" id="income-min" placeholder="例: 600" min="0" max="5000" style="width:100%;">
+  </div>
+
+  <div class="setting-group">
+    <div class="label">社格条件（複数選択可）</div>
+    <div class="checkbox-group" id="company-tier-group">
+      <label class="checkbox-item" data-value="上場企業">
+        <input type="checkbox" value="上場企業">上場企業
+      </label>
+      <label class="checkbox-item" data-value="大手企業">
+        <input type="checkbox" value="大手企業">大手企業
+      </label>
+      <label class="checkbox-item" data-value="外資系">
+        <input type="checkbox" value="外資系">外資系
+      </label>
+      <label class="checkbox-item" data-value="コンサルファーム">
+        <input type="checkbox" value="コンサルファーム">コンサルファーム
+      </label>
+      <label class="checkbox-item" data-value="メガベンチャー">
+        <input type="checkbox" value="メガベンチャー">メガベンチャー
+      </label>
+      <label class="checkbox-item" data-value="不問">
+        <input type="checkbox" value="不問">不問
+      </label>
+    </div>
+  </div>
+
+  <div class="setting-group">
+    <div class="label">学歴条件</div>
+    <select id="education-req">
+      <option value="不問">不問</option>
+      <option value="大卒以上">大卒以上</option>
+      <option value="大学院卒以上">大学院卒以上</option>
+      <option value="旧帝大・早慶以上">旧帝大・早慶以上</option>
+    </select>
+  </div>
+
+  <div class="setting-group">
+    <div class="label">必須経験キーワード（カンマ区切り、空欄で不問）</div>
+    <textarea id="required-keywords" placeholder="例: コンサルタント, PM, ERP, DX"></textarea>
+  </div>
+
+  <div class="setting-group">
+    <div class="label">除外キーワード（カンマ区切り、空欄で不問）</div>
+    <textarea id="exclude-keywords" placeholder="例: 販売員, アルバイト"></textarea>
+  </div>
+
+  <button class="settings-save-btn" id="settings-save-btn">設定を保存</button>
+  <div class="settings-saved" id="settings-saved">✅ 保存しました</div>
+</div>
+
+<script src="popup.js"></script>
+</body>
+</html>
