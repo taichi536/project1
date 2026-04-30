@@ -141,6 +141,26 @@
 
     .hint { font-size: 10px; color: #888780; margin-top: 4px; line-height: 1.5; }
 
+    /* 候補者サマリーカード */
+    .candidate-card {
+      background: #F0F4FF; border: 1.5px solid #A5B4FC;
+      border-radius: 10px; padding: 11px 14px; margin-bottom: 10px;
+    }
+    .candidate-card-label {
+      font-size: 10px; font-weight: 600; color: #4338CA;
+      letter-spacing: .04em; margin-bottom: 7px;
+    }
+    .candidate-fields { display: flex; flex-direction: column; gap: 4px; }
+    .candidate-field {
+      display: flex; align-items: baseline; gap: 6px; font-size: 12px;
+    }
+    .candidate-field-name {
+      font-size: 10px; font-weight: 600; color: #6366F1;
+      min-width: 44px; flex-shrink: 0;
+    }
+    .candidate-field-value { color: #1E1B4B; font-weight: 500; }
+    .candidate-field-value.unknown { color: #9CA3AF; font-weight: 400; font-style: italic; }
+
     /* 一次選定 */
     .screening-result { margin-top: 10px; }
 
@@ -377,6 +397,7 @@
   <button class="primary-btn" id="screening-btn">🔍 一次選定を実行する</button>
   <div class="status idle" id="screening-status">候補者のプロフィールページで実行してください</div>
   <div class="screening-result" id="screening-result" style="display:none;">
+    <div id="candidate-card"></div>
     <div id="overall-badge-wrap"></div>
     <div class="criteria-list" id="criteria-list"></div>
     <div class="comment-label">AIコメント</div>

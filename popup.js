@@ -467,6 +467,13 @@ ${profileText}
 
 以下のJSON形式のみで出力してください（説明・前置き不要）:
 {
+  "candidate": {
+    "age": "プロフィールから読み取った年齢（例: 43歳）。不明な場合は空文字",
+    "income": "現在年収（例: 1100〜1200万円）。不明な場合は空文字",
+    "current_company": "直近の在籍企業名。不明な場合は空文字",
+    "education": "最終学歴の学校名。不明な場合は空文字",
+    "experience_years": "社会人経験年数（例: 約15年）。不明な場合は空文字"
+  },
   "overall": "OK" | "NG" | "要確認",
   "criteria": [
     {
@@ -504,6 +511,31 @@ ${profileText}
 }
 
 function renderScreeningResult(result) {
+  // 候補者サマリーカード
+  const card = $('candidate-card');
+  const c = result.candidate || {};
+  const fields = [
+    { name: '年齢',   value: c.age },
+    { name: '年収',   value: c.income },
+    { name: '直近',   value: c.current_company },
+    { name: '学歴',   value: c.education },
+    { name: '経験',   value: c.experience_years },
+  ].filter(f => f.name);
+
+  card.innerHTML = `
+    <div class="candidate-card">
+      <div class="candidate-card-label">📋 AIが読み取った候補者情報</div>
+      <div class="candidate-fields">
+        ${fields.map(f => `
+          <div class="candidate-field">
+            <span class="candidate-field-name">${f.name}</span>
+            <span class="candidate-field-value ${f.value ? '' : 'unknown'}">${f.value || '情報なし'}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+
   // 総合判定バッジ
   const badgeWrap = $('overall-badge-wrap');
   const overall = result.overall || '要確認';
