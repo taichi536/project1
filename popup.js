@@ -507,14 +507,40 @@ function renderScreeningResult(result) {
   // 総合判定バッジ
   const badgeWrap = $('overall-badge-wrap');
   const overall = result.overall || '要確認';
-  const badgeClass = overall === 'OK' ? 'ok' : overall === 'NG' ? 'ng' : 'warn';
-  const badgeIcon = overall === 'OK' ? '✅' : overall === 'NG' ? '❌' : '⚠️';
-  badgeWrap.innerHTML = `<div class="overall-badge ${badgeClass}">${badgeIcon} 総合判定: ${overall}</div>`;
+  const criteria = result.criteria || [];
+  const okCount = criteria.filter(c => c.result === 'OK').length;
+  const totalCount = criteria.filter(c => c.result !== '情報なし').length;
+  const pct = totalCount > 0 ? Math.round((okCount / totalCount) * 100) : 0;
 
-  // 各基準
+  const bannerClass = overall === 'OK' ? 'ok' : overall === 'NG' ? 'ng' : 'warn';
+  const bannerIcon = overall === 'OK' ? '🟢' : overall === 'NG' ? '🔴' : '🟡';
+  const verdictText = overall === 'OK' ? 'スカウト推奨' : overall === 'NG' ? 'スカウト見送り' : '要確認';
+
+  badgeWrap.innerHTML = `
+    <div class="overall-banner ${bannerClass}">
+      <div class="overall-icon">${bannerIcon}</div>
+      <div class="overall-text">
+        <div class="overall-label">総合判定</div>
+        <div class="overall-verdict">${verdictText}</div>
+        <div class="overall-score">${okCount} / ${criteria.length} 項目クリア</div>
+      </div>
+    </div>
+    <div class="score-bar-wrap">
+      <div class="score-bar-track">
+        <div class="score-bar-fill ${bannerClass}" style="width:${pct}%"></div>
+      </div>
+    </div>
+  `;
+
+  // 各基準（NG → 情報なし → OK の順に並べて視認性を上げる）
+  const sorted = [...criteria].sort((a, b) => {
+    const order = { 'NG': 0, '情報なし': 1, 'OK': 2 };
+    return (order[a.result] ?? 1) - (order[b.result] ?? 1);
+  });
+
   const list = $('criteria-list');
   list.innerHTML = '';
-  (result.criteria || []).forEach(c => {
+  sorted.forEach(c => {
     const rowClass = c.result === 'OK' ? 'ok' : c.result === 'NG' ? 'ng' : 'skip';
     const icon = c.result === 'OK' ? '✅' : c.result === 'NG' ? '❌' : '—';
     const row = document.createElement('div');

@@ -142,32 +142,60 @@
     .hint { font-size: 10px; color: #888780; margin-top: 4px; line-height: 1.5; }
 
     /* 一次選定 */
-    .screening-result {
-      margin-top: 10px;
-    }
-    .overall-badge {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 6px 14px; border-radius: 20px;
-      font-size: 14px; font-weight: 700; margin-bottom: 10px;
-    }
-    .overall-badge.ok   { background: #E1F5EE; color: #085041; border: 1px solid #5DCAA5; }
-    .overall-badge.ng   { background: #FDE8E8; color: #A32D2D; border: 1px solid #F0A0A0; }
-    .overall-badge.warn { background: #FEF3E2; color: #7A4E00; border: 1px solid #F5C26B; }
+    .screening-result { margin-top: 10px; }
 
-    .criteria-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; }
+    .overall-banner {
+      width: 100%; border-radius: 10px; padding: 14px 16px;
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 12px;
+    }
+    .overall-banner.ok   { background: #D1FAE5; border: 1.5px solid #34D399; }
+    .overall-banner.ng   { background: #FEE2E2; border: 1.5px solid #F87171; }
+    .overall-banner.warn { background: #FEF3C7; border: 1.5px solid #FBBF24; }
+    .overall-icon { font-size: 32px; flex-shrink: 0; line-height: 1; }
+    .overall-text { flex: 1; }
+    .overall-label { font-size: 11px; font-weight: 500; margin-bottom: 2px; }
+    .overall-banner.ok   .overall-label { color: #065F46; }
+    .overall-banner.ng   .overall-label { color: #991B1B; }
+    .overall-banner.warn .overall-label { color: #78350F; }
+    .overall-verdict { font-size: 20px; font-weight: 800; line-height: 1; }
+    .overall-banner.ok   .overall-verdict { color: #059669; }
+    .overall-banner.ng   .overall-verdict { color: #DC2626; }
+    .overall-banner.warn .overall-verdict { color: #D97706; }
+    .overall-score { font-size: 12px; font-weight: 600; margin-top: 3px; }
+    .overall-banner.ok   .overall-score { color: #065F46; }
+    .overall-banner.ng   .overall-score { color: #991B1B; }
+    .overall-banner.warn .overall-score { color: #78350F; }
+
+    .score-bar-wrap { margin-bottom: 10px; }
+    .score-bar-track {
+      height: 6px; background: #E5E7EB; border-radius: 99px; overflow: hidden;
+    }
+    .score-bar-fill {
+      height: 100%; border-radius: 99px;
+      transition: width .4s ease;
+    }
+    .score-bar-fill.ok   { background: #34D399; }
+    .score-bar-fill.ng   { background: #F87171; }
+    .score-bar-fill.warn { background: #FBBF24; }
+
+    .criteria-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
     .criterion-row {
-      display: flex; align-items: flex-start; gap: 8px;
-      padding: 7px 10px; border-radius: 6px;
-      background: #F8F7F3; border: 0.5px solid #e0ddd6;
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 8px 11px; border-radius: 7px;
+      background: #F8F7F3; border: 1px solid #e0ddd6;
       font-size: 12px;
     }
-    .criterion-row.ok   { background: #F0FBF7; border-color: #A8E4CE; }
-    .criterion-row.ng   { background: #FEF5F5; border-color: #F0A0A0; }
-    .criterion-row.skip { background: #F8F7F3; border-color: #e0ddd6; opacity: 0.7; }
-    .criterion-icon { font-size: 13px; flex-shrink: 0; margin-top: 1px; }
+    .criterion-row.ok   { background: #ECFDF5; border-color: #6EE7B7; }
+    .criterion-row.ng   { background: #FEF2F2; border-color: #FCA5A5; }
+    .criterion-row.skip { background: #F9FAFB; border-color: #E5E7EB; opacity: 0.75; }
+    .criterion-icon { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
     .criterion-body { flex: 1; }
-    .criterion-name { font-weight: 600; color: #2c2c2a; }
-    .criterion-detail { color: #5F5E5A; margin-top: 1px; font-size: 11px; }
+    .criterion-name { font-weight: 700; font-size: 12px; }
+    .criterion-row.ok   .criterion-name { color: #065F46; }
+    .criterion-row.ng   .criterion-name { color: #991B1B; }
+    .criterion-row.skip .criterion-name { color: #6B7280; }
+    .criterion-detail { margin-top: 2px; font-size: 11px; line-height: 1.5; color: #4B5563; }
 
     .screening-comment {
       background: #F8F7F3; border: 0.5px solid #d3d1c7;
