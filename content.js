@@ -187,49 +187,46 @@ function extractMainText(root, limit) {
 }
 
 // -------------------------------------------------------
-// RDS詳細パネルを特定する
+// プロフィールらしいテキストかを判定
+// -------------------------------------------------------
+const PROFILE_KEYWORDS = ['職務経歴', '職歴', '学歴', 'スキル', '自己PR', '資格', '語学', '業務内容', '転職理由', '希望年収'];
+
+function hasProfileContent(text) {
+  return PROFILE_KEYWORDS.filter(kw => text.includes(kw)).length >= 2;
+}
+
+// -------------------------------------------------------
+// RDS詳細パネルを特定する（プロフィール内容を必須条件に）
 // -------------------------------------------------------
 function findRDSDetailPanel() {
+  const vw = window.innerWidth;
   const candidates = [];
 
-  document.querySelectorAll('h1, h2, h3, h4, h5, h6, div, span').forEach(el => {
-    const t = (el.innerText || el.textContent || '').trim();
-    if (t === '候補者詳細' || t === '候補者 詳細') {
+  // 方法1: 「職務経歴」など複数のプロフィールキーワードを含む右側パネルを探す
+  document.querySelectorAll('div, section, article, main').forEach(el => {
+    const rect = el.getBoundingClientRect();
+    if (rect.left < vw * 0.3 || rect.width < 250 || rect.height < 300) return;
+    const text = (el.innerText || '').trim();
+    if (text.length < 200 || text.length > 20000) return;
+    if (!hasProfileContent(text)) return;
+    candidates.push({ el, score: text.length });
+  });
+
+  // 方法2: 「候補者詳細」見出しを持つ親コンテナ
+  if (candidates.length === 0) {
+    document.querySelectorAll('h1,h2,h3,h4,h5,h6,div,span').forEach(el => {
+      const t = (el.innerText || el.textContent || '').trim();
+      if (t !== '候補者詳細' && t !== '候補者 詳細') return;
       let parent = el.parentElement;
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 10; i++) {
         if (!parent) break;
-        const rect = parent.getBoundingClientRect();
-        const innerText = (parent.innerText || '').trim();
-        if (rect.width > 300 && innerText.length > 200) {
-          candidates.push({ el: parent, score: innerText.length });
+        const text = (parent.innerText || '').trim();
+        if (text.length > 300 && hasProfileContent(text)) {
+          candidates.push({ el: parent, score: text.length });
           break;
         }
         parent = parent.parentElement;
       }
-    }
-  });
-
-  if (candidates.length === 0) {
-    const viewportWidth = window.innerWidth;
-    document.querySelectorAll('div, section, article, main').forEach(el => {
-      const rect = el.getBoundingClientRect();
-      if (rect.left > viewportWidth * 0.35 &&
-          rect.width > 300 &&
-          rect.height > 400) {
-        const innerText = (el.innerText || '').trim();
-        if (innerText.length > 200) {
-          candidates.push({ el, score: innerText.length });
-        }
-      }
-    });
-  }
-
-  const urlMatch = location.href.match(/\/scoutroom\/(\d+)\//);
-  if (urlMatch && candidates.length === 0) {
-    const candidateId = urlMatch[1];
-    document.querySelectorAll(`[data-id="${candidateId}"], [data-candidate-id="${candidateId}"]`).forEach(el => {
-      const parent = el.closest('[class*="detail"]') || el.closest('[class*="panel"]') || el.parentElement;
-      if (parent) candidates.push({ el: parent, score: (parent.innerText || '').length });
     });
   }
 
@@ -465,13 +462,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'getProfile') {
     try {
       const profileText = extractProfile();
-      sendResponse({
-        success: true,
-        profileText,
-        url: location.href,
-        hostname: location.hostname,
-        length: profileText.length
-      });
+      const isRDS = location.hostname.includes('rikunabi') || location.hostname.includes('hrtech');
+      const looksEmpty = !hasProfileContent(profileText);
+
+      if (isRDS && looksEmpty) {
+        sendResponse({
+          success: false,
+          needsCandidateSelection: true,
+          profileText: '',
+          error: '候補者が選択されていません'
+        });
+      } else {
+        sendResponse({
+          success: true,
+          profileText,
+          url: location.href,
+          hostname: location.hostname,
+          length: profileText.length
+        });
+      }
     } catch (e) {
       sendResponse({
         success: false,

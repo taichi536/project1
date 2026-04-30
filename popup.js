@@ -161,8 +161,12 @@ async function runGenerate() {
     return;
   }
 
-  if (!profileData || !profileData.success || !profileData.profileText) {
-    setStatus('generate', 'error', 'プロフィール情報が取得できませんでした');
+  if (!profileData || !profileData.success) {
+    if (profileData && profileData.needsCandidateSelection) {
+      setStatus('generate', 'error', '👆 候補者カードをクリックして右パネルにプロフィールを表示してから実行してください');
+    } else {
+      setStatus('generate', 'error', 'プロフィール情報が取得できませんでした');
+    }
     $('generate-btn').disabled = false;
     return;
   }
@@ -402,9 +406,13 @@ async function runScreening() {
     return;
   }
 
-  if (!profileData || !profileData.success || !profileData.profileText) {
-    setStatus('screening', 'error', 'プロフィール情報が取得できませんでした');
+  if (!profileData || !profileData.success) {
     chrome.tabs.sendMessage(tab.id, { action: 'clearBadge' }).catch(() => {});
+    if (profileData && profileData.needsCandidateSelection) {
+      setStatus('screening', 'error', '👆 候補者カードをクリックして右パネルにプロフィールを表示してから実行してください');
+    } else {
+      setStatus('screening', 'error', 'プロフィール情報が取得できませんでした');
+    }
     $('screening-btn').disabled = false;
     return;
   }
