@@ -380,18 +380,31 @@ async function runScreening() {
   $('screening-btn').disabled = true;
   $('screening-result').style.display = 'none';
 
+  let tab;
+  try {
+    [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  } catch (e) {
+    setStatus('screening', 'error', 'タブを取得できませんでした');
+    $('screening-btn').disabled = false;
+    return;
+  }
+
+  // 判定中バッジを表示
+  chrome.tabs.sendMessage(tab.id, { action: 'showBadgeChecking' }).catch(() => {});
+
   let profileData;
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     profileData = await chrome.tabs.sendMessage(tab.id, { action: 'getProfile' });
   } catch (e) {
     setStatus('screening', 'error', 'プロフィールを取得できませんでした。候補者ページを開いているか確認してください。');
+    chrome.tabs.sendMessage(tab.id, { action: 'clearBadge' }).catch(() => {});
     $('screening-btn').disabled = false;
     return;
   }
 
   if (!profileData || !profileData.success || !profileData.profileText) {
     setStatus('screening', 'error', 'プロフィール情報が取得できませんでした');
+    chrome.tabs.sendMessage(tab.id, { action: 'clearBadge' }).catch(() => {});
     $('screening-btn').disabled = false;
     return;
   }
@@ -406,6 +419,9 @@ async function runScreening() {
     renderScreeningResult(result);
     $('screening-result').style.display = 'block';
 
+    // 結果バッジをカードに表示
+    chrome.tabs.sendMessage(tab.id, { action: 'showBadgeResult', overall: result.overall }).catch(() => {});
+
     const overall = result.overall;
     if (overall === 'OK') {
       setStatus('screening', 'success', '判定完了 — 基準をクリアしています');
@@ -415,6 +431,7 @@ async function runScreening() {
       setStatus('screening', 'idle', '判定完了 — 要確認項目があります');
     }
   } catch (e) {
+    chrome.tabs.sendMessage(tab.id, { action: 'clearBadge' }).catch(() => {});
     setStatus('screening', 'error', `判定エラー: ${e.message}`);
   }
 

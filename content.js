@@ -1,5 +1,101 @@
-// content.js v1.3.0
+// content.js v1.4.0
 // 各媒体のプロフィールページからテキストを抽出する
+
+// -------------------------------------------------------
+// 候補者カードへのビジュアルフィードバック
+// -------------------------------------------------------
+
+let _selectedCard = null;
+
+function injectStyles() {
+  if (document.getElementById('snow-we-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'snow-we-styles';
+  style.textContent = `
+    .snow-we-selected {
+      outline: 3px solid #6366F1 !important;
+      outline-offset: -2px;
+      transition: outline .2s;
+    }
+    .snow-we-badge {
+      position: absolute !important;
+      top: 6px !important;
+      right: 6px !important;
+      font-size: 11px !important;
+      font-weight: 700 !important;
+      padding: 3px 10px !important;
+      border-radius: 20px !important;
+      z-index: 99999 !important;
+      pointer-events: none !important;
+      white-space: nowrap !important;
+      box-shadow: 0 1px 4px rgba(0,0,0,.25) !important;
+      font-family: -apple-system, sans-serif !important;
+    }
+    .snow-we-badge.checking { background: #6366F1 !important; color: #fff !important; }
+    .snow-we-badge.ok       { background: #059669 !important; color: #fff !important; }
+    .snow-we-badge.ng       { background: #DC2626 !important; color: #fff !important; }
+    .snow-we-badge.warn     { background: #D97706 !important; color: #fff !important; }
+    @keyframes snow-we-pulse {
+      0%,100% { opacity: 1; } 50% { opacity: .6; }
+    }
+    .snow-we-badge.checking { animation: snow-we-pulse 1.2s ease-in-out infinite; }
+  `;
+  document.head.appendChild(style);
+}
+
+function findCandidateCards() {
+  // RDS / リクナビ: 候補者カードを特定
+  const agePattern = /\d{2}歳/;
+  const vw = window.innerWidth;
+
+  // まずクラス名ベースで探す
+  const byClass = document.querySelectorAll(
+    '[class*="candidate"],[class*="Candidate"],[class*="scout"],[class*="Scout"],' +
+    '[class*="person"],[class*="Person"],[class*="result-item"],[class*="resultItem"]'
+  );
+  if (byClass.length > 1) return Array.from(byClass);
+
+  // フォールバック: 左半分にあり年齢テキストを含む適度なサイズの要素
+  return Array.from(document.querySelectorAll('div, li, article')).filter(el => {
+    const rect = el.getBoundingClientRect();
+    const text = (el.innerText || '');
+    return rect.left < vw * 0.55 &&
+           rect.width > 180 && rect.width < vw * 0.55 &&
+           rect.height > 50 && rect.height < 400 &&
+           agePattern.test(text) &&
+           text.length > 40 && text.length < 1500;
+  });
+}
+
+function setupClickTracking() {
+  injectStyles();
+  document.addEventListener('click', e => {
+    const cards = findCandidateCards();
+    const clicked = cards.find(c => c.contains(e.target) || c === e.target);
+    if (!clicked) return;
+
+    // 前の選択をリセット
+    document.querySelectorAll('.snow-we-badge').forEach(b => b.remove());
+    document.querySelectorAll('.snow-we-selected').forEach(el => el.classList.remove('snow-we-selected'));
+
+    _selectedCard = clicked;
+    if (getComputedStyle(clicked).position === 'static') clicked.style.position = 'relative';
+    clicked.classList.add('snow-we-selected');
+  }, true);
+}
+
+function showBadge(cls, text) {
+  if (!_selectedCard) return;
+  document.querySelectorAll('.snow-we-badge').forEach(b => b.remove());
+
+  const badge = document.createElement('div');
+  badge.className = `snow-we-badge ${cls}`;
+  badge.textContent = text;
+  _selectedCard.appendChild(badge);
+}
+
+// クリックトラッキング開始
+setupClickTracking();
 
 // -------------------------------------------------------
 // ユーティリティ：セレクターで要素を取得しテキスト結合
@@ -346,6 +442,26 @@ function extractProfile() {
 // メッセージリスナー
 // -------------------------------------------------------
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'showBadgeChecking') {
+    injectStyles();
+    showBadge('checking', '🔍 判定中...');
+    sendResponse({ success: true });
+  }
+
+  if (request.action === 'showBadgeResult') {
+    const map = { OK: ['ok', '✅ スカウト推奨'], NG: ['ng', '❌ 見送り'], '要確認': ['warn', '⚠️ 要確認'] };
+    const [cls, text] = map[request.overall] || ['warn', '⚠️ 要確認'];
+    showBadge(cls, text);
+    sendResponse({ success: true });
+  }
+
+  if (request.action === 'clearBadge') {
+    document.querySelectorAll('.snow-we-badge').forEach(b => b.remove());
+    document.querySelectorAll('.snow-we-selected').forEach(el => el.classList.remove('snow-we-selected'));
+    _selectedCard = null;
+    sendResponse({ success: true });
+  }
+
   if (request.action === 'getProfile') {
     try {
       const profileText = extractProfile();
