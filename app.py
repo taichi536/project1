@@ -22,6 +22,7 @@ from modules.macro_analysis import get_macro_context, analyze_news_sentiment, qu
 from modules.backtest import run_backtest, STRATEGIES
 from modules.portfolio import build_portfolio_summary
 from modules.charts import build_backtest_chart, build_correlation_heatmap, build_portfolio_pie
+from modules.notifier import send_signal_alert, send_screening_alert, send_stop_loss_alert
 
 init_db()
 
@@ -31,7 +32,7 @@ with st.sidebar:
     st.markdown("---")
     page = st.radio(
         "メニュー",
-        ["テクニカル分析", "スクリーニング", "ファンダメンタル分析", "マクロ・ニュース分析", "バックテスト", "ポートフォリオ最適化", "投資日記"],
+        ["テクニカル分析", "スクリーニング", "ファンダメンタル分析", "マクロ・ニュース分析", "バックテスト", "ポートフォリオ最適化", "投資日記", "🔔 通知設定"],
         label_visibility="collapsed",
     )
     st.markdown("---")
@@ -820,3 +821,189 @@ elif page == "投資日記":
                     st.markdown(f"**🔍 見落としシグナル:** {row['missed_signals']}")
         else:
             st.info("まだ振り返りがありません。")
+
+
+# ─── 通知設定 ─────────────────────────────────────────────────────────────────
+elif page == "🔔 通知設定":
+    st.title("🔔 通知設定")
+    st.markdown("シグナルをスマホに届けます。**Telegram**（推奨）または **Slack** を設定してください。")
+
+    ntab1, ntab2, ntab3 = st.tabs(["📱 Telegram設定", "💬 Slack設定", "🚀 今すぐ送信テスト"])
+
+    with ntab1:
+        st.markdown("### Telegram Bot の設定手順")
+        st.markdown("""
+**ステップ1: Bot を作る（1分）**
+1. スマホの Telegram で [@BotFather](https://t.me/BotFather) を開く
+2. `/newbot` と送信
+3. Bot名を入力（例: `MyStockBot`）
+4. Bot Token が発行される（例: `1234567890:ABCdef...`）
+
+**ステップ2: Chat ID を取得する**
+1. 作った Bot に何かメッセージを送る
+2. ブラウザで以下のURLを開く（tokenを置き換える）
+   ```
+   https://api.telegram.org/bot<TOKEN>/getUpdates
+   ```
+3. `"chat":{"id": 123456789}` の数字が Chat ID
+""")
+
+        st.markdown("### 認証情報を入力")
+        tg_token = st.text_input("Bot Token", type="password",
+                                  value=os.getenv("TELEGRAM_BOT_TOKEN", ""),
+                                  placeholder="1234567890:ABCdefGHI...")
+        tg_chat = st.text_input("Chat ID",
+                                 value=os.getenv("TELEGRAM_CHAT_ID", ""),
+                                 placeholder="123456789")
+
+        if st.button("✅ Telegram接続テスト", type="primary"):
+            if tg_token and tg_chat:
+                from modules.notifier import _telegram
+                ok = _telegram(tg_token, tg_chat,
+                                "✅ 株式分析ツールからの接続テストです！通知設定が完了しました。")
+                if ok:
+                    st.success("送信成功！スマホを確認してください 📱")
+                else:
+                    st.error("送信失敗。Token と Chat ID を確認してください。")
+            else:
+                st.warning("Token と Chat ID を入力してください")
+
+        st.markdown("---")
+        st.markdown("### 環境変数に設定する（常時起動用）")
+        st.code(f"""# .env ファイルまたはターミナルで設定
+export TELEGRAM_BOT_TOKEN="{tg_token or 'your_token_here'}"
+export TELEGRAM_CHAT_ID="{tg_chat or 'your_chat_id'}"
+export WATCH_TICKERS="7203,9984,AAPL"   # 監視銘柄
+export SIGNAL_THRESHOLD="2"              # スコア±2以上でアラート
+""", language="bash")
+
+    with ntab2:
+        st.markdown("### Slack Webhook の設定手順")
+        st.markdown("""
+1. [Slack API](https://api.slack.com/apps) → 「Create New App」
+2. 「Incoming Webhooks」を有効化
+3. 「Add New Webhook to Workspace」でチャンネルを選択
+4. Webhook URL をコピー（`https://hooks.slack.com/services/...`）
+""")
+
+        slack_url = st.text_input("Slack Webhook URL", type="password",
+                                   value=os.getenv("SLACK_WEBHOOK_URL", ""),
+                                   placeholder="https://hooks.slack.com/services/...")
+        if st.button("✅ Slack接続テスト", type="primary"):
+            if slack_url:
+                from modules.notifier import _slack
+                ok = _slack(slack_url, "✅ 株式分析ツールからの接続テストです！通知設定が完了しました。")
+                if ok:
+                    st.success("送信成功！Slackを確認してください 💬")
+                else:
+                    st.error("送信失敗。Webhook URLを確認してください。")
+            else:
+                st.warning("Webhook URLを入力してください")
+
+        st.markdown("---")
+        st.code(f"""export SLACK_WEBHOOK_URL="{slack_url or 'your_webhook_url'}"
+""", language="bash")
+
+    with ntab3:
+        st.markdown("### 手動でアラートを送信")
+        st.caption("設定が正しいか確認するために、任意の銘柄でテスト送信できます")
+
+        test_ticker = st.text_input("銘柄コード", value="7203", key="notif_ticker")
+        notif_tg_token = st.text_input("Bot Token（省略時は環境変数）",
+                                        type="password", key="notif_tg_token")
+        notif_tg_chat = st.text_input("Chat ID（省略時は環境変数）",
+                                       key="notif_tg_chat")
+        notif_slack = st.text_input("Slack Webhook（省略時は環境変数）",
+                                     type="password", key="notif_slack")
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("📊 シグナルアラートを送信", type="primary", use_container_width=True):
+                with st.spinner(f"{test_ticker} を分析して送信中..."):
+                    try:
+                        df = fetch_ohlcv(test_ticker, period="3mo")
+                        df = compute_all(df)
+                        sigs = evaluate_signals(df)
+                        verdict, score = overall_signal(sigs)
+                        price = df["Close"].iloc[-1]
+                        rsi = df["RSI"].dropna().iloc[-1] if "RSI" in df.columns else None
+                        atr = df["ATR"].dropna().iloc[-1] if "ATR" in df.columns else None
+
+                        results = send_signal_alert(
+                            ticker=test_ticker,
+                            verdict=verdict,
+                            score=score,
+                            price=price,
+                            signals=sigs,
+                            rsi=rsi,
+                            atr=atr,
+                            telegram_token=notif_tg_token or None,
+                            telegram_chat_id=notif_tg_chat or None,
+                            slack_webhook=notif_slack or None,
+                        )
+                        for ch, ok in results.items():
+                            if ok:
+                                st.success(f"{ch}: 送信成功 ✅")
+                            else:
+                                st.error(f"{ch}: 送信失敗 ❌")
+                        if not results:
+                            st.warning("通知先が設定されていません（環境変数またはフォームに入力）")
+                    except Exception as e:
+                        st.error(f"エラー: {e}")
+
+        with col_b:
+            if st.button("🔍 スクリーニング結果を送信", use_container_width=True):
+                with st.spinner("スクリーニング中..."):
+                    try:
+                        result = screen_single(test_ticker)
+                        passed = [test_ticker] if result["合否"] else []
+                        results = send_screening_alert(
+                            passed,
+                            telegram_token=notif_tg_token or None,
+                            telegram_chat_id=notif_tg_chat or None,
+                            slack_webhook=notif_slack or None,
+                        )
+                        for ch, ok in results.items():
+                            if ok:
+                                st.success(f"{ch}: 送信成功 ✅")
+                            else:
+                                st.error(f"{ch}: 送信失敗 ❌")
+                        if not results:
+                            st.warning("通知先が設定されていません")
+                    except Exception as e:
+                        st.error(f"エラー: {e}")
+
+        st.markdown("---")
+        st.markdown("### ⏰ 定期自動通知の設定（cron）")
+        st.markdown("""
+アプリを起動していなくても、定期的にアラートを受け取れます。
+
+**Mac / Linux の場合（crontab）:**
+```bash
+# crontab を開く
+crontab -e
+
+# 平日の朝9時と夕方15時に実行
+0 9,15 * * 1-5 cd /path/to/project1 && \\
+  TELEGRAM_BOT_TOKEN=xxx TELEGRAM_CHAT_ID=yyy \\
+  WATCH_TICKERS=7203,9984,AAPL \\
+  python alert_runner.py --mode all
+```
+
+**Windows の場合（タスクスケジューラ）:**
+```
+タスクスケジューラ → 基本タスクの作成
+→ 毎日 9:00 / 15:00
+→ プログラム: python
+→ 引数: alert_runner.py --mode all
+→ 開始場所: C:\\path\\to\\project1
+```
+
+**手動で今すぐ実行:**
+```bash
+python alert_runner.py                   # 全チェック1回
+python alert_runner.py --loop 60         # 60分ごとに繰り返す
+python alert_runner.py --mode signal     # シグナルのみ
+python alert_runner.py --tickers 7203,AAPL  # 銘柄を指定
+```
+""")
