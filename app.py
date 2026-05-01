@@ -17,6 +17,8 @@ from modules.fundamental import get_fundamental_summary, get_risk_metrics
 from modules.screening import screen_single
 from modules.diary import add_trade, get_trades, add_review, get_reviews, trade_stats, init_db
 from modules.ai_analysis import analyze_five_forces, analyze_chart_ai
+from modules.news_fetcher import fetch_market_news, score_macro_relevance
+from modules.macro_analysis import get_macro_context, analyze_news_sentiment, quick_market_sentiment
 
 init_db()
 
@@ -26,7 +28,7 @@ with st.sidebar:
     st.markdown("---")
     page = st.radio(
         "メニュー",
-        ["テクニカル分析", "スクリーニング", "ファンダメンタル分析", "投資日記"],
+        ["テクニカル分析", "スクリーニング", "ファンダメンタル分析", "マクロ・ニュース分析", "投資日記"],
         label_visibility="collapsed",
     )
     st.markdown("---")
@@ -100,20 +102,47 @@ if page == "テクニカル分析":
                       f"-{risk['リスク率 (ATR×2)']:.1f}%", delta_color="inverse")
             r4.metric("ATR", f"{risk['ATR']:.2f}")
 
-        # AI分析
-        st.markdown("### 🤖 AIチャート解説")
-        if not os.getenv("ANTHROPIC_API_KEY"):
-            st.warning("ANTHROPIC_API_KEY が未設定です。AI分析をスキップします。")
-        else:
-            with st.spinner("AIが分析中..."):
-                try:
-                    ai_comment = analyze_chart_ai(
-                        ticker, signals, verdict, score,
-                        df["Close"].iloc[-1], rsi_val, atr_val,
-                    )
-                    st.info(ai_comment)
-                except Exception as e:
-                    st.warning(f"AI分析エラー: {e}")
+        # AI分析タブ
+        ai_tab1, ai_tab2 = st.tabs(["🤖 テクニカルAI解説", "🌐 マクロ・ニュース影響"])
+
+        with ai_tab1:
+            if not os.getenv("ANTHROPIC_API_KEY"):
+                st.warning("ANTHROPIC_API_KEY が未設定です。AI分析をスキップします。")
+            else:
+                with st.spinner("AIが分析中..."):
+                    try:
+                        ai_comment = analyze_chart_ai(
+                            ticker, signals, verdict, score,
+                            df["Close"].iloc[-1], rsi_val, atr_val,
+                        )
+                        st.info(ai_comment)
+                    except Exception as e:
+                        st.warning(f"AI分析エラー: {e}")
+
+        with ai_tab2:
+            if not os.getenv("ANTHROPIC_API_KEY"):
+                st.warning("ANTHROPIC_API_KEY が未設定です。")
+            else:
+                with st.spinner("ニュースを取得してマクロ分析中..."):
+                    try:
+                        news = fetch_market_news(max_per_source=5)
+                        try:
+                            info = fetch_info(ticker)
+                            company_name = info.get("longName") or info.get("shortName", ticker)
+                            sector = info.get("sector", "不明")
+                        except Exception:
+                            company_name = ticker
+                            sector = "不明"
+                        macro_comment = analyze_news_sentiment(ticker, company_name, sector, news)
+                        st.markdown(macro_comment)
+                        if news:
+                            with st.expander("取得したニュース一覧"):
+                                for n in news[:15]:
+                                    relevance = score_macro_relevance(n["title"], n.get("summary", ""))
+                                    badge = "🔴" if relevance >= 3 else ("🟡" if relevance >= 1 else "⚪")
+                                    st.markdown(f"{badge} **[{n['source']}]** {n['title']}")
+                    except Exception as e:
+                        st.warning(f"マクロ分析エラー: {e}")
 
 
 # ─── スクリーニング ────────────────────────────────────────────────────────────
@@ -228,6 +257,116 @@ elif page == "ファンダメンタル分析":
                         st.markdown(ff)
                     except Exception as e:
                         st.warning(f"AI分析エラー: {e}")
+
+
+# ─── マクロ・ニュース分析 ─────────────────────────────────────────────────────
+elif page == "マクロ・ニュース分析":
+    st.title("🌐 マクロ経済・ニュース分析")
+    st.markdown("社会情勢・経済指標・最新ニュースから相場への影響を分析します")
+
+    macro_tab1, macro_tab2 = st.tabs(["📰 市場ニュース＆センチメント", "📊 マクロ経済指標"])
+
+    with macro_tab1:
+        col_l, col_r = st.columns([1, 2])
+        with col_l:
+            ticker_macro = st.text_input("個別銘柄への影響を分析（任意）", placeholder="7203 / AAPL")
+        with col_r:
+            st.markdown("")  # spacer
+        news_btn = st.button("📰 ニュース取得＆分析", type="primary")
+
+        if news_btn:
+            with st.spinner("ニュースを収集中..."):
+                news = fetch_market_news(max_per_source=5)
+
+            if news:
+                st.success(f"{len(news)}件のニュースを取得しました")
+
+                # 市場全体センチメント
+                st.markdown("### 🎯 市場センチメント（AI判定）")
+                if not os.getenv("ANTHROPIC_API_KEY"):
+                    st.warning("ANTHROPIC_API_KEY が未設定です。")
+                else:
+                    with st.spinner("AIが市場センチメントを判定中..."):
+                        try:
+                            sentiment = quick_market_sentiment(news)
+                            lines = sentiment.strip().split("\n")
+                            for line in lines:
+                                if "強気" in line:
+                                    st.success(line)
+                                elif "弱気" in line:
+                                    st.error(line)
+                                elif "中立" in line:
+                                    st.warning(line)
+                                else:
+                                    st.info(line)
+                        except Exception as e:
+                            st.warning(f"センチメント分析エラー: {e}")
+
+                # ニュース一覧
+                st.markdown("### 📋 注目ニュース")
+                high = [n for n in news if score_macro_relevance(n["title"], n.get("summary", "")) >= 2]
+                other = [n for n in news if score_macro_relevance(n["title"], n.get("summary", "")) < 2]
+
+                if high:
+                    st.markdown("**🔴 マクロ高関連ニュース**")
+                    for n in high[:8]:
+                        st.markdown(f"- **[{n['source']}]** {n['title']}")
+                        if n.get("summary"):
+                            st.caption(f"  {n['summary'][:120]}...")
+
+                if other:
+                    with st.expander(f"その他のニュース（{len(other)}件）"):
+                        for n in other[:10]:
+                            st.markdown(f"- [{n['source']}] {n['title']}")
+
+                # 個別銘柄への影響分析
+                if ticker_macro and os.getenv("ANTHROPIC_API_KEY"):
+                    st.markdown(f"### 🔍 {ticker_macro} への影響分析")
+                    with st.spinner(f"{ticker_macro} への影響を分析中..."):
+                        try:
+                            try:
+                                info = fetch_info(ticker_macro)
+                                company_name = info.get("longName") or info.get("shortName", ticker_macro)
+                                sector = info.get("sector", "不明")
+                            except Exception:
+                                company_name = ticker_macro
+                                sector = "不明"
+                            impact = analyze_news_sentiment(ticker_macro, company_name, sector, news)
+                            st.markdown(impact)
+                        except Exception as e:
+                            st.warning(f"影響分析エラー: {e}")
+            else:
+                st.warning("ニュースを取得できませんでした。ネットワーク接続を確認してください。")
+
+    with macro_tab2:
+        st.markdown("### 📊 主要マクロ経済指標")
+        st.caption("投資判断に使うマクロコンテキスト（手動更新・随時見直し）")
+
+        macro_ctx = get_macro_context()
+        for region, indicators in macro_ctx.items():
+            st.markdown(f"#### {region}")
+            rows = []
+            for name, data in indicators.items():
+                rows.append({
+                    "指標": name,
+                    "現在値": data["値"],
+                    "方向性": data["方向"],
+                    "投資への影響": data["投資影響"],
+                })
+            df_macro = pd.DataFrame(rows)
+            st.dataframe(df_macro, use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        st.markdown("#### 📌 投資に関わる主要イベントカレンダー")
+        events = [
+            {"日付": "随時", "イベント": "日銀金融政策決定会合", "注目度": "★★★", "影響": "円相場・金融株・REITに直結"},
+            {"日付": "毎月初旬", "イベント": "米雇用統計 (NFP)", "注目度": "★★★", "影響": "FRB政策観測・ドル円に影響"},
+            {"日付": "毎月中旬", "イベント": "米CPI（消費者物価指数）", "注目度": "★★★", "影響": "インフレ→利下げ観測→グロース株"},
+            {"日付": "四半期", "イベント": "決算シーズン（3・6・9・12月）", "注目度": "★★★", "影響": "個別株の最大の変動要因"},
+            {"日付": "随時", "イベント": "地政学リスク（中東・台湾海峡等）", "注目度": "★★☆", "影響": "リスクオフ・原油・防衛株"},
+            {"日付": "随時", "イベント": "米中貿易摩擦・関税動向", "注目度": "★★☆", "影響": "製造業・半導体・自動車に逆風"},
+        ]
+        st.dataframe(pd.DataFrame(events), use_container_width=True, hide_index=True)
 
 
 # ─── 投資日記 ─────────────────────────────────────────────────────────────────
