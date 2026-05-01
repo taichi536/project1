@@ -19,6 +19,9 @@ from modules.diary import add_trade, get_trades, add_review, get_reviews, trade_
 from modules.ai_analysis import analyze_five_forces, analyze_chart_ai
 from modules.news_fetcher import fetch_market_news, score_macro_relevance
 from modules.macro_analysis import get_macro_context, analyze_news_sentiment, quick_market_sentiment
+from modules.backtest import run_backtest, STRATEGIES
+from modules.portfolio import build_portfolio_summary
+from modules.charts import build_backtest_chart, build_correlation_heatmap, build_portfolio_pie
 
 init_db()
 
@@ -28,7 +31,7 @@ with st.sidebar:
     st.markdown("---")
     page = st.radio(
         "メニュー",
-        ["テクニカル分析", "スクリーニング", "ファンダメンタル分析", "マクロ・ニュース分析", "投資日記"],
+        ["テクニカル分析", "スクリーニング", "ファンダメンタル分析", "マクロ・ニュース分析", "バックテスト", "ポートフォリオ最適化", "投資日記"],
         label_visibility="collapsed",
     )
     st.markdown("---")
@@ -367,6 +370,195 @@ elif page == "マクロ・ニュース分析":
             {"日付": "随時", "イベント": "米中貿易摩擦・関税動向", "注目度": "★★☆", "影響": "製造業・半導体・自動車に逆風"},
         ]
         st.dataframe(pd.DataFrame(events), use_container_width=True, hide_index=True)
+
+
+# ─── バックテスト ─────────────────────────────────────────────────────────────
+elif page == "バックテスト":
+    st.title("🔬 バックテスト")
+    st.markdown("過去データで売買戦略の有効性を検証します")
+
+    c1, c2, c3 = st.columns([2, 1, 1])
+    with c1:
+        bt_ticker = st.text_input("銘柄コード", value="7203", key="bt_ticker")
+    with c2:
+        bt_period = st.selectbox("検証期間", ["1y", "2y", "5y"], index=1,
+                                 format_func=lambda x: {"1y": "1年", "2y": "2年", "5y": "5年"}[x])
+    with c3:
+        bt_strategy_label = st.selectbox("戦略", list(STRATEGIES.keys()))
+
+    with st.expander("⚙️ 詳細パラメータ"):
+        pc1, pc2, pc3, pc4 = st.columns(4)
+        bt_short = pc1.number_input("短期MA", value=25, min_value=5, max_value=50)
+        bt_long = pc2.number_input("長期MA", value=75, min_value=20, max_value=200)
+        bt_rsi_buy = pc3.number_input("RSI買いライン", value=35, min_value=10, max_value=50)
+        bt_rsi_sell = pc4.number_input("RSI売りライン", value=65, min_value=50, max_value=90)
+        bt_cash = st.number_input("初期資金 (円)", value=1_000_000, min_value=100_000, step=100_000)
+        bt_stop_atr = st.slider("損切り幅 (ATR倍)", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
+
+    bt_btn = st.button("▶ バックテスト実行", type="primary", use_container_width=True)
+
+    if bt_btn and bt_ticker:
+        with st.spinner("データ取得・バックテスト実行中..."):
+            try:
+                df_raw = fetch_ohlcv(bt_ticker, period=bt_period)
+                strategy_key = STRATEGIES[bt_strategy_label]
+                result = run_backtest(
+                    df_raw,
+                    strategy=strategy_key,
+                    sma_short=bt_short,
+                    sma_long=bt_long,
+                    rsi_buy=bt_rsi_buy,
+                    rsi_sell=bt_rsi_sell,
+                    initial_cash=bt_cash,
+                    stop_loss_atr=bt_stop_atr,
+                )
+            except Exception as e:
+                st.error(f"エラー: {e}")
+                st.stop()
+
+        m = result["metrics"]
+        st.markdown("### 📊 パフォーマンス指標")
+        cols = st.columns(7)
+        metrics = [
+            ("最終資産", f"¥{m['最終資産']:,.0f}", None),
+            ("総リターン", f"{m['総リターン(%)']:+.1f}%",
+             f"B&H: {m['B&Hリターン(%)']:+.1f}%"),
+            ("最大DD", f"{m['最大ドローダウン(%)']:.1f}%", None),
+            ("シャープ", f"{m['シャープレシオ']:.2f}", None),
+            ("取引回数", f"{m['総取引回数']}回", None),
+            ("勝率", f"{m['勝率(%)']}%", None),
+            ("戦略 vs B&H", "優位" if m['総リターン(%)'] > m['B&Hリターン(%)'] else "劣後", None),
+        ]
+        for col, (label, val, delta) in zip(cols, metrics):
+            col.metric(label, val, delta)
+
+        fig_bt = build_backtest_chart(result["portfolio"], result["trades"], bt_ticker)
+        st.plotly_chart(fig_bt, use_container_width=True)
+
+        if not result["trades"].empty:
+            st.markdown("### 📋 取引履歴")
+            trades_display = result["trades"].copy()
+            trades_display["損益"] = trades_display["損益"].apply(
+                lambda x: f"¥{x:+,.0f}" if x != 0 else "-"
+            )
+            st.dataframe(trades_display, use_container_width=True, hide_index=True)
+
+            st.markdown("### 💡 AIによる戦略評価")
+            if os.getenv("ANTHROPIC_API_KEY"):
+                with st.spinner("AIが戦略を評価中..."):
+                    try:
+                        from modules.ai_analysis import _get_client
+                        prompt = f"""バックテスト結果を評価してください。
+銘柄: {bt_ticker} / 戦略: {bt_strategy_label} / 期間: {bt_period}
+総リターン: {m['総リターン(%)']:+.1f}% (B&H: {m['B&Hリターン(%)']:+.1f}%)
+最大ドローダウン: {m['最大ドローダウン(%)']:.1f}% / シャープレシオ: {m['シャープレシオ']:.2f}
+勝率: {m['勝率(%)']}% / 取引回数: {m['総取引回数']}回
+
+この戦略の強み・弱み・改善提案を200字以内で日本語で述べてください。"""
+                        client = _get_client()
+                        resp = client.messages.create(
+                            model="claude-sonnet-4-6",
+                            max_tokens=400,
+                            messages=[{"role": "user", "content": prompt}],
+                        )
+                        st.info(resp.content[0].text)
+                    except Exception as e:
+                        st.warning(f"AI評価エラー: {e}")
+
+
+# ─── ポートフォリオ最適化 ─────────────────────────────────────────────────────
+elif page == "ポートフォリオ最適化":
+    st.title("📐 ポートフォリオ最適化")
+    st.markdown("相関分析・最小分散・ケリー基準で分散投資を最適化します")
+
+    tickers_input = st.text_area(
+        "保有・検討銘柄を入力（1行1銘柄、2銘柄以上）",
+        value="7203\n9984\n6758\nAAPL",
+        height=120,
+    )
+    pf_period = st.selectbox("分析期間", ["1y", "2y"], index=0,
+                              format_func=lambda x: {"1y": "1年", "2y": "2年"}[x])
+    pf_btn = st.button("📐 最適化実行", type="primary", use_container_width=True)
+
+    if pf_btn:
+        tickers = [t.strip() for t in tickers_input.strip().split("\n") if t.strip()]
+        if len(tickers) < 2:
+            st.error("2銘柄以上入力してください")
+        else:
+            dfs = {}
+            with st.spinner("データ取得中..."):
+                for t in tickers:
+                    try:
+                        dfs[t] = fetch_ohlcv(t, period=pf_period)
+                    except Exception as e:
+                        st.warning(f"{t}: スキップ ({e})")
+
+            if len(dfs) < 2:
+                st.error("有効なデータが2銘柄未満です")
+            else:
+                trades_df = get_trades()
+                pf_result = build_portfolio_summary(list(dfs.keys()), dfs, trades_df)
+
+                if "error" in pf_result:
+                    st.error(pf_result["error"])
+                else:
+                    st.markdown("### 🔗 相関係数マトリクス")
+                    st.caption("値が低い（青）ほど分散効果が高い。0.7以上（赤）は集中リスク")
+                    fig_corr = build_correlation_heatmap(pf_result["corr"])
+                    st.plotly_chart(fig_corr, use_container_width=True)
+
+                    st.markdown("### ⚖️ 最適ウェイト比較")
+                    col_mv, col_eq = st.columns(2)
+                    with col_mv:
+                        st.markdown("**最小分散ポートフォリオ**")
+                        st.caption("リスクを最小化する配分")
+                        fig_mv = build_portfolio_pie(pf_result["weights_min_var"], "最小分散")
+                        st.plotly_chart(fig_mv, use_container_width=True)
+                        s = pf_result["stats_min_var"]
+                        st.metric("期待リターン", f"{s['期待リターン(%)']:+.1f}%")
+                        st.metric("リスク（年率）", f"{s['リスク（年率ボラ%）']:.1f}%")
+                        st.metric("シャープレシオ", f"{s['シャープレシオ']:.2f}")
+
+                    with col_eq:
+                        st.markdown("**均等配分**")
+                        st.caption("単純均等割り（参考）")
+                        fig_eq = build_portfolio_pie(pf_result["weights_equal"], "均等配分")
+                        st.plotly_chart(fig_eq, use_container_width=True)
+                        s = pf_result["stats_equal"]
+                        st.metric("期待リターン", f"{s['期待リターン(%)']:+.1f}%")
+                        st.metric("リスク（年率）", f"{s['リスク（年率ボラ%）']:.1f}%")
+                        st.metric("シャープレシオ", f"{s['シャープレシオ']:.2f}")
+
+                    # ケリー基準
+                    if pf_result["kelly"]:
+                        st.markdown("### 🎯 ケリー基準（投資日記の取引実績より）")
+                        st.caption("過去の勝率・損益比から算出した理論上の最適投資比率")
+                        kelly_data = [
+                            {"銘柄": t, "ケリー推奨比率": f"{v*100:.1f}%",
+                             "ハーフケリー（安全版）": f"{v*50:.1f}%"}
+                            for t, v in pf_result["kelly"].items()
+                        ]
+                        st.dataframe(pd.DataFrame(kelly_data), use_container_width=True, hide_index=True)
+                        st.caption("※ ハーフケリー（推奨比率の半分）が実用的とされています")
+                    else:
+                        st.info("投資日記に取引履歴を記録するとケリー基準が計算されます")
+
+                    # リターン時系列
+                    st.markdown("### 📈 銘柄別リターン推移（累積）")
+                    returns = pf_result["returns"]
+                    cumulative = (1 + returns).cumprod() - 1
+                    import plotly.express as px
+                    fig_ret = px.line(
+                        cumulative * 100,
+                        title="累積リターン (%)",
+                        labels={"value": "リターン (%)", "variable": "銘柄"},
+                        color_discrete_sequence=px.colors.qualitative.Set2,
+                    )
+                    fig_ret.update_layout(
+                        paper_bgcolor="#0e1117", plot_bgcolor="#1a1d23",
+                        font=dict(color="#fafafa"), height=400,
+                    )
+                    st.plotly_chart(fig_ret, use_container_width=True)
 
 
 # ─── 投資日記 ─────────────────────────────────────────────────────────────────

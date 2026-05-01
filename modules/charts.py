@@ -121,3 +121,103 @@ def build_main_chart(df: pd.DataFrame, ticker: str, sma_short: int = 25, sma_lon
     fig.update_xaxes(gridcolor="rgba(255,255,255,0.05)")
 
     return fig
+
+
+def build_backtest_chart(pv: pd.DataFrame, trades_df: pd.DataFrame, ticker: str) -> go.Figure:
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        row_heights=[0.7, 0.3],
+        vertical_spacing=0.03,
+        subplot_titles=("資産推移（戦略 vs Buy&Hold）", "ドローダウン (%)"),
+    )
+
+    fig.add_trace(go.Scatter(
+        x=pv.index, y=pv["総資産"],
+        line=dict(color="#26a69a", width=2),
+        name="戦略資産",
+    ), row=1, col=1)
+
+    if "Buy&Hold" in pv.columns:
+        fig.add_trace(go.Scatter(
+            x=pv.index, y=pv["Buy&Hold"],
+            line=dict(color="#7e57c2", width=1.5, dash="dot"),
+            name="Buy & Hold",
+        ), row=1, col=1)
+
+    # 取引マーカー
+    if not trades_df.empty and "日付" in trades_df.columns:
+        buys = trades_df[trades_df["種別"] == "買い"]
+        sells = trades_df[trades_df["種別"] == "売り"]
+        stoplosses = trades_df[trades_df["種別"] == "損切り売"]
+
+        for subset, color, symbol, name in [
+            (buys, "#26a69a", "triangle-up", "買い"),
+            (sells, "#7e57c2", "triangle-down", "売り"),
+            (stoplosses, "#ef5350", "x", "損切り"),
+        ]:
+            if not subset.empty:
+                dates = pd.to_datetime(subset["日付"])
+                vals = [pv.loc[pv.index.asof(d), "総資産"] if d in pv.index else None for d in dates]
+                fig.add_trace(go.Scatter(
+                    x=dates, y=vals,
+                    mode="markers",
+                    marker=dict(symbol=symbol, size=10, color=color),
+                    name=name,
+                ), row=1, col=1)
+
+    # ドローダウン
+    if "ドローダウン(%)" in pv.columns:
+        fig.add_trace(go.Scatter(
+            x=pv.index, y=pv["ドローダウン(%)"],
+            fill="tozeroy", fillcolor="rgba(239,83,80,0.2)",
+            line=dict(color="#ef5350", width=1),
+            name="ドローダウン",
+        ), row=2, col=1)
+        fig.add_hline(y=0, line_color="rgba(255,255,255,0.2)", row=2, col=1)
+
+    fig.update_layout(
+        title=f"{ticker} バックテスト結果",
+        height=650,
+        paper_bgcolor="#0e1117",
+        plot_bgcolor="#1a1d23",
+        font=dict(color="#fafafa"),
+        legend=dict(orientation="h", y=1.02, x=0),
+    )
+    fig.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
+    fig.update_xaxes(gridcolor="rgba(255,255,255,0.05)")
+    return fig
+
+
+def build_correlation_heatmap(corr: "pd.DataFrame") -> go.Figure:
+    import plotly.express as px
+    fig = px.imshow(
+        corr,
+        color_continuous_scale="RdYlGn",
+        zmin=-1, zmax=1,
+        text_auto=".2f",
+        title="銘柄間 相関係数マトリクス",
+    )
+    fig.update_layout(
+        paper_bgcolor="#0e1117",
+        plot_bgcolor="#1a1d23",
+        font=dict(color="#fafafa"),
+        height=450,
+    )
+    return fig
+
+
+def build_portfolio_pie(weights: dict, title: str) -> go.Figure:
+    fig = go.Figure(go.Pie(
+        labels=list(weights.keys()),
+        values=list(weights.values()),
+        hole=0.4,
+        textinfo="label+percent",
+    ))
+    fig.update_layout(
+        title=title,
+        paper_bgcolor="#0e1117",
+        font=dict(color="#fafafa"),
+        height=380,
+    )
+    return fig
