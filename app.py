@@ -15,7 +15,7 @@ from modules.signals import evaluate_signals, overall_signal
 from modules.charts import build_main_chart
 from modules.fundamental import get_fundamental_summary, get_risk_metrics
 from modules.screening import screen_single
-from modules.diary import add_trade, get_trades, add_review, get_reviews, trade_stats, init_db
+from modules.diary import add_trade, get_trades, add_review, get_reviews, trade_stats, init_db, calc_pnl, calc_unrealized
 from modules.ai_analysis import analyze_five_forces, analyze_chart_ai
 from modules.news_fetcher import fetch_market_news, score_macro_relevance
 from modules.macro_analysis import get_macro_context, analyze_news_sentiment, quick_market_sentiment
@@ -565,7 +565,7 @@ elif page == "ポートフォリオ最適化":
 elif page == "投資日記":
     st.title("📔 投資日記")
 
-    tab1, tab2, tab3 = st.tabs(["📝 取引記録", "📊 パフォーマンス", "🔄 振り返り"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📝 取引記録", "💰 損益サマリー", "📊 パフォーマンス", "🔄 振り返り"])
 
     with tab1:
         st.markdown("### 取引を記録する")
@@ -620,6 +620,157 @@ elif page == "投資日記":
             st.info("まだ取引記録がありません。")
 
     with tab2:
+        import plotly.express as px
+        import plotly.graph_objects as go_pnl
+
+        st.markdown("### 💰 損益サマリー")
+        trades_df = get_trades(limit=10000)
+        pnl_data = calc_pnl(trades_df)
+        realized = pnl_data["realized"]
+        positions = pnl_data["positions"]
+        summary_by_ticker = pnl_data["summary_by_ticker"]
+        monthly = pnl_data["monthly"]
+
+        if not realized and not positions:
+            st.info("取引記録がまだありません。「取引記録」タブから入力してください。")
+        else:
+            # ─ 全体サマリー ─
+            total_realized = sum(r["実現損益"] for r in realized)
+            total_wins = sum(1 for r in realized if r["実現損益"] > 0)
+            total_trades = len(realized)
+            win_rate = total_wins / total_trades * 100 if total_trades else 0
+            avg_win = sum(r["実現損益"] for r in realized if r["実現損益"] > 0) / total_wins if total_wins else 0
+            total_loss_count = total_trades - total_wins
+            avg_loss = sum(r["実現損益"] for r in realized if r["実現損益"] <= 0) / total_loss_count if total_loss_count else 0
+
+            m1, m2, m3, m4, m5 = st.columns(5)
+            pnl_color = "normal" if total_realized >= 0 else "inverse"
+            m1.metric("確定損益合計", f"¥{total_realized:+,.0f}")
+            m2.metric("勝率", f"{win_rate:.1f}%", f"{total_wins}勝 {total_loss_count}敗")
+            m3.metric("平均利益", f"¥{avg_win:,.0f}")
+            m4.metric("平均損失", f"¥{avg_loss:,.0f}")
+            rr = abs(avg_win / avg_loss) if avg_loss else 0
+            m5.metric("損益比 (RR比)", f"{rr:.2f}",
+                      help="1以上が理想。勝率×RR比 > 1で期待値プラス")
+
+            st.markdown("---")
+
+            # ─ 月別損益チャート ─
+            if monthly:
+                st.markdown("#### 📅 月別実現損益")
+                months = sorted(monthly.keys())
+                values = [monthly[m] for m in months]
+                colors = ["#26a69a" if v >= 0 else "#ef5350" for v in values]
+                fig_monthly = go_pnl.Figure(go_pnl.Bar(
+                    x=months, y=values,
+                    marker_color=colors,
+                    text=[f"¥{v:+,.0f}" for v in values],
+                    textposition="outside",
+                ))
+                fig_monthly.update_layout(
+                    title="月別実現損益",
+                    paper_bgcolor="#0e1117", plot_bgcolor="#1a1d23",
+                    font=dict(color="#fafafa"), height=350,
+                    yaxis_title="損益 (円)",
+                )
+                st.plotly_chart(fig_monthly, use_container_width=True)
+
+            col_a, col_b = st.columns(2)
+
+            # ─ 銘柄別損益 ─
+            with col_a:
+                st.markdown("#### 🏷️ 銘柄別損益")
+                if summary_by_ticker:
+                    ticker_rows = [
+                        {
+                            "銘柄": t,
+                            "実現損益": f"¥{s['実現損益合計']:+,.0f}",
+                            "取引回数": s["取引回数"],
+                            "勝率": f"{s['勝率(%)']}%",
+                            "勝/負": f"{s['勝ち']}勝 {s['負け']}敗",
+                        }
+                        for t, s in sorted(summary_by_ticker.items(),
+                                           key=lambda x: x[1]["実現損益合計"], reverse=True)
+                    ]
+                    st.dataframe(pd.DataFrame(ticker_rows), use_container_width=True, hide_index=True)
+
+                    # 銘柄別損益バー
+                    tickers_sorted = sorted(summary_by_ticker.keys(),
+                                            key=lambda t: summary_by_ticker[t]["実現損益合計"])
+                    pnl_vals = [summary_by_ticker[t]["実現損益合計"] for t in tickers_sorted]
+                    fig_tk = go_pnl.Figure(go_pnl.Bar(
+                        x=pnl_vals, y=tickers_sorted, orientation="h",
+                        marker_color=["#26a69a" if v >= 0 else "#ef5350" for v in pnl_vals],
+                    ))
+                    fig_tk.update_layout(
+                        paper_bgcolor="#0e1117", plot_bgcolor="#1a1d23",
+                        font=dict(color="#fafafa"), height=300,
+                        xaxis_title="損益 (円)",
+                    )
+                    st.plotly_chart(fig_tk, use_container_width=True)
+
+            # ─ 含み損益（保有中） ─
+            with col_b:
+                st.markdown("#### 📂 含み損益（保有中ポジション）")
+                if positions:
+                    # 現在値をyfinanceから取得
+                    current_prices = {}
+                    for t in positions:
+                        try:
+                            info = fetch_info(t)
+                            current_prices[t] = info.get("currentPrice") or info.get("regularMarketPrice")
+                        except Exception:
+                            pass
+                    unrealized = calc_unrealized(positions, current_prices)
+                    if unrealized:
+                        ur_total = sum(
+                            r["含み損益"] for r in unrealized
+                            if isinstance(r["含み損益"], (int, float))
+                        )
+                        st.metric("含み損益合計", f"¥{ur_total:+,.0f}")
+                        ur_df = pd.DataFrame(unrealized)
+                        st.dataframe(ur_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("現在保有中のポジションはありません")
+
+            # ─ 取引明細 ─
+            st.markdown("#### 📋 確定済み取引一覧")
+            if realized:
+                realized_df = pd.DataFrame(realized)
+                realized_df["実現損益"] = realized_df["実現損益"].apply(
+                    lambda x: f"¥{x:+,.0f}"
+                )
+                realized_df["損益率(%)"] = realized_df["損益率(%)"].apply(
+                    lambda x: f"{x:+.2f}%"
+                )
+                st.dataframe(realized_df, use_container_width=True, hide_index=True)
+
+                # 損益推移（累積）
+                st.markdown("#### 📈 確定損益の累積推移")
+                cumulative_pnl = pd.DataFrame(realized)[["日付", "実現損益"]].copy()
+                cumulative_pnl["実現損益"] = pd.to_numeric(
+                    pd.DataFrame(realized)["実現損益"]
+                )
+                cumulative_pnl = cumulative_pnl.sort_values("日付")
+                cumulative_pnl["累積損益"] = cumulative_pnl["実現損益"].cumsum()
+                fig_cum = go_pnl.Figure()
+                fig_cum.add_trace(go_pnl.Scatter(
+                    x=cumulative_pnl["日付"],
+                    y=cumulative_pnl["累積損益"],
+                    fill="tozeroy",
+                    fillcolor="rgba(38,166,154,0.15)",
+                    line=dict(color="#26a69a", width=2),
+                    name="累積損益",
+                ))
+                fig_cum.add_hline(y=0, line_color="rgba(255,255,255,0.3)", line_dash="dash")
+                fig_cum.update_layout(
+                    paper_bgcolor="#0e1117", plot_bgcolor="#1a1d23",
+                    font=dict(color="#fafafa"), height=320,
+                    yaxis_title="累積損益 (円)",
+                )
+                st.plotly_chart(fig_cum, use_container_width=True)
+
+    with tab3:
         st.markdown("### パフォーマンス統計")
         trades_df = get_trades()
         stats = trade_stats(trades_df)
@@ -645,7 +796,7 @@ elif page == "投資日記":
         else:
             st.info("取引データが不足しています。")
 
-    with tab3:
+    with tab4:
         st.markdown("### 週次・月次振り返り")
         with st.form("review_form"):
             r_period = st.text_input("対象期間", placeholder="例: 2026年5月第1週")
