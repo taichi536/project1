@@ -48,6 +48,33 @@ with st.sidebar:
         label_visibility="collapsed",
     )
     st.markdown("---")
+
+    # AI機能のオンオフ（コスト管理）
+    ai_enabled = st.toggle(
+        "🤖 AI分析機能",
+        value=st.session_state.get("ai_enabled", False),
+        help="オフにするとClaude APIを呼び出しません（コスト0円）",
+    )
+    st.session_state["ai_enabled"] = ai_enabled
+    if ai_enabled:
+        st.caption("✅ AI有効（API料金が発生します）")
+    else:
+        st.caption("⏸ AI無効（無料モード）")
+
+    # 今月のコスト表示
+    from modules.ai_analysis import get_cost_summary
+    cost_data = get_cost_summary()
+    month = __import__("time").strftime("%Y-%m")
+    if month in cost_data:
+        m = cost_data[month]
+        usd = m.get("estimated_usd", 0)
+        jpy = usd * 150  # 概算
+        cached = m.get("cached_calls", 0)
+        total = m.get("calls", 0)
+        st.caption(f"今月のAI使用: {total}回（うちキャッシュ {cached}回）")
+        st.caption(f"推定コスト: ${usd:.3f}（約¥{jpy:.0f}）")
+
+    st.markdown("---")
     st.caption("日本株: 7203 → 7203.T 自動変換")
     st.caption("米国株: AAPL, MSFT など")
 
@@ -354,7 +381,7 @@ elif page == "📊 テクニカル分析":
         ai_tab1, ai_tab2 = st.tabs(["🤖 テクニカルAI解説", "🌐 マクロ・ニュース影響"])
 
         with ai_tab1:
-            if not os.getenv("ANTHROPIC_API_KEY"):
+            if not (st.session_state.get("ai_enabled") and os.getenv("ANTHROPIC_API_KEY")):
                 st.warning("ANTHROPIC_API_KEY が未設定です。AI分析をスキップします。")
             else:
                 with st.spinner("AIが分析中..."):
@@ -368,7 +395,7 @@ elif page == "📊 テクニカル分析":
                         st.warning(f"AI分析エラー: {e}")
 
         with ai_tab2:
-            if not os.getenv("ANTHROPIC_API_KEY"):
+            if not (st.session_state.get("ai_enabled") and os.getenv("ANTHROPIC_API_KEY")):
                 st.warning("ANTHROPIC_API_KEY が未設定です。")
             else:
                 with st.spinner("ニュースを取得してマクロ分析中..."):
@@ -496,7 +523,7 @@ elif page == "📋 ファンダメンタル分析":
         # ファイブフォース（AI）
         if summary["セクター"] != "N/A":
             st.markdown("### 🤖 ファイブフォース分析（AI）")
-            if not os.getenv("ANTHROPIC_API_KEY"):
+            if not (st.session_state.get("ai_enabled") and os.getenv("ANTHROPIC_API_KEY")):
                 st.warning("ANTHROPIC_API_KEY が未設定です。")
             else:
                 with st.spinner("AIがファイブフォース分析中..."):
@@ -531,7 +558,7 @@ elif page == "🌐 マクロ・ニュース":
 
                 # 市場全体センチメント
                 st.markdown("### 🎯 市場センチメント（AI判定）")
-                if not os.getenv("ANTHROPIC_API_KEY"):
+                if not (st.session_state.get("ai_enabled") and os.getenv("ANTHROPIC_API_KEY")):
                     st.warning("ANTHROPIC_API_KEY が未設定です。")
                 else:
                     with st.spinner("AIが市場センチメントを判定中..."):
@@ -568,7 +595,7 @@ elif page == "🌐 マクロ・ニュース":
                             st.markdown(f"- [{n['source']}] {n['title']}")
 
                 # 個別銘柄への影響分析
-                if ticker_macro and os.getenv("ANTHROPIC_API_KEY"):
+                if ticker_macro and st.session_state.get("ai_enabled") and os.getenv("ANTHROPIC_API_KEY"):
                     st.markdown(f"### 🔍 {ticker_macro} への影響分析")
                     with st.spinner(f"{ticker_macro} への影響を分析中..."):
                         try:
@@ -689,7 +716,7 @@ elif page == "🔬 バックテスト":
             st.dataframe(trades_display, use_container_width=True, hide_index=True)
 
             st.markdown("### 💡 AIによる戦略評価")
-            if os.getenv("ANTHROPIC_API_KEY"):
+            if st.session_state.get("ai_enabled") and os.getenv("ANTHROPIC_API_KEY"):
                 with st.spinner("AIが戦略を評価中..."):
                     try:
                         from modules.ai_analysis import _get_client
