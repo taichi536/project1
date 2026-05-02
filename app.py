@@ -1072,7 +1072,7 @@ elif page == "🔔 通知設定":
     st.title("🔔 通知設定")
     st.markdown("シグナルをスマホに届けます。**Telegram**（推奨）または **Slack** を設定してください。")
 
-    ntab1, ntab2, ntab3 = st.tabs(["📱 Telegram設定", "💬 Slack設定", "🚀 今すぐ送信テスト"])
+    ntab1, ntab2, ntab3, ntab4 = st.tabs(["📱 Telegram設定", "💬 Slack設定", "⚡ リアルタイムデータ設定", "🚀 今すぐ送信テスト"])
 
     with ntab1:
         st.markdown("### Telegram Bot の設定手順")
@@ -1149,6 +1149,105 @@ export SIGNAL_THRESHOLD="2"              # スコア±2以上でアラート
 """, language="bash")
 
     with ntab3:
+        st.markdown("### ⚡ リアルタイムデータの設定")
+        st.markdown("""
+現在のyfinanceは**最大15分遅延**ですが、以下を設定すると遅延を大幅に短縮できます。
+""")
+
+        rt_col1, rt_col2 = st.columns(2)
+
+        with rt_col1:
+            st.markdown("#### 🇯🇵 日本株：J-Quants API（無料）")
+            st.markdown("""
+**JPX（日本取引所グループ）公式のAPI**です。無料プランで日次データが取得できます。
+
+**登録手順：**
+1. [J-Quants登録ページ](https://application.jpx-jquants.com/) でメールアドレスを登録
+2. メール認証後、ログインしてAPIを有効化
+3. 下記にメールアドレスとパスワードを入力
+""")
+            jq_email = st.text_input("J-Quants メールアドレス",
+                                      value=os.getenv("JQUANTS_EMAIL", ""),
+                                      placeholder="example@email.com")
+            jq_pass = st.text_input("J-Quants パスワード", type="password",
+                                     value=os.getenv("JQUANTS_PASSWORD", ""))
+            if st.button("✅ J-Quants 接続テスト"):
+                if jq_email and jq_pass:
+                    try:
+                        from modules.data_fetcher import JQuantsClient
+                        client = JQuantsClient(jq_email, jq_pass)
+                        client._get_refresh_token()
+                        st.success("接続成功！日本株がJ-Quantsで取得されます ✅")
+                    except Exception as e:
+                        st.error(f"接続失敗: {e}")
+                else:
+                    st.warning("メールアドレスとパスワードを入力してください")
+            st.code(f"""# 環境変数に設定
+export JQUANTS_EMAIL="{jq_email or 'your@email.com'}"
+export JQUANTS_PASSWORD="your_password"
+""", language="bash")
+
+        with rt_col2:
+            st.markdown("#### 🇺🇸 米国株：Alpaca Markets（無料）")
+            st.markdown("""
+**米国株のリアルタイム価格**が無料で取得できます。
+
+**登録手順：**
+1. [Alpaca Markets](https://alpaca.markets/) でアカウント作成（無料）
+2. ダッシュボード → 「API Keys」でキーを発行
+3. 下記に入力（Paper Trading キーでOK）
+""")
+            alp_key = st.text_input("Alpaca API Key",
+                                     value=os.getenv("ALPACA_API_KEY", ""),
+                                     type="password",
+                                     placeholder="PKxxxxxx...")
+            alp_secret = st.text_input("Alpaca Secret Key",
+                                        value=os.getenv("ALPACA_SECRET_KEY", ""),
+                                        type="password")
+            if st.button("✅ Alpaca 接続テスト"):
+                if alp_key and alp_secret:
+                    try:
+                        import requests as req
+                        resp = req.get(
+                            "https://data.alpaca.markets/v2/stocks/AAPL/quotes/latest",
+                            headers={"APCA-API-KEY-ID": alp_key,
+                                     "APCA-API-SECRET-KEY": alp_secret},
+                            timeout=8,
+                        )
+                        if resp.status_code == 200:
+                            price = resp.json().get("quote", {})
+                            mid = (price.get("ap", 0) + price.get("bp", 0)) / 2
+                            st.success(f"接続成功！AAPL 現在値: ${mid:.2f} ✅")
+                        else:
+                            st.error(f"接続失敗: {resp.status_code}")
+                    except Exception as e:
+                        st.error(f"エラー: {e}")
+                else:
+                    st.warning("APIキーを入力してください")
+            st.code(f"""export ALPACA_API_KEY="{alp_key or 'your_api_key'}"
+export ALPACA_SECRET_KEY="{alp_secret or 'your_secret_key'}"
+""", language="bash")
+
+        st.markdown("---")
+        st.markdown("#### 📊 現在のデータソース状況")
+        from modules.data_fetcher import _get_jquants_client
+        jq_active = _get_jquants_client() is not None
+        alp_active = bool(os.getenv("ALPACA_API_KEY") and os.getenv("ALPACA_SECRET_KEY"))
+        status_data = [
+            {"データソース": "yfinance (デフォルト)", "対象": "日米全銘柄",
+             "遅延": "最大15分", "状態": "✅ 常時有効"},
+            {"データソース": "yfinance fast_info", "対象": "日米全銘柄",
+             "遅延": "数分〜ほぼリアル", "状態": "✅ 常時有効（現在価格に使用）"},
+            {"データソース": "J-Quants API", "対象": "日本株",
+             "遅延": "リアルタイム（翌日分も）",
+             "状態": "✅ 設定済み" if jq_active else "❌ 未設定"},
+            {"データソース": "Alpaca Markets", "対象": "米国株",
+             "遅延": "リアルタイム",
+             "状態": "✅ 設定済み" if alp_active else "❌ 未設定"},
+        ]
+        st.dataframe(pd.DataFrame(status_data), use_container_width=True, hide_index=True)
+
+    with ntab4:
         st.markdown("### 手動でアラートを送信")
         st.caption("設定が正しいか確認するために、任意の銘柄でテスト送信できます")
 

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 import pandas as pd
-from modules.data_fetcher import fetch_ohlcv, fetch_info, normalize_ticker
+from modules.data_fetcher import fetch_ohlcv, fetch_info, normalize_ticker, fetch_realtime_price
 from modules.technical import compute_all
 from modules.signals import evaluate_signals, overall_signal
 
@@ -26,9 +26,16 @@ def scan_ticker(ticker: str) -> dict:
         signals = evaluate_signals(df)
         verdict, score = overall_signal(signals)
 
-        close = df["Close"].iloc[-1]
-        prev_close = df["Close"].iloc[-2] if len(df) >= 2 else close
-        change_pct = (close - prev_close) / prev_close * 100
+        # fast_info で最新価格を上書き（遅延を最小化）
+        rt = fetch_realtime_price(ticker)
+        if rt.get("price"):
+            close = rt["price"]
+            prev_close = rt.get("prev_close") or df["Close"].iloc[-1]
+            change_pct = rt.get("change_pct") or (close - prev_close) / prev_close * 100
+        else:
+            close = df["Close"].iloc[-1]
+            prev_close = df["Close"].iloc[-2] if len(df) >= 2 else close
+            change_pct = (close - prev_close) / prev_close * 100
 
         rsi = df["RSI"].dropna().iloc[-1] if "RSI" in df.columns else None
         atr = df["ATR"].dropna().iloc[-1] if "ATR" in df.columns else None
