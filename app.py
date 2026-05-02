@@ -25,6 +25,8 @@ from modules.portfolio import build_portfolio_summary
 from modules.charts import build_backtest_chart, build_correlation_heatmap, build_portfolio_pie
 from modules.notifier import send_signal_alert, send_screening_alert, send_stop_loss_alert
 from modules.dashboard import load_watchlist, save_watchlist, scan_all
+from modules.ml_model import train_model, trend_regression, detect_candlestick_patterns
+from modules.market_utils import market_status
 
 init_db()
 
@@ -32,6 +34,14 @@ init_db()
 with st.sidebar:
     st.title("📈 株式分析ツール")
     st.markdown("---")
+
+    # 市場ステータス
+    mst = market_status()
+    st.markdown(f"**東証** {mst['jp_label']}　**NYSE** {mst['us_label']}")
+    st.caption(mst["data_delay_note"])
+    st.caption(mst["now_jst"])
+    st.markdown("---")
+
     page = st.radio(
         "メニュー",
         ["🏠 ダッシュボード", "📊 テクニカル分析", "🔍 スクリーニング", "📋 ファンダメンタル分析", "🌐 マクロ・ニュース", "🔬 バックテスト", "📐 ポートフォリオ", "📔 投資日記", "🔔 通知設定"],
@@ -63,18 +73,40 @@ if page == "🏠 ダッシュボード":
             st.success("保存しました")
             st.rerun()
 
-    # 自動更新トグル
-    col_r1, col_r2 = st.columns([3, 1])
+    # 市場状況と更新間隔
+    mst = market_status()
+    col_r1, col_r2 = st.columns([2, 2])
+    with col_r1:
+        auto_refresh = st.toggle("🔄 自動更新", value=False)
     with col_r2:
-        auto_refresh = st.toggle("🔄 自動更新（5分）", value=False)
+        interval_label = st.selectbox(
+            "間隔",
+            ["1分", "3分", "5分", "15分"],
+            index=1,
+            disabled=not auto_refresh,
+            label_visibility="collapsed",
+        )
+    interval_map = {"1分": 60, "3分": 180, "5分": 300, "15分": 900}
+    interval_sec = interval_map[interval_label]
+
     if auto_refresh:
-        st_autorefresh(interval=5 * 60 * 1000, key="dashboard_refresh")
+        st_autorefresh(interval=interval_sec * 1000, key="dashboard_refresh")
+        if not mst["any_open"]:
+            st.info("💤 現在は市場閉場中です。価格データは変動しません（次の開場まで更新不要）")
 
     # スキャン実行
     if st.button("🔍 今すぐ更新", type="primary", use_container_width=True) or \
        "dashboard_data" not in st.session_state:
+        prev_data = {r["ticker"]: r["シグナル"]
+                     for r in st.session_state.get("dashboard_data", [])}
         with st.spinner(f"{len(watchlist)}銘柄をスキャン中..."):
-            st.session_state["dashboard_data"] = scan_all(watchlist)
+            new_data = scan_all(watchlist)
+        # シグナル変化を検出
+        for r in new_data:
+            prev_sig = prev_data.get(r["ticker"])
+            r["シグナル変化"] = (prev_sig is not None and prev_sig != r["シグナル"])
+            r["前回シグナル"] = prev_sig
+        st.session_state["dashboard_data"] = new_data
 
     rows = st.session_state.get("dashboard_data", [])
 
@@ -93,6 +125,16 @@ if page == "🏠 ダッシュボード":
         st.markdown("### 銘柄別シグナル一覧")
         st.caption("行をクリックした銘柄はテクニカル分析で詳細確認できます")
 
+        # シグナル変化があれば先にまとめて表示
+        changed = [r for r in rows if r.get("シグナル変化")]
+        if changed:
+            st.markdown("### 🚨 シグナル変化あり")
+            for r in changed:
+                arrow = {"買い": "🟢", "売り": "🔴", "様子見": "🟡"}.get(r["シグナル"], "⚪")
+                prev = {"買い": "🟢", "売り": "🔴", "様子見": "🟡"}.get(r["前回シグナル"], "⚪")
+                st.warning(f"**{r['ticker']}**　{prev} {r['前回シグナル']} → {arrow} **{r['シグナル']}**　（{r['理由']}）")
+            st.markdown("---")
+
         for r in rows:
             sig = r["シグナル"]
             emoji = {"買い": "🟢", "売り": "🔴", "様子見": "🟡", "エラー": "⚫"}.get(sig, "⚪")
@@ -105,10 +147,11 @@ if page == "🏠 ダッシュボード":
             chg_color = "color:#26a69a" if chg and chg >= 0 else "color:#ef5350"
             price_str = f"{price:,.2f}" if price else "N/A"
             rsi_str = f"{rsi:.0f}" if rsi else "-"
+            changed_badge = " 🔔NEW" if r.get("シグナル変化") else ""
 
             with st.container():
                 c1, c2, c3, c4, c5, c6 = st.columns([1.5, 1.5, 2, 1, 1, 3])
-                c1.markdown(f"**{r['ticker']}**")
+                c1.markdown(f"**{r['ticker']}**{changed_badge}")
                 c2.markdown(f"{price_str}")
                 c3.markdown(f"<span style='{chg_color}'>{chg_str}</span>", unsafe_allow_html=True)
                 c4.markdown(f"{emoji} **{sig}**")
@@ -226,6 +269,88 @@ elif page == "📊 テクニカル分析":
             r4.metric("ATR", f"{risk['ATR']:.2f}")
 
         # AI分析タブ
+        # ── ML分析 ─────────────────────────────────────────────
+        st.markdown("### 🧠 機械学習分析")
+        ml_col1, ml_col2 = st.columns(2)
+
+        with ml_col1:
+            st.markdown("#### 価格トレンド（回帰分析）")
+            trend = trend_regression(df, window=20)
+            st.markdown(
+                f"""<div style="background:{trend['trend_color']}22;border:1px solid {trend['trend_color']};
+                    border-radius:10px;padding:12px;text-align:center">
+                    <div style="font-size:1.3em;color:{trend['trend_color']};font-weight:bold">{trend['trend']}</div>
+                    <div style="color:#aaa;margin-top:4px">日次変化率: {trend['slope_pct_per_day']:+.3f}% / 当てはまり度 R²: {trend['r2']:.2f}</div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+
+        with ml_col2:
+            st.markdown("#### ローソク足パターン（直近3本）")
+            patterns = detect_candlestick_patterns(df)
+            if patterns:
+                for p in patterns:
+                    p_color = {"買い": "#26a69a", "売り": "#ef5350", "中立": "#ffd54f"}.get(p["方向"], "#888")
+                    st.markdown(
+                        f"""<div style="background:{p_color}22;border-left:3px solid {p_color};
+                            padding:8px 12px;margin-bottom:6px;border-radius:4px">
+                            <b>{p['パターン']}</b>（{p['日付']}）<br>
+                            <small>{p['意味']}</small>
+                        </div>""",
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.info("直近3本で特定のパターンは検出されませんでした")
+
+        st.markdown("#### 🤖 機械学習シグナル予測（RandomForest + GradientBoosting）")
+        ml_horizon = st.slider("予測期間（日）", min_value=3, max_value=20, value=5, step=1,
+                               help="何日後の価格が上昇しているかを予測します")
+        if st.button("🔮 ML予測を実行", type="secondary"):
+            with st.spinner("モデルを学習中...（初回は30秒ほどかかります）"):
+                ml_result = train_model(df, horizon=ml_horizon)
+
+            if ml_result.get("error"):
+                st.warning(ml_result["error"])
+            else:
+                prob = ml_result["up_probability"]
+                ml_color = ml_result["ml_color"]
+                mc1, mc2, mc3, mc4 = st.columns(4)
+                mc1.metric(f"{ml_horizon}日後の予測", ml_result["ml_verdict"])
+                mc2.metric("上昇確率", f"{prob}%")
+                mc3.metric("モデル精度（検証）", f"{ml_result['ensemble_accuracy']}%",
+                           help="過去データのテスト期間での正解率。50%以上なら参考になります")
+                mc4.metric("信頼度", f"{ml_result['confidence']:.0f}%",
+                           help="50%から離れるほど確信が強い予測です")
+
+                # 上昇確率ゲージ
+                st.markdown(
+                    f"""<div style="background:#1a1d23;border-radius:8px;height:20px;margin:8px 0">
+                    <div style="width:{prob}%;background:{ml_color};height:20px;border-radius:8px;
+                         display:flex;align-items:center;justify-content:center;
+                         color:white;font-size:0.8em;font-weight:bold">{prob}%</div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+                st.caption("⚠️ 機械学習の予測は参考情報です。過去のパターンが未来に繰り返される保証はありません。")
+
+                # 特徴量重要度
+                with st.expander("📊 予測に使われた指標の重要度"):
+                    fi = ml_result["feature_importance"]
+                    import plotly.express as px
+                    fig_fi = px.bar(
+                        x=fi.values * 100, y=fi.index, orientation="h",
+                        labels={"x": "重要度 (%)", "y": "指標"},
+                        color=fi.values,
+                        color_continuous_scale="teal",
+                    )
+                    fig_fi.update_layout(
+                        paper_bgcolor="#0e1117", plot_bgcolor="#1a1d23",
+                        font=dict(color="#fafafa"), height=300,
+                        showlegend=False, coloraxis_showscale=False,
+                    )
+                    st.plotly_chart(fig_fi, use_container_width=True)
+
+        st.markdown("---")
         ai_tab1, ai_tab2 = st.tabs(["🤖 テクニカルAI解説", "🌐 マクロ・ニュース影響"])
 
         with ai_tab1:
