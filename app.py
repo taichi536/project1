@@ -204,16 +204,43 @@ if page == "🏠 ダッシュボード":
 elif page == "📊 テクニカル分析":
     st.title("📊 テクニカル分析")
 
-    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
-    with col1:
-        ticker = st.text_input("銘柄コード", value="7203", placeholder="例: 7203 / AAPL")
-    with col2:
-        period = st.selectbox("期間", ["3mo", "6mo", "1y", "2y"], index=1,
-                              format_func=lambda x: {"3mo": "3ヶ月", "6mo": "6ヶ月", "1y": "1年", "2y": "2年"}[x])
-    with col3:
-        sma_short = st.number_input("短期MA", value=25, min_value=5, max_value=50, step=5)
-    with col4:
-        sma_long = st.number_input("長期MA", value=75, min_value=20, max_value=200, step=5)
+    watchlist = load_watchlist()
+
+    # ── 銘柄選択（ウォッチリスト or 手入力） ──────────────────────────────
+    sel_col1, sel_col2 = st.columns([3, 1])
+    with sel_col1:
+        # ウォッチリストから選択
+        options = watchlist + ["✏️ 直接入力する"]
+        default_idx = 0
+        if st.session_state.get("ta_ticker") in watchlist:
+            default_idx = watchlist.index(st.session_state["ta_ticker"])
+        selected = st.selectbox(
+            "銘柄を選択（ウォッチリストから）",
+            options,
+            index=default_idx,
+        )
+    with sel_col2:
+        period = st.selectbox(
+            "期間",
+            ["3mo", "6mo", "1y", "2y"],
+            index=1,
+            format_func=lambda x: {"3mo": "3ヶ月", "6mo": "6ヶ月", "1y": "1年", "2y": "2年"}[x],
+        )
+
+    if selected == "✏️ 直接入力する":
+        ticker = st.text_input("銘柄コードを入力", placeholder="例: 7203 / AAPL")
+    else:
+        ticker = selected
+
+    if ticker:
+        st.session_state["ta_ticker"] = ticker
+
+    # 詳細設定（折りたたみ）
+    sma_short, sma_long = 25, 75
+    with st.expander("⚙️ 詳細設定（移動平均の期間など）", expanded=False):
+        c3, c4 = st.columns(2)
+        sma_short = c3.number_input("短期MA（日）", value=25, min_value=5, max_value=50, step=5)
+        sma_long = c4.number_input("長期MA（日）", value=75, min_value=20, max_value=200, step=5)
 
     analyze_btn = st.button("🔍 分析する", type="primary", use_container_width=True)
 
@@ -273,6 +300,56 @@ elif page == "📊 テクニカル分析":
         # チャート
         fig = build_main_chart(df, ticker, sma_short=sma_short, sma_long=sma_long)
         st.plotly_chart(fig, use_container_width=True)
+
+        # ── チャートの見方ガイド ──────────────────────────────
+        with st.expander("📖 チャートの見方（各線・指標の説明）", expanded=False):
+            st.markdown("""
+#### 🕯️ ローソク足（上段メイン）
+| 色 | 意味 |
+|----|------|
+| 🟩 緑のローソク | 前日より株価が**上がった**日 |
+| 🟥 赤のローソク | 前日より株価が**下がった**日 |
+| ローソクの上下のヒゲ | その日の最高値・最安値の範囲 |
+
+#### 📈 移動平均線（上段）
+| 線 | 意味 |
+|----|------|
+| 🟠 オレンジ線（SMA25） | 過去**25日間**の平均株価。短期トレンド |
+| 🔵 青線（SMA75） | 過去**75日間**の平均株価。長期トレンド |
+| ✅ オレンジが青を下から上に抜いた（ゴールデンクロス） | **買いサイン** |
+| ⚠️ オレンジが青を上から下に抜いた（デッドクロス） | **売りサイン** |
+
+#### 🌥️ 雲（薄い緑・赤の帯）
+一目均衡表の「雲」です。
+- 株価が**雲の上** → 強い上昇トレンド
+- 株価が**雲の下** → 弱い下落トレンド
+- 株価が**雲の中** → 方向感なし・様子見
+
+#### 📊 ボリンジャーバンド（薄い青の帯）
+平均株価を中心に、値動きの範囲を示します。
+- 株価が**帯の下限に触れた** → 売られすぎ・反発の可能性
+- 株価が**帯の上限に触れた** → 買われすぎ・反落の可能性
+
+---
+
+#### 📉 出来高 / OBV（2段目）
+| | 意味 |
+|----|------|
+| 棒グラフ（出来高） | その日に売買された株の量。多いほど注目されている |
+| OBVライン | 出来高の積み上げ。大口投資家の動きを反映 |
+
+#### 📉 MACD（3段目）
+トレンドの方向と勢いを見る指標。
+- **MACDライン（紫）が シグナルライン（橙の点線）を下から上に抜けた** → 買いサイン
+- **上から下に抜けた** → 売りサイン
+- ヒストグラム（棒）がプラス圏 → 上昇の勢い、マイナス圏 → 下落の勢い
+
+#### 📉 RSI・ストキャスティクス（4段目）
+売られすぎ・買われすぎを0〜100で表示。
+- **RSIが30以下** → 売られすぎ（買いの候補）
+- **RSIが70以上** → 買われすぎ（売りの候補）
+- 緑の破線（30）と赤の破線（70）が目安
+""")
 
         # 指標テーブル
         st.markdown("### 指標別シグナル一覧")
