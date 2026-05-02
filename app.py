@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(
     page_title="株式売買タイミング分析ツール",
@@ -23,6 +24,7 @@ from modules.backtest import run_backtest, STRATEGIES
 from modules.portfolio import build_portfolio_summary
 from modules.charts import build_backtest_chart, build_correlation_heatmap, build_portfolio_pie
 from modules.notifier import send_signal_alert, send_screening_alert, send_stop_loss_alert
+from modules.dashboard import load_watchlist, save_watchlist, scan_all
 
 init_db()
 
@@ -32,7 +34,7 @@ with st.sidebar:
     st.markdown("---")
     page = st.radio(
         "メニュー",
-        ["テクニカル分析", "スクリーニング", "ファンダメンタル分析", "マクロ・ニュース分析", "バックテスト", "ポートフォリオ最適化", "投資日記", "🔔 通知設定"],
+        ["🏠 ダッシュボード", "📊 テクニカル分析", "🔍 スクリーニング", "📋 ファンダメンタル分析", "🌐 マクロ・ニュース", "🔬 バックテスト", "📐 ポートフォリオ", "📔 投資日記", "🔔 通知設定"],
         label_visibility="collapsed",
     )
     st.markdown("---")
@@ -40,8 +42,96 @@ with st.sidebar:
     st.caption("米国株: AAPL, MSFT など")
 
 
+# ─── ダッシュボード ───────────────────────────────────────────────────────────
+if page == "🏠 ダッシュボード":
+    st.title("🏠 ダッシュボード")
+    st.caption("登録銘柄のシグナルを一覧で確認できます")
+
+    # ウォッチリスト編集
+    watchlist = load_watchlist()
+    with st.expander("⚙️ 監視銘柄を編集", expanded=False):
+        wl_input = st.text_area(
+            "1行1銘柄（日本株は4桁、米国株はティッカー）",
+            value="\n".join(watchlist),
+            height=150,
+            key="wl_edit",
+        )
+        if st.button("💾 保存", key="wl_save"):
+            new_list = [t.strip() for t in wl_input.strip().split("\n") if t.strip()]
+            save_watchlist(new_list)
+            watchlist = new_list
+            st.success("保存しました")
+            st.rerun()
+
+    # 自動更新トグル
+    col_r1, col_r2 = st.columns([3, 1])
+    with col_r2:
+        auto_refresh = st.toggle("🔄 自動更新（5分）", value=False)
+    if auto_refresh:
+        st_autorefresh(interval=5 * 60 * 1000, key="dashboard_refresh")
+
+    # スキャン実行
+    if st.button("🔍 今すぐ更新", type="primary", use_container_width=True) or \
+       "dashboard_data" not in st.session_state:
+        with st.spinner(f"{len(watchlist)}銘柄をスキャン中..."):
+            st.session_state["dashboard_data"] = scan_all(watchlist)
+
+    rows = st.session_state.get("dashboard_data", [])
+
+    if rows:
+        # 集計バッジ
+        buy_count = sum(1 for r in rows if r["シグナル"] == "買い")
+        sell_count = sum(1 for r in rows if r["シグナル"] == "売り")
+        watch_count = sum(1 for r in rows if r["シグナル"] == "様子見")
+        b1, b2, b3, b4 = st.columns(4)
+        b1.metric("監視銘柄数", len(rows))
+        b2.metric("🟢 買いシグナル", buy_count)
+        b3.metric("🟡 様子見", watch_count)
+        b4.metric("🔴 売りシグナル", sell_count)
+
+        st.markdown("---")
+        st.markdown("### 銘柄別シグナル一覧")
+        st.caption("行をクリックした銘柄はテクニカル分析で詳細確認できます")
+
+        for r in rows:
+            sig = r["シグナル"]
+            emoji = {"買い": "🟢", "売り": "🔴", "様子見": "🟡", "エラー": "⚫"}.get(sig, "⚪")
+            score = r["スコア"]
+            price = r["現在値"]
+            chg = r["前日比(%)"]
+            rsi = r["RSI"]
+
+            chg_str = f"{chg:+.2f}%" if chg is not None else "N/A"
+            chg_color = "color:#26a69a" if chg and chg >= 0 else "color:#ef5350"
+            price_str = f"{price:,.2f}" if price else "N/A"
+            rsi_str = f"{rsi:.0f}" if rsi else "-"
+
+            with st.container():
+                c1, c2, c3, c4, c5, c6 = st.columns([1.5, 1.5, 2, 1, 1, 3])
+                c1.markdown(f"**{r['ticker']}**")
+                c2.markdown(f"{price_str}")
+                c3.markdown(f"<span style='{chg_color}'>{chg_str}</span>", unsafe_allow_html=True)
+                c4.markdown(f"{emoji} **{sig}**")
+                c5.markdown(f"RSI {rsi_str}")
+                c6.markdown(f"<small>{r['理由']}</small>", unsafe_allow_html=True)
+
+            # スコアバー
+            bar_pct = min(max((score + 12) / 24 * 100, 0), 100)
+            bar_color = "#26a69a" if score > 0 else ("#ef5350" if score < 0 else "#ffd54f")
+            st.markdown(
+                f"""<div style="background:#1a1d23;border-radius:4px;height:6px;margin-bottom:8px">
+                <div style="width:{bar_pct}%;background:{bar_color};height:6px;border-radius:4px"></div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+
+        # 詳細分析へのリンク案内
+        st.markdown("---")
+        st.info("💡 詳しく分析したい銘柄は左メニューの「📊 テクニカル分析」で確認できます")
+
+
 # ─── テクニカル分析 ───────────────────────────────────────────────────────────
-if page == "テクニカル分析":
+elif page == "📊 テクニカル分析":
     st.title("📊 テクニカル分析")
 
     col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
@@ -68,18 +158,47 @@ if page == "テクニカル分析":
                 st.error(f"データ取得エラー: {e}")
                 st.stop()
 
-        # 総合シグナル表示
-        st.markdown("### 総合シグナル")
-        emoji = {"買い": "🟢", "売り": "🔴", "様子見": "🟡"}.get(verdict, "⚪")
-        color = {"買い": "#26a69a", "売り": "#ef5350", "様子見": "#ffd54f"}.get(verdict, "#888")
-
-        col_sig, col_price, col_rsi, col_atr = st.columns(4)
-        col_sig.metric("シグナル", f"{emoji} {verdict}", f"スコア: {score:+d}")
-        col_price.metric("現在値", f"{df['Close'].iloc[-1]:.2f}")
         rsi_val = df["RSI"].dropna().iloc[-1] if "RSI" in df.columns else None
         atr_val = df["ATR"].dropna().iloc[-1] if "ATR" in df.columns else None
-        col_rsi.metric("RSI", f"{rsi_val:.1f}" if rsi_val else "N/A")
-        col_atr.metric("ATR（ボラティリティ）", f"{atr_val:.2f}" if atr_val else "N/A")
+        close_val = df["Close"].iloc[-1]
+        prev_val = df["Close"].iloc[-2] if len(df) >= 2 else close_val
+        chg_pct = (close_val - prev_val) / prev_val * 100
+
+        # ── 大きなシグナル表示 ──────────────────────────────
+        sig_color = {"買い": "#26a69a", "売り": "#ef5350", "様子見": "#ffd54f"}.get(verdict, "#888")
+        sig_emoji = {"買い": "🟢", "売り": "🔴", "様子見": "🟡"}.get(verdict, "⚪")
+        sig_msg = {
+            "買い": "買いのタイミングです",
+            "売り": "売りを検討してください",
+            "様子見": "まだ動かず待ちましょう",
+        }.get(verdict, "")
+
+        # シンプルな理由（上位2つ）
+        top2 = sorted(signals, key=lambda x: abs(x["スコア"]), reverse=True)[:2]
+        reasons_html = "　".join(
+            f"<span style='background:{'#1e3a2f' if s['スコア']>0 else '#3a1e1e'};padding:2px 8px;border-radius:12px;font-size:0.85em'>"
+            f"{'✅' if s['スコア']>0 else '⚠️'} {s['指標'].split('(')[0].strip()}: {s['判定']}</span>"
+            for s in top2
+        )
+
+        st.markdown(
+            f"""<div style="background:{sig_color}22;border:2px solid {sig_color};
+                border-radius:16px;padding:24px;text-align:center;margin-bottom:16px">
+                <div style="font-size:3em">{sig_emoji}</div>
+                <div style="font-size:2em;font-weight:bold;color:{sig_color}">{verdict}</div>
+                <div style="font-size:1.1em;color:#ccc;margin-top:4px">{sig_msg}</div>
+                <div style="margin-top:12px">{reasons_html}</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+        col_price, col_chg, col_rsi, col_atr = st.columns(4)
+        col_price.metric("現在値", f"{close_val:,.2f}")
+        col_chg.metric("前日比", f"{chg_pct:+.2f}%")
+        col_rsi.metric("RSI", f"{rsi_val:.1f}" if rsi_val else "N/A",
+                       help="30以下=売られすぎ（買い候補）/ 70以上=買われすぎ（売り候補）")
+        col_atr.metric("ATR（値幅目安）", f"{atr_val:.2f}" if atr_val else "N/A",
+                       help="1日の平均的な値動き幅。損切り幅の基準に使います")
 
         # チャート
         fig = build_main_chart(df, ticker, sma_short=sma_short, sma_long=sma_long)
@@ -150,7 +269,7 @@ if page == "テクニカル分析":
 
 
 # ─── スクリーニング ────────────────────────────────────────────────────────────
-elif page == "スクリーニング":
+elif page == "🔍 スクリーニング":
     st.title("🔍 バリュー株スクリーニング")
     st.markdown("**なごちょう式** 6条件 + Piotroski Fスコアで評価します")
 
@@ -198,7 +317,7 @@ elif page == "スクリーニング":
 
 
 # ─── ファンダメンタル分析 ─────────────────────────────────────────────────────
-elif page == "ファンダメンタル分析":
+elif page == "📋 ファンダメンタル分析":
     st.title("📋 ファンダメンタル分析")
 
     ticker_fa = st.text_input("銘柄コード", value="7203", key="fa_ticker")
@@ -264,7 +383,7 @@ elif page == "ファンダメンタル分析":
 
 
 # ─── マクロ・ニュース分析 ─────────────────────────────────────────────────────
-elif page == "マクロ・ニュース分析":
+elif page == "🌐 マクロ・ニュース":
     st.title("🌐 マクロ経済・ニュース分析")
     st.markdown("社会情勢・経済指標・最新ニュースから相場への影響を分析します")
 
@@ -374,7 +493,7 @@ elif page == "マクロ・ニュース分析":
 
 
 # ─── バックテスト ─────────────────────────────────────────────────────────────
-elif page == "バックテスト":
+elif page == "🔬 バックテスト":
     st.title("🔬 バックテスト")
     st.markdown("過去データで売買戦略の有効性を検証します")
 
@@ -468,7 +587,7 @@ elif page == "バックテスト":
 
 
 # ─── ポートフォリオ最適化 ─────────────────────────────────────────────────────
-elif page == "ポートフォリオ最適化":
+elif page == "📐 ポートフォリオ":
     st.title("📐 ポートフォリオ最適化")
     st.markdown("相関分析・最小分散・ケリー基準で分散投資を最適化します")
 
@@ -563,7 +682,7 @@ elif page == "ポートフォリオ最適化":
 
 
 # ─── 投資日記 ─────────────────────────────────────────────────────────────────
-elif page == "投資日記":
+elif page == "📔 投資日記":
     st.title("📔 投資日記")
 
     tab1, tab2, tab3, tab4 = st.tabs(["📝 取引記録", "💰 損益サマリー", "📊 パフォーマンス", "🔄 振り返り"])
