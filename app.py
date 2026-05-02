@@ -12,7 +12,7 @@ st.set_page_config(
 
 from modules.data_fetcher import fetch_ohlcv, fetch_info
 from modules.technical import compute_all
-from modules.signals import evaluate_signals, overall_signal
+from modules.signals import evaluate_signals, overall_signal, generate_action_plan
 from modules.charts import build_main_chart
 from modules.fundamental import get_fundamental_summary, get_risk_metrics
 from modules.screening import screen_single
@@ -48,6 +48,14 @@ with st.sidebar:
         label_visibility="collapsed",
     )
     st.markdown("---")
+
+    # 初心者モード
+    beginner_mode = st.toggle(
+        "🔰 初心者モード",
+        value=st.session_state.get("beginner_mode", True),
+        help="オンにすると専門用語を減らし、具体的な行動提案を優先表示します",
+    )
+    st.session_state["beginner_mode"] = beginner_mode
 
     # AI機能のオンオフ（コスト管理）
     ai_enabled = st.toggle(
@@ -351,26 +359,78 @@ elif page == "📊 テクニカル分析":
 - 緑の破線（30）と赤の破線（70）が目安
 """)
 
-        # 指標テーブル
-        st.markdown("### 指標別シグナル一覧")
-        sig_df = pd.DataFrame(signals)
-        sig_df["判定"] = sig_df.apply(
-            lambda r: ("🟢 " if r["スコア"] > 0 else ("🔴 " if r["スコア"] < 0 else "🟡 ")) + r["判定"],
-            axis=1,
-        )
-        st.dataframe(sig_df[["指標", "値", "判定"]], use_container_width=True, hide_index=True)
+        # ── 投資プラン（初心者向け具体的提案） ─────────────────
+        plan = generate_action_plan(df, signals, verdict, ticker)
 
-        # 損切りライン
-        if atr_val:
-            st.markdown("### 損切りライン（ATRベース）")
-            risk = get_risk_metrics(ticker, df["Close"].iloc[-1], atr_val)
-            r1, r2, r3, r4 = st.columns(4)
-            r1.metric("現在値", f"{risk['現在値']:.2f}")
-            r2.metric("損切りライン (×1 ATR)", f"{risk['損切りライン (ATR×1)']:.2f}",
-                      f"-{risk['リスク率 (ATR×1)']:.1f}%", delta_color="inverse")
-            r3.metric("損切りライン (×2 ATR)", f"{risk['損切りライン (ATR×2)']:.2f}",
-                      f"-{risk['リスク率 (ATR×2)']:.1f}%", delta_color="inverse")
-            r4.metric("ATR", f"{risk['ATR']:.2f}")
+        st.markdown("### 📋 具体的な投資プラン")
+        st.markdown(
+            f"""<div style="background:#1a1d23;border-radius:12px;padding:20px;margin-bottom:16px">
+            <div style="font-size:1.2em;font-weight:bold;margin-bottom:12px">{plan['timing']}</div>
+            <div style="color:#ccc;margin-bottom:16px">{plan['timing_detail']}</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+        pc1, pc2, pc3, pc4 = st.columns(4)
+        pc1.metric("📍 現在値（エントリー目安）", f"{plan['entry_price']:,.1f}",
+                   help="今この価格で買うとしたら")
+        pc2.metric("🎯 利確ライン", f"{plan['target1']:,.1f}",
+                   help="ここまで上がったら売ることを検討",
+                   delta=f"+{plan['target1']-plan['entry_price']:,.0f}")
+        pc3.metric("🛑 損切りライン", f"{plan['stop_loss']:,.1f}",
+                   help="ここを下回ったら迷わず売る",
+                   delta=f"{plan['stop_loss']-plan['entry_price']:,.0f}",
+                   delta_color="inverse")
+        rr_color = "✅" if plan["risk_reward"] >= 2 else ("⚠️" if plan["risk_reward"] >= 1 else "❌")
+        pc4.metric(f"リスクリワード比 {rr_color}", f"1 : {plan['risk_reward']:.1f}",
+                   help="2以上が理想。損1に対してどれだけ利益が見込めるか")
+
+        # 様子見のときは「次にどうなったら動くか」を表示
+        if verdict == "様子見":
+            st.info(
+                f"**⏳ 今は待つ時期です。次のサインが出たら行動しましょう**\n\n"
+                f"🟢 **買いを検討するタイミング：** {plan['buy_trigger']}\n\n"
+                f"🔴 **売り・見送りを検討するタイミング：** {plan['sell_trigger']}"
+            )
+            st.caption("💡 「様子見」は最も多い判定です。相場の70〜80%の時間は様子見が正解です。焦らず待つことも立派な投資判断です。")
+
+        # 初心者モードでは指標テーブルを折りたたみ
+        if st.session_state.get("beginner_mode", True):
+            with st.expander("📊 各指標の詳細データ（上級者向け）", expanded=False):
+                sig_df = pd.DataFrame(signals)
+                sig_df["判定"] = sig_df.apply(
+                    lambda r: ("🟢 " if r["スコア"] > 0 else ("🔴 " if r["スコア"] < 0 else "🟡 ")) + r["判定"],
+                    axis=1,
+                )
+                st.dataframe(sig_df[["指標", "値", "判定"]], use_container_width=True, hide_index=True)
+                if atr_val:
+                    st.markdown("**損切りラインの詳細（ATRベース）**")
+                    risk = get_risk_metrics(ticker, df["Close"].iloc[-1], atr_val)
+                    r1, r2, r3, r4 = st.columns(4)
+                    r1.metric("現在値", f"{risk['現在値']:.2f}")
+                    r2.metric("損切り×1", f"{risk['損切りライン (ATR×1)']:.2f}",
+                              f"-{risk['リスク率 (ATR×1)']:.1f}%", delta_color="inverse")
+                    r3.metric("損切り×2", f"{risk['損切りライン (ATR×2)']:.2f}",
+                              f"-{risk['リスク率 (ATR×2)']:.1f}%", delta_color="inverse")
+                    r4.metric("ATR", f"{risk['ATR']:.2f}")
+        else:
+            st.markdown("### 指標別シグナル一覧")
+            sig_df = pd.DataFrame(signals)
+            sig_df["判定"] = sig_df.apply(
+                lambda r: ("🟢 " if r["スコア"] > 0 else ("🔴 " if r["スコア"] < 0 else "🟡 ")) + r["判定"],
+                axis=1,
+            )
+            st.dataframe(sig_df[["指標", "値", "判定"]], use_container_width=True, hide_index=True)
+            if atr_val:
+                st.markdown("### 損切りライン（ATRベース）")
+                risk = get_risk_metrics(ticker, df["Close"].iloc[-1], atr_val)
+                r1, r2, r3, r4 = st.columns(4)
+                r1.metric("現在値", f"{risk['現在値']:.2f}")
+                r2.metric("損切りライン (×1 ATR)", f"{risk['損切りライン (ATR×1)']:.2f}",
+                          f"-{risk['リスク率 (ATR×1)']:.1f}%", delta_color="inverse")
+                r3.metric("損切りライン (×2 ATR)", f"{risk['損切りライン (ATR×2)']:.2f}",
+                          f"-{risk['リスク率 (ATR×2)']:.1f}%", delta_color="inverse")
+                r4.metric("ATR", f"{risk['ATR']:.2f}")
 
         # AI分析タブ
         # ── ML分析 ─────────────────────────────────────────────

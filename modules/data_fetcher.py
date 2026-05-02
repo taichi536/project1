@@ -153,6 +153,10 @@ def fetch_realtime_price(ticker: str) -> dict:
 def fetch_ohlcv(ticker: str, period: str = "6mo", interval: str = "1d") -> pd.DataFrame:
     t = normalize_ticker(ticker)
 
+    # SMA75を計算するには最低100日分必要。短期間を自動延長
+    min_days = {"1mo": "3mo", "2mo": "6mo", "3mo": "6mo"}
+    period = min_days.get(period, period)
+
     # J-Quantsが使えて日本株なら使用
     if is_japan_ticker(ticker) and interval == "1d":
         client = _get_jquants_client()
