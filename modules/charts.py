@@ -116,18 +116,144 @@ def build_main_chart(df: pd.DataFrame, ticker: str, sma_short: int = 25, sma_lon
         fig.add_trace(go.Scatter(x=df.index, y=df["Stoch_K"], line=dict(color="#e91e63", width=1, dash="dot"), name="%K"), row=4, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df["Stoch_D"], line=dict(color="#9c27b0", width=1, dash="dot"), name="%D"), row=4, col=1)
 
+    # レンジセレクター（チャートズーム）
     fig.update_layout(
         title=f"{ticker} テクニカルチャート",
-        height=900,
-        xaxis_rangeslider_visible=False,
+        height=920,
         paper_bgcolor="#0e1117",
         plot_bgcolor="#1a1d23",
         font=dict(color="#fafafa"),
         legend=dict(orientation="h", y=1.02, x=0),
+        xaxis=dict(
+            rangeslider=dict(visible=True, thickness=0.04, bgcolor="#1a1d23"),
+            rangeselector=dict(
+                bgcolor="#1a1d23",
+                activecolor="#26a69a",
+                buttons=[
+                    dict(count=1,  label="1日",  step="day",   stepmode="backward"),
+                    dict(count=5,  label="1週",  step="day",   stepmode="backward"),
+                    dict(count=1,  label="1ヶ月", step="month", stepmode="backward"),
+                    dict(count=3,  label="3ヶ月", step="month", stepmode="backward"),
+                    dict(count=6,  label="6ヶ月", step="month", stepmode="backward"),
+                    dict(count=1,  label="1年",  step="year",  stepmode="backward"),
+                    dict(step="all", label="全期間"),
+                ],
+                font=dict(color="#fafafa"),
+            ),
+            type="date",
+            gridcolor="rgba(255,255,255,0.05)",
+        ),
+    )
+    fig.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
+    fig.update_xaxes(gridcolor="rgba(255,255,255,0.05)", row=2, col=1)
+    fig.update_xaxes(gridcolor="rgba(255,255,255,0.05)", row=3, col=1)
+    fig.update_xaxes(gridcolor="rgba(255,255,255,0.05)", row=4, col=1)
+
+    return fig
+
+
+def build_montecarlo_chart(mc: dict, ticker: str) -> go.Figure:
+    """モンテカルロシミュレーション結果のファンチャート"""
+    horizon = mc["horizon"]
+    x = list(range(horizon + 1))
+    S0 = mc["S0"]
+
+    fig = go.Figure()
+
+    # 信頼区間の帯（5%〜95%）
+    fig.add_trace(go.Scatter(
+        x=x + x[::-1],
+        y=list(mc["p95"]) + list(mc["p5"])[::-1],
+        fill="toself",
+        fillcolor="rgba(100,181,246,0.12)",
+        line=dict(color="rgba(0,0,0,0)"),
+        name="90%信頼区間",
+        showlegend=True,
+    ))
+    # 25%〜75%帯
+    fig.add_trace(go.Scatter(
+        x=x + x[::-1],
+        y=list(mc["p75"]) + list(mc["p25"])[::-1],
+        fill="toself",
+        fillcolor="rgba(100,181,246,0.25)",
+        line=dict(color="rgba(0,0,0,0)"),
+        name="50%信頼区間",
+        showlegend=True,
+    ))
+    # 中央値
+    fig.add_trace(go.Scatter(
+        x=x, y=mc["p50"],
+        line=dict(color="#2196f3", width=2),
+        name="中央値（最も起こりやすい経路）",
+    ))
+    # 現在価格の水平線
+    fig.add_hline(
+        y=S0, line_dash="dash",
+        line_color="rgba(255,255,255,0.5)",
+        annotation_text=f"現在 {S0:,.0f}",
+        annotation_font_color="#fafafa",
+    )
+
+    fig.update_layout(
+        title=f"{ticker} モンテカルロシミュレーション（{horizon}日間）",
+        xaxis_title="経過日数",
+        yaxis_title="株価",
+        height=400,
+        paper_bgcolor="#0e1117",
+        plot_bgcolor="#1a1d23",
+        font=dict(color="#fafafa"),
+        legend=dict(orientation="h", y=1.08, x=0),
     )
     fig.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
     fig.update_xaxes(gridcolor="rgba(255,255,255,0.05)")
+    return fig
 
+
+def build_volatility_chart(vol_data: dict) -> go.Figure:
+    """ボラティリティ推移チャート（現在位置ハイライト付き）"""
+    rolling_vol = vol_data["rolling_vol"]
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=rolling_vol.index,
+        y=rolling_vol.values,
+        line=dict(color="#7e57c2", width=1.5),
+        name="20日ローリングボラティリティ（年率%）",
+        fill="tozeroy",
+        fillcolor="rgba(126,87,194,0.15)",
+    ))
+    # レジーム境界線
+    for pct, color, label in [
+        ("vol_p25", "rgba(38,166,154,0.6)",  "下位25%（低ボラ）"),
+        ("vol_p75", "rgba(255,213,79,0.6)",  "上位25%（高ボラ）"),
+        ("vol_p90", "rgba(239,83,80,0.6)",   "上位10%（危険）"),
+    ]:
+        fig.add_hline(
+            y=vol_data[pct],
+            line_dash="dot", line_color=color,
+            annotation_text=label,
+            annotation_font_color=color,
+            annotation_position="right",
+        )
+    # 現在値マーカー
+    fig.add_trace(go.Scatter(
+        x=[rolling_vol.index[-1]],
+        y=[vol_data["current_vol"]],
+        mode="markers",
+        marker=dict(size=12, color=vol_data["color"], symbol="circle"),
+        name=f"現在: {vol_data['current_vol']:.1f}%（{vol_data['regime']}）",
+    ))
+    fig.update_layout(
+        title="ボラティリティ推移（過去1年）",
+        yaxis_title="年率ボラティリティ (%)",
+        height=300,
+        paper_bgcolor="#0e1117",
+        plot_bgcolor="#1a1d23",
+        font=dict(color="#fafafa"),
+        legend=dict(orientation="h", y=1.08, x=0),
+    )
+    fig.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
+    fig.update_xaxes(gridcolor="rgba(255,255,255,0.05)")
     return fig
 
 

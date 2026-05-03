@@ -683,6 +683,135 @@ elif page == "📊 テクニカル分析":
                           f"-{risk['リスク率 (ATR×2)']:.1f}%", delta_color="inverse")
                 r4.metric("ATR", f"{risk['ATR']:.2f}")
 
+        # ── 金融工学リスク分析 ──────────────────────────────────
+        st.markdown("---")
+        st.markdown("### 📐 金融工学リスク分析")
+        st.caption("価格予測ではなく「リスクの大きさ」を数値化します。エントリー判断とポジションサイズ決定に使ってください。")
+
+        from modules.risk_metrics import calc_var, monte_carlo, volatility_regime
+        from modules.charts import build_montecarlo_chart, build_volatility_chart
+
+        _var = calc_var(df)
+        _vol = volatility_regime(df)
+        _mc  = monte_carlo(df, n_simulations=300, horizon=30)
+
+        # ボラティリティレジーム（最優先で表示）
+        if _vol:
+            st.markdown("#### 🌡️ ボラティリティレジーム（今は動きやすい時期か？）")
+            st.markdown(
+                f"""<div style="background:{_vol['color']}22;border:2px solid {_vol['color']};
+                    border-radius:12px;padding:16px;margin-bottom:8px">
+                    <div style="font-size:1.4em;font-weight:bold;color:{_vol['color']}">
+                        {_vol['emoji']} {_vol['regime']}
+                    </div>
+                    <div style="color:#ccc;margin-top:6px">{_vol['advice']}</div>
+                    <div style="background:rgba(0,0,0,0.3);border-radius:8px;padding:10px;margin-top:8px;color:#ffd54f">
+                        💡 <b>行動指針:</b> {_vol['action']}
+                    </div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+            vc1, vc2, vc3, vc4 = st.columns(4)
+            vc1.metric("現在のボラティリティ（年率）", f"{_vol['current_vol']:.1f}%",
+                       help="20日間の日次リターンの標準偏差を年率換算")
+            vc2.metric("過去比較（パーセンタイル）", f"{_vol['pct_rank']:.0f}位/100",
+                       help="過去1年間の中で何番目に高い水準か。75以上は高ボラ")
+            vc3.metric("推奨ポジションサイズ係数", f"×{_vol['position_size_factor']:.2f}",
+                       help="通常のポジションサイズにこの係数をかける。高ボラ時はリスクが大きいため小さくする")
+            vc4.metric("通常水準", f"{_vol['vol_p50']:.1f}%",
+                       help="過去1年の中央値（50パーセンタイル）")
+            with st.expander("📊 ボラティリティ推移チャートを見る", expanded=False):
+                st.caption("白点線を境に低・高ボラ圏を区分。現在位置（●）がどのゾーンにあるか確認してください。")
+                fig_vol = build_volatility_chart(_vol)
+                st.plotly_chart(fig_vol, use_container_width=True)
+
+        # VaR
+        if _var:
+            st.markdown("#### 📉 VaR（バリュー・アット・リスク）— 損失リスクの見積もり")
+            st.markdown("""
+<div style="background:#1a1d23;border-radius:8px;padding:12px;margin-bottom:12px;font-size:0.9em;color:#aaa">
+📖 <b>読み方:</b> 「95% VaR 1日 = -2.5%」なら、<b>翌日に-2.5%以上の損失が発生する確率は5%</b>。
+20回に1回はその水準を超える損失が起きると理解してください。<br>
+⚠️ <b>注意:</b> 暴落・ショック時はVaRを大幅に超えることがあります（CVaRも参照）。
+</div>""", unsafe_allow_html=True)
+
+            v1, v2, v3, v4 = st.columns(4)
+            v1.metric(
+                "📌 95% VaR（1日）",
+                f"{_var['var_95_1d_pct']*100:+.2f}%",
+                f"≈ ¥{_var['var_95_1d_yen']:,.0f}",
+                delta_color="inverse",
+                help="翌日に5%の確率でこれ以上損する。20回に1回の想定最悪値",
+            )
+            v2.metric(
+                "📌 99% VaR（1日）",
+                f"{_var['var_99_1d_pct']*100:+.2f}%",
+                f"≈ ¥{_var['var_99_1d_yen']:,.0f}",
+                delta_color="inverse",
+                help="翌日に1%の確率でこれ以上損する。100回に1回の想定最悪値",
+            )
+            v3.metric(
+                "🔥 CVaR（平均損失額）",
+                f"{_var['cvar_95_pct']*100:+.2f}%",
+                f"≈ ¥{_var['cvar_95_yen']:,.0f}",
+                delta_color="inverse",
+                help="VaRを超えた損失が発生したとき、平均でどれだけ損するか。VaRより悲観的な値。暴落時の参考に。",
+            )
+            v4.metric(
+                "📊 最大ドローダウン（過去）",
+                f"{_var['max_drawdown']*100:+.1f}%",
+                help="過去データの中で最も大きかった下落幅。これを超える損失には停止線を設けてください。",
+                delta_color="inverse",
+            )
+
+        # モンテカルロ
+        if _mc:
+            st.markdown("#### 🎲 モンテカルロシミュレーション（今後30日の価格の幅）")
+            st.markdown("""
+<div style="background:#1a1d23;border-radius:8px;padding:12px;margin-bottom:12px;font-size:0.9em;color:#aaa">
+📖 <b>読み方:</b> 過去のリターン・ボラティリティを使って300通りの価格経路をシミュレーション。<br>
+濃い青帯 = 50%の確率でこの範囲に収まる。薄い青帯 = 90%の確率でこの範囲。<br>
+⚠️ <b>重要:</b> <b>これは予測ではありません。</b> リスクの幅を理解するためのツールです。
+</div>""", unsafe_allow_html=True)
+
+            mc1, mc2, mc3, mc4 = st.columns(4)
+            mc1.metric("30日後 中央値", f"{_mc['final_median']:,.1f}",
+                       delta=f"{(_mc['final_median']/_mc['S0']-1)*100:+.1f}%",
+                       help="最も起こりやすい価格水準")
+            mc2.metric("上振れシナリオ（上位5%）", f"{_mc['final_p95']:,.1f}",
+                       delta=f"{(_mc['final_p95']/_mc['S0']-1)*100:+.1f}%",
+                       help="運良く上振れた場合")
+            mc3.metric("下振れシナリオ（下位5%）", f"{_mc['final_p5']:,.1f}",
+                       delta=f"{(_mc['final_p5']/_mc['S0']-1)*100:+.1f}%",
+                       delta_color="inverse",
+                       help="最悪ケースに近い水準（損切りラインの参考に）")
+            prob_color = "#26a69a" if _mc['prob_profit'] > 0.5 else "#ef5350"
+            mc4.metric("上昇確率（モデル推定）", f"{_mc['prob_profit']*100:.0f}%",
+                       help="30日後に現在より高い値を付ける確率（過去のドリフトに基づく推定）")
+
+            fig_mc = build_montecarlo_chart(_mc, ticker)
+            st.plotly_chart(fig_mc, use_container_width=True)
+
+            with st.expander("💡 モンテカルロシミュレーションの使い方（初心者向け）"):
+                st.markdown(f"""
+**このグラフの正しい使い方:**
+
+1. **下振れシナリオ（{_mc['final_p5']:,.0f}円）を損切りの参考に**
+   → モデルが推定する最悪ケースに近い価格。ここを下回るような損切りラインを設けると良い
+
+2. **上振れシナリオ（{_mc['final_p95']:,.0f}円）を利確の参考に**
+   → 楽観シナリオの上限。これを超えて目標を設定すると実現しにくい
+
+3. **幅が広い = リスクが高い**
+   → 帯の幅はボラティリティに比例します。帯が広いほど読みにくい相場
+
+4. **これは予測ツールではない**
+   → 決算・市場ショックなどのイベントリスクは捉えられません
+
+**「上昇確率 {_mc['prob_profit']*100:.0f}%」について:**
+過去のリターンの傾向（ドリフト）を反映しています。50%より高くても必ず上がるわけではありません。
+""")
+
         # AI分析タブ
         # ── ML分析 ─────────────────────────────────────────────
         st.markdown("### 🧠 機械学習分析")
