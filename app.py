@@ -79,7 +79,7 @@ with st.sidebar:
 
     page = st.radio(
         "メニュー",
-        ["🏠 ダッシュボード", "📊 テクニカル分析", "🔍 スクリーニング", "📋 ファンダメンタル分析", "🌐 マクロ・ニュース", "🔬 バックテスト", "📐 ポートフォリオ", "📔 投資日記", "🔔 通知設定"],
+        ["🏠 ダッシュボード", "🔭 銘柄スキャン", "📊 テクニカル分析", "🔍 スクリーニング", "📋 ファンダメンタル分析", "🌐 マクロ・ニュース", "🔬 バックテスト", "📐 ポートフォリオ", "📔 投資日記", "🔔 通知設定"],
         label_visibility="collapsed",
         key="menu_page",
     )
@@ -334,6 +334,124 @@ if page == "🏠 ダッシュボード":
                 st.rerun()
 
 
+# ─── 銘柄スキャン ────────────────────────────────────────────────────────────
+elif page == "🔭 銘柄スキャン":
+    from modules.universe import UNIVERSE, get_ticker_name
+    st.title("🔭 銘柄スキャン")
+    st.caption("銘柄コードを知らなくても、カテゴリを選ぶだけで「今買えそうな銘柄」を自動発見できます")
+
+    # カテゴリ選択
+    cat_col1, cat_col2 = st.columns([3, 1])
+    with cat_col1:
+        selected_cat = st.selectbox(
+            "スキャンするカテゴリを選択",
+            list(UNIVERSE.keys()),
+            help="スキャンしたい銘柄カテゴリを選択してください",
+        )
+    with cat_col2:
+        st.markdown("")
+        sort_by = st.selectbox("並べ替え", ["買いシグナル優先", "スコア順", "前日比順"])
+
+    cat_info = UNIVERSE[selected_cat]
+    st.info(f"📋 {cat_info['説明']}　（{len(cat_info['tickers'])}銘柄）")
+
+    scan_btn = st.button("🔍 スキャン実行", type="primary", use_container_width=True)
+
+    if scan_btn or f"scan_result_{selected_cat}" in st.session_state:
+        if scan_btn:
+            prog = st.progress(0, text="スキャン中...")
+            results = []
+            tickers = cat_info["tickers"]
+            for i, tk in enumerate(tickers):
+                prog.progress((i + 1) / len(tickers), text=f"スキャン中... {tk} ({i+1}/{len(tickers)})")
+                from modules.dashboard import scan_ticker
+                r = scan_ticker(tk)
+                r["企業名"] = get_ticker_name(selected_cat, tk)
+                results.append(r)
+            prog.empty()
+            st.session_state[f"scan_result_{selected_cat}"] = results
+
+        results = st.session_state.get(f"scan_result_{selected_cat}", [])
+        if not results:
+            st.info("スキャン結果がありません。「スキャン実行」ボタンを押してください。")
+        else:
+            # ソート
+            if sort_by == "買いシグナル優先":
+                sig_order = {"買い": 0, "様子見": 1, "売り": 2, "エラー": 3}
+                results = sorted(results, key=lambda r: (sig_order.get(r["シグナル"], 9), -r["スコア"]))
+            elif sort_by == "スコア順":
+                results = sorted(results, key=lambda r: -r["スコア"])
+            elif sort_by == "前日比順":
+                results = sorted(results, key=lambda r: -(r["前日比(%)"] or 0))
+
+            # 集計
+            buy_n = sum(1 for r in results if r["シグナル"] == "買い")
+            watch_n = sum(1 for r in results if r["シグナル"] == "様子見")
+            sell_n = sum(1 for r in results if r["シグナル"] == "売り")
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            sc1.metric("スキャン銘柄数", len(results))
+            sc2.metric("🟢 買い候補", buy_n)
+            sc3.metric("🟡 様子見", watch_n)
+            sc4.metric("🔴 売りシグナル", sell_n)
+
+            if buy_n == 0:
+                st.warning("現在このカテゴリに買いシグナルが出ている銘柄はありません。別カテゴリを試すか、時間をおいて再スキャンしてください。")
+
+            st.markdown("---")
+            st.markdown("### スキャン結果一覧")
+            st.caption("「📊 分析」ボタンで詳細なテクニカル分析を確認できます")
+
+            for r in results:
+                sig = r["シグナル"]
+                emoji = {"買い": "🟢", "売り": "🔴", "様子見": "🟡", "エラー": "⚫"}.get(sig, "⚪")
+                sig_bg = {"買い": "#1e3a2f", "売り": "#3a1e1e", "様子見": "#2a2a1a"}.get(sig, "#1a1d23")
+                border = {"買い": "#26a69a", "売り": "#ef5350", "様子見": "#888"}.get(sig, "#444")
+                price = r["現在値"]
+                chg = r["前日比(%)"]
+                chg_str = f"{chg:+.2f}%" if chg is not None else "N/A"
+                chg_color = "#26a69a" if (chg or 0) >= 0 else "#ef5350"
+                rsi = r["RSI"]
+                score = r["スコア"]
+
+                # スコアバー（±14範囲）
+                bar_pct = min(max((score + 14) / 28 * 100, 0), 100)
+                bar_color = "#26a69a" if score > 0 else ("#ef5350" if score < 0 else "#ffd54f")
+
+                col_name, col_price, col_chg, col_sig, col_rsi, col_reason, col_btn = st.columns([1.8, 1.4, 1.2, 1.5, 0.9, 3, 1])
+                col_name.markdown(f"**{r['ticker']}**  \n<small style='color:#999'>{r['企業名']}</small>", unsafe_allow_html=True)
+                col_price.markdown(f"**{price:,.2f}**" if price else "N/A")
+                col_chg.markdown(f"<span style='color:{chg_color}'>{chg_str}</span>", unsafe_allow_html=True)
+                col_sig.markdown(
+                    f"<span style='background:{sig_bg};border:1px solid {border};padding:2px 8px;border-radius:8px'>{emoji} **{sig}**</span>",
+                    unsafe_allow_html=True,
+                )
+                col_rsi.markdown(f"<small>RSI {rsi:.0f}</small>" if rsi else "<small>-</small>", unsafe_allow_html=True)
+                col_reason.markdown(f"<small style='color:#999'>{r['理由']}</small>", unsafe_allow_html=True)
+
+                if col_btn.button("📊 分析", key=f"scan_goto_{r['ticker']}", help="テクニカル分析で詳細確認"):
+                    st.session_state["current_ticker"] = r["ticker"]
+                    st.session_state["menu_page"] = "📊 テクニカル分析"
+                    st.rerun()
+
+                st.markdown(
+                    f'<div style="background:#1a1d23;border-radius:3px;height:4px;margin-bottom:8px">'
+                    f'<div style="width:{bar_pct}%;background:{bar_color};height:4px;border-radius:3px"></div></div>',
+                    unsafe_allow_html=True,
+                )
+
+            # 買い候補まとめ
+            buy_results = [r for r in results if r["シグナル"] == "買い"]
+            if buy_results:
+                st.markdown("---")
+                st.markdown("### 🟢 今すぐ検討できる買い候補")
+                st.caption("複数の指標が上昇を示している銘柄です。詳細分析の上で判断してください。")
+                for r in buy_results:
+                    st.markdown(
+                        f"- **{r['ticker']}**（{r['企業名']}）　現在値 {r['現在値']:,.2f} / "
+                        f"スコア {r['スコア']:+d} / {r['理由']}"
+                    )
+
+
 # ─── テクニカル分析 ───────────────────────────────────────────────────────────
 elif page == "📊 テクニカル分析":
     st.title("📊 テクニカル分析")
@@ -391,7 +509,7 @@ elif page == "📊 テクニカル分析":
                 df = fetch_ohlcv(ticker, period=period, interval=cfg["interval"])
                 df = compute_all(df, sma_short=sma_short, sma_long=sma_long)
                 signals = evaluate_signals(df, sma_short=sma_short, sma_long=sma_long)
-                verdict, score = overall_signal(signals)
+                verdict, score = overall_signal(signals, df=df, sma_long=sma_long)
             except Exception as e:
                 st.error(f"データ取得エラー: {e}")
                 st.stop()

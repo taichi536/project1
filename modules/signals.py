@@ -9,8 +9,9 @@ def _latest(df: pd.DataFrame, col: str):
 def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) -> list[dict]:
     signals = []
     row = df.iloc[-1]
+    close = row["Close"]
 
-    # --- 移動平均 ---
+    # --- 移動平均（トレンド方向） ---
     sma_s = _latest(df, f"SMA{sma_short}")
     sma_l = _latest(df, f"SMA{sma_long}")
     if sma_s is not None and sma_l is not None:
@@ -30,13 +31,13 @@ def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) 
         else:
             judge, score = "計算中", 0
         signals.append({
-            "指標": f"移動平均線",
+            "指標": "移動平均線",
             "値": f"短期 {sma_s:.0f} / 長期 {sma_l:.0f}",
             "判定": judge,
             "スコア": score,
         })
 
-    # --- RSI ---
+    # --- RSI（売買過熱感） ---
     rsi = _latest(df, "RSI")
     if rsi is not None:
         if rsi < 25:
@@ -51,7 +52,7 @@ def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) 
             judge, score = "中立域（40〜60）", 0
         signals.append({"指標": "RSI（売買過熱感）", "値": f"{rsi:.1f}", "判定": judge, "スコア": score})
 
-    # --- MACD ---
+    # --- MACD（モメンタム変化） ---
     macd = _latest(df, "MACD")
     macd_sig = _latest(df, "MACD_signal")
     macd_hist = _latest(df, "MACD_hist")
@@ -72,7 +73,7 @@ def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) 
             "スコア": score,
         })
 
-    # --- ボリンジャーバンド ---
+    # --- ボリンジャーバンド（過熱・反転ゾーン） ---
     bb_pct = _latest(df, "BB_pct")
     if bb_pct is not None:
         if bb_pct < 0:
@@ -92,19 +93,21 @@ def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) 
             "スコア": score,
         })
 
-    # --- 一目均衡表（雲） ---
+    # --- 一目均衡表（雲）: トレンド強度の確認 ---
     sa = _latest(df, "Ichimoku_senkou_a")
     sb = _latest(df, "Ichimoku_senkou_b")
-    close = row["Close"]
     if sa is not None and sb is not None:
         cloud_top = max(sa, sb)
         cloud_bot = min(sa, sb)
+        cloud_thickness = (cloud_top - cloud_bot) / cloud_bot * 100 if cloud_bot > 0 else 0
         if close > cloud_top:
-            judge, score = "雲の上 → 強い上昇トレンド", 1
+            judge = f"雲の上 → 強い上昇トレンド（雲厚 {cloud_thickness:.1f}%）"
+            score = 2 if cloud_thickness > 3 else 1
         elif close < cloud_bot:
-            judge, score = "雲の下 → 強い下落トレンド", -1
+            judge = f"雲の下 → 強い下落トレンド（雲厚 {cloud_thickness:.1f}%）"
+            score = -2 if cloud_thickness > 3 else -1
         else:
-            judge, score = "雲の中 → 方向感なし", 0
+            judge, score = "雲の中 → 方向感なし（トレンド転換期）", 0
         signals.append({
             "指標": "一目均衡表（雲）",
             "値": f"雲 {cloud_bot:.0f}〜{cloud_top:.0f} / 現在値 {close:.0f}",
@@ -112,44 +115,47 @@ def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) 
             "スコア": score,
         })
 
-    # --- ストキャスティクス ---
-    stk = _latest(df, "Stoch_K")
-    std = _latest(df, "Stoch_D")
-    if stk is not None and std is not None:
-        if stk < 20 and stk > std:
-            judge, score = "売られすぎ＋上昇転換", 2
-        elif stk < 20:
-            judge, score = "売られすぎ圏", 1
-        elif stk > 80 and stk < std:
-            judge, score = "買われすぎ＋下落転換", -2
-        elif stk > 80:
-            judge, score = "買われすぎ圏", -1
+    # --- 出来高トレンド（OBV）: ストキャスティクスを置き換え ---
+    # ストキャスティクスはRSIと同じ「過熱感」を測定するため重複。
+    # OBVは「出来高が価格変動を支持しているか」という独立した情報を提供する。
+    obv_series = df["OBV"].dropna() if "OBV" in df.columns else pd.Series(dtype=float)
+    if len(obv_series) >= 10:
+        obv_recent = obv_series.iloc[-5:].mean()
+        obv_prev = obv_series.iloc[-10:-5].mean()
+        obv_chg = (obv_recent - obv_prev) / abs(obv_prev) * 100 if obv_prev != 0 else 0
+        if obv_chg > 10:
+            judge, score = "大口が買い積み増し中 → 強い買い圧力", 2
+        elif obv_chg > 3:
+            judge, score = "出来高が上昇をサポート → 信頼性高い上昇", 1
+        elif obv_chg < -10:
+            judge, score = "大口が売り急ぎ中 → 強い売り圧力", -2
+        elif obv_chg < -3:
+            judge, score = "出来高が下落をサポート → 信頼性高い下落", -1
         else:
-            judge, score = "中立", 0
+            judge, score = "出来高変化なし → 信頼性に欠ける動き", 0
         signals.append({
-            "指標": "ストキャスティクス",
-            "値": f"%K {stk:.0f} / %D {std:.0f}",
+            "指標": "出来高トレンド（OBV）",
+            "値": f"5日平均変化 {obv_chg:+.1f}%",
             "判定": judge,
             "スコア": score,
         })
 
-    # --- VWAP ---
+    # --- VWAP（出来高加重平均: 機関投資家の基準価格） ---
     vwap = _latest(df, "VWAP")
     if vwap is not None:
-        close = row["Close"]
         pct = (close - vwap) / vwap * 100
         if close > vwap * 1.03:
             judge, score = "VWAPより3%以上高い → 過熱・反落注意", -2
         elif close > vwap * 1.01:
             judge, score = "VWAPより上 → 上昇モメンタム継続", 1
         elif close < vwap * 0.97:
-            judge, score = "VWAPより3%以上低い → 売られすぎ・反発期待", 2
+            judge, score = "VWAPより3%以上低い → 割安・反発期待", 2
         elif close < vwap * 0.99:
             judge, score = "VWAPより下 → 下落モメンタム", -1
         else:
             judge, score = "VWAP付近 → 均衡状態", 0
         signals.append({
-            "指標": "VWAP（出来高加重平均）",
+            "指標": "VWAP（機関投資家の基準価格）",
             "値": f"VWAP {vwap:.1f} / 現在値との乖離 {pct:+.1f}%",
             "判定": judge,
             "スコア": score,
@@ -158,14 +164,45 @@ def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) 
     return signals
 
 
-def overall_signal(signals: list[dict]) -> tuple[str, int]:
+def overall_signal(
+    signals: list[dict],
+    df: pd.DataFrame = None,
+    sma_long: int = 75,
+) -> tuple[str, int]:
+    """
+    シグナルを総合判定する。
+    dfを渡すとトレンドフィルターが有効になる。
+
+    トレンドフィルターの役割:
+    長期移動平均より大幅に下にある銘柄（下落トレンド）で買いシグナルが出ても、
+    それは「落ちるナイフをつかむ」リスクが高い。スコアにペナルティを加える。
+    """
     total = sum(s["スコア"] for s in signals)
     max_score = len(signals) * 2
-    pct = total / max_score if max_score > 0 else 0
-    # 閾値を30%に下げて感度を上げる
-    if pct >= 0.3:
+    if max_score == 0:
+        return "様子見", 0
+
+    # トレンドフィルター
+    trend_adj = 0
+    if df is not None:
+        sma_col = f"SMA{sma_long}"
+        _sma = df[sma_col].dropna() if sma_col in df.columns else pd.Series(dtype=float)
+        if len(_sma) > 0:
+            _gap = (df["Close"].iloc[-1] - _sma.iloc[-1]) / _sma.iloc[-1]
+            if _gap < -0.07:
+                # 長期MAより7%以上下: 下落トレンド確認 → 買いシグナルに厳しくする
+                trend_adj = -2
+            elif _gap < -0.03:
+                trend_adj = -1
+            elif _gap > 0.07:
+                # 長期MAより7%以上上: 上昇トレンド確認 → 押し目買いを支持
+                trend_adj = 1
+
+    pct = (total + trend_adj) / max_score
+
+    if pct >= 0.30:
         return "買い", total
-    elif pct <= -0.3:
+    elif pct <= -0.30:
         return "売り", total
     else:
         return "様子見", total
@@ -182,27 +219,19 @@ def generate_action_plan(
     atr = df["ATR"].dropna().iloc[-1] if "ATR" in df.columns else close * 0.02
     rsi = df["RSI"].dropna().iloc[-1] if "RSI" in df.columns else 50
 
-    # 直近の抵抗線・支持線（簡易：20日高値・安値）
     recent = df.tail(20)
     resistance = recent["High"].max()
     support = recent["Low"].min()
 
-    # エントリー価格
     entry = close
-
-    # 利確ライン（抵抗線 or ATR×3）
     target1 = min(resistance, close + atr * 2)
     target2 = close + atr * 4
-
-    # 損切りライン（支持線 or ATR×1.5）
     stop = max(support, close - atr * 1.5)
 
-    # リスクリワード比
     risk = close - stop
     reward = target1 - close
     rr = reward / risk if risk > 0 else 0
 
-    # 推奨タイミング
     if verdict == "買い":
         timing = "✅ 今が買いのタイミングです"
         timing_detail = "複数の指標が上昇を示しています。エントリーを検討してください。"
@@ -210,7 +239,6 @@ def generate_action_plan(
         timing = "⚠️ 今は買わずに待ちましょう"
         timing_detail = "下落サインが出ています。保有中なら売りを検討してください。"
     else:
-        # 様子見でも「次にどうなったら動くか」を示す
         timing = "⏳ 様子見 — 次のサインを待ちましょう"
         if rsi < 45:
             timing_detail = f"RSIが{rsi:.0f}で低め。このまま下落が続けば買い候補になります。"
@@ -219,7 +247,6 @@ def generate_action_plan(
         else:
             timing_detail = "明確なトレンドが出るまで待つのが賢明です。急がないことが大切です。"
 
-    # 「様子見」のときのトリガー条件
     buy_trigger = f"RSIが35以下 かつ 株価が{support:.0f}円付近で反発したとき"
     sell_trigger = f"RSIが70以上 または 株価が{stop:.0f}円を割ったとき"
 

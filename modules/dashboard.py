@@ -24,7 +24,7 @@ def scan_ticker(ticker: str) -> dict:
         df = fetch_ohlcv(ticker, period="3mo")
         df = compute_all(df)
         signals = evaluate_signals(df)
-        verdict, score = overall_signal(signals)
+        verdict, score = overall_signal(signals, df=df)
 
         # fast_info で最新価格を上書き（遅延を最小化）
         rt = fetch_realtime_price(ticker)
