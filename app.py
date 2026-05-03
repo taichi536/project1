@@ -556,9 +556,9 @@ elif page == "📊 テクニカル分析":
         col_atr.metric("ATR（値幅目安）", f"{atr_val:.2f}" if atr_val else "N/A",
                        help="1日の平均的な値動き幅。損切り幅の基準に使います")
 
-        # チャート
+        # チャート（マウスホイール・ピンチでズーム可能）
         fig = build_main_chart(df, ticker, sma_short=sma_short, sma_long=sma_long)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
         # ── チャートの見方ガイド ──────────────────────────────
         with st.expander("📖 チャートの見方（各線・指標の説明）", expanded=False):
@@ -723,7 +723,7 @@ elif page == "📊 テクニカル分析":
             with st.expander("📊 ボラティリティ推移チャートを見る", expanded=False):
                 st.caption("白点線を境に低・高ボラ圏を区分。現在位置（●）がどのゾーンにあるか確認してください。")
                 fig_vol = build_volatility_chart(_vol)
-                st.plotly_chart(fig_vol, use_container_width=True)
+                st.plotly_chart(fig_vol, use_container_width=True, config={"scrollZoom": True})
 
         # VaR
         if _var:
@@ -790,7 +790,7 @@ elif page == "📊 テクニカル分析":
                        help="30日後に現在より高い値を付ける確率（過去のドリフトに基づく推定）")
 
             fig_mc = build_montecarlo_chart(_mc, ticker)
-            st.plotly_chart(fig_mc, use_container_width=True)
+            st.plotly_chart(fig_mc, use_container_width=True, config={"scrollZoom": True})
 
             with st.expander("💡 モンテカルロシミュレーションの使い方（初心者向け）"):
                 st.markdown(f"""
@@ -892,7 +892,7 @@ elif page == "📊 テクニカル分析":
                         font=dict(color="#fafafa"), height=300,
                         showlegend=False, coloraxis_showscale=False,
                     )
-                    st.plotly_chart(fig_fi, use_container_width=True)
+                    st.plotly_chart(fig_fi, use_container_width=True, config={"scrollZoom": True})
 
         st.markdown("---")
         ai_tab1, ai_tab2 = st.tabs(["🤖 テクニカルAI解説", "🌐 マクロ・ニュース影響"])
@@ -1226,7 +1226,7 @@ elif page == "🔬 バックテスト":
             col.metric(label, val, delta)
 
         fig_bt = build_backtest_chart(result["portfolio"], result["trades"], bt_ticker)
-        st.plotly_chart(fig_bt, use_container_width=True)
+        st.plotly_chart(fig_bt, use_container_width=True, config={"scrollZoom": True})
 
         if not result["trades"].empty:
             st.markdown("### 📋 取引履歴")
@@ -1624,41 +1624,90 @@ elif page == "🔔 通知設定":
 
     with ntab1:
         st.markdown("### Telegram Bot の設定手順")
-        st.markdown("""
-**ステップ1: Bot を作る（1分）**
-1. スマホの Telegram で [@BotFather](https://t.me/BotFather) を開く
-2. `/newbot` と送信
-3. Bot名を入力（例: `MyStockBot`）
-4. Bot Token が発行される（例: `1234567890:ABCdef...`）
+        with st.expander("📋 手順を見る（まだ設定していない方）", expanded=False):
+            st.markdown("""
+**ステップ1: Bot を作る（約1分）**
+1. スマホの Telegram で **[@BotFather](https://t.me/BotFather)** を検索して開く
+2. `Start` または `/start` と送信
+3. `/newbot` と送信
+4. Bot名を入力（例: `MyStockBot`）
+5. Bot Token が発行される（例: `1234567890:ABCdefGHI...`） → 下の欄に貼り付け
 
 **ステップ2: Chat ID を取得する**
-1. 作った Bot に何かメッセージを送る
-2. ブラウザで以下のURLを開く（tokenを置き換える）
-   ```
-   https://api.telegram.org/bot<TOKEN>/getUpdates
-   ```
-3. `"chat":{"id": 123456789}` の数字が Chat ID
+1. 作った Bot のページを開き、**「START」または何かメッセージを送る**（← 重要！先に送らないとIDが取得できません）
+2. 下の「🔍 Chat ID を自動取得」ボタンを押す
+   - または手動取得: `https://api.telegram.org/bot【TOKEN】/getUpdates` をブラウザで開き、`"chat":{"id": 数字}` の数字をコピー
+
+**よくある失敗:**
+- ❌ Bot にメッセージを送る前に Chat ID 取得 → `result: []` が返ってきて取得できない
+- ❌ Token に余分なスペースが入っている → コピー時に注意
 """)
 
         st.markdown("### 認証情報を入力")
         tg_token = st.text_input("Bot Token", type="password",
                                   value=os.getenv("TELEGRAM_BOT_TOKEN", ""),
                                   placeholder="1234567890:ABCdefGHI...")
-        tg_chat = st.text_input("Chat ID",
-                                 value=os.getenv("TELEGRAM_CHAT_ID", ""),
+        tg_chat_default = os.getenv("TELEGRAM_CHAT_ID", "")
+        tg_chat = st.text_input("Chat ID（わからない場合は下のボタンで自動取得）",
+                                 value=tg_chat_default,
                                  placeholder="123456789")
 
-        if st.button("✅ Telegram接続テスト", type="primary"):
-            if tg_token and tg_chat:
-                from modules.notifier import _telegram
-                ok = _telegram(tg_token, tg_chat,
-                                "✅ 株式分析ツールからの接続テストです！通知設定が完了しました。")
-                if ok:
-                    st.success("送信成功！スマホを確認してください 📱")
-                else:
-                    st.error("送信失敗。Token と Chat ID を確認してください。")
+        # Chat ID 自動取得ボタン
+        if st.button("🔍 Chat ID を自動取得（Bot に先にメッセージを送ってから押す）"):
+            if not tg_token:
+                st.warning("先に Bot Token を入力してください")
             else:
-                st.warning("Token と Chat ID を入力してください")
+                try:
+                    import requests as _req
+                    _res = _req.get(
+                        f"https://api.telegram.org/bot{tg_token.strip()}/getUpdates",
+                        timeout=10,
+                    )
+                    _data = _res.json()
+                    if not _data.get("ok"):
+                        st.error(f"Telegram APIエラー: {_data.get('description', '不明')}\n\nToken が正しいか確認してください。")
+                    elif not _data.get("result"):
+                        st.warning("""Chat ID が見つかりませんでした。
+
+**次の手順を試してください:**
+1. Telegram で作った Bot を検索して開く
+2. 「START」ボタンを押す（または「/start」と送信）
+3. もう一度このボタンを押す""")
+                    else:
+                        _updates = _data["result"]
+                        _found_ids = []
+                        for _upd in _updates:
+                            _msg = _upd.get("message") or _upd.get("channel_post", {})
+                            _chat = _msg.get("chat", {})
+                            _cid = _chat.get("id")
+                            _cname = _chat.get("first_name") or _chat.get("title") or _chat.get("username", "")
+                            if _cid and _cid not in [x[0] for x in _found_ids]:
+                                _found_ids.append((_cid, _cname))
+                        if _found_ids:
+                            st.success(f"Chat ID を取得しました！")
+                            for _cid, _cname in _found_ids:
+                                st.info(f"👤 {_cname}　Chat ID: **`{_cid}`**")
+                            st.markdown("上の数字を「Chat ID」欄にコピーしてください。")
+                        else:
+                            st.warning("メッセージは届いていますが、Chat ID を抽出できませんでした。手動で確認してください。")
+                except Exception as _e:
+                    st.error(f"取得エラー: {_e}")
+
+        st.markdown("---")
+
+        col_tg1, col_tg2 = st.columns(2)
+        with col_tg1:
+            if st.button("✅ Telegram接続テスト", type="primary"):
+                if tg_token and tg_chat:
+                    from modules.notifier import _telegram
+                    ok = _telegram(tg_token, tg_chat,
+                                    "✅ 株式分析ツールからの接続テストです！通知設定が完了しました。")
+                    if ok:
+                        st.success("送信成功！スマホを確認してください 📱")
+                    else:
+                        st.error("送信失敗。Token と Chat ID を確認してください。")
+                else:
+                    st.warning("Token と Chat ID を入力してください")
 
         st.markdown("---")
         st.markdown("### 環境変数に設定する（常時起動用）")

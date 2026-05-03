@@ -153,9 +153,19 @@ def fetch_realtime_price(ticker: str) -> dict:
 def fetch_ohlcv(ticker: str, period: str = "6mo", interval: str = "1d") -> pd.DataFrame:
     t = normalize_ticker(ticker)
 
-    # SMA75を計算するには最低100日分必要。短期間を自動延長
-    min_days = {"1mo": "3mo", "2mo": "6mo", "3mo": "6mo"}
-    period = min_days.get(period, period)
+    # SMA75を計算するには最低100日分必要。短期間を自動延長（日足のみ）
+    if interval == "1d":
+        min_days = {"1mo": "3mo", "2mo": "6mo", "3mo": "6mo"}
+        period = min_days.get(period, period)
+
+    # yfinance非標準の期間（14d, 30d, 60d等）はstart日付に変換
+    _non_standard = {
+        "3d": 3, "7d": 7, "14d": 14, "21d": 21,
+        "30d": 30, "45d": 45, "60d": 60, "90d": 90,
+    }
+    _start_date = None
+    if period in _non_standard:
+        _start_date = (datetime.now() - timedelta(days=_non_standard[period])).strftime("%Y-%m-%d")
 
     # J-Quantsが使えて日本株なら使用
     if is_japan_ticker(ticker) and interval == "1d":
@@ -166,14 +176,17 @@ def fetch_ohlcv(ticker: str, period: str = "6mo", interval: str = "1d") -> pd.Da
                 date_to = datetime.now().strftime("%Y-%m-%d")
                 period_map = {"1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "2y": 730, "5y": 1825}
                 days = period_map.get(period, 180)
-                date_from = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+                date_from = _start_date or (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
                 df = client.get_price_range(code, date_from, date_to)
                 if not df.empty and all(c in df.columns for c in ["Open", "High", "Low", "Close"]):
                     return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
             except Exception:
                 pass  # フォールバック
 
-    df = yf.download(t, period=period, interval=interval, auto_adjust=True, progress=False)
+    if _start_date:
+        df = yf.download(t, start=_start_date, interval=interval, auto_adjust=True, progress=False)
+    else:
+        df = yf.download(t, period=period, interval=interval, auto_adjust=True, progress=False)
     if df.empty:
         raise ValueError(f"データを取得できませんでした: {ticker}")
     df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
