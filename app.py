@@ -37,15 +37,51 @@ with st.sidebar:
 
     # 市場ステータス
     mst = market_status()
-    st.markdown(f"**東証** {mst['jp_label']}　**NYSE** {mst['us_label']}")
-    st.caption(mst["data_delay_note"])
+    jp_color = "#26a69a" if "開場" in mst["jp_label"] else "#888"
+    us_color = "#26a69a" if "開場" in mst["us_label"] else "#888"
+    st.markdown(
+        f"<span style='color:{jp_color}'>●</span> **東証** {mst['jp_label']}　"
+        f"<span style='color:{us_color}'>●</span> **NYSE** {mst['us_label']}",
+        unsafe_allow_html=True,
+    )
     st.caption(mst["now_jst"])
+    st.markdown("---")
+
+    # ── グローバル銘柄選択（全ページ共通） ───────────────────────────────
+    _wl = load_watchlist()
+    st.markdown("**📌 分析銘柄**")
+    _ticker_options = _wl + ["✏️ 直接入力"]
+    _cur = st.session_state.get("current_ticker", _wl[0] if _wl else "")
+    _def_idx = _wl.index(_cur) if _cur in _wl else len(_wl)
+    _sel = st.selectbox(
+        "銘柄を選択",
+        _ticker_options,
+        index=_def_idx,
+        label_visibility="collapsed",
+        key="sidebar_ticker_select",
+    )
+    if _sel == "✏️ 直接入力":
+        _manual = st.text_input(
+            "銘柄コード（例: 7203 / AAPL）",
+            value="" if _cur in _wl else _cur,
+            label_visibility="collapsed",
+            placeholder="7203 / AAPL",
+        )
+        if _manual:
+            st.session_state["current_ticker"] = _manual.strip().upper()
+    else:
+        st.session_state["current_ticker"] = _sel
+
+    _ct = st.session_state.get("current_ticker", "")
+    if _ct:
+        st.caption(f"選択中: **{_ct}**　← 全ページで共通")
     st.markdown("---")
 
     page = st.radio(
         "メニュー",
         ["🏠 ダッシュボード", "📊 テクニカル分析", "🔍 スクリーニング", "📋 ファンダメンタル分析", "🌐 マクロ・ニュース", "🔬 バックテスト", "📐 ポートフォリオ", "📔 投資日記", "🔔 通知設定"],
         label_visibility="collapsed",
+        key="menu_page",
     )
     st.markdown("---")
 
@@ -76,15 +112,10 @@ with st.sidebar:
     if month in cost_data:
         m = cost_data[month]
         usd = m.get("estimated_usd", 0)
-        jpy = usd * 150  # 概算
+        jpy = usd * 150
         cached = m.get("cached_calls", 0)
         total = m.get("calls", 0)
-        st.caption(f"今月のAI使用: {total}回（うちキャッシュ {cached}回）")
-        st.caption(f"推定コスト: ${usd:.3f}（約¥{jpy:.0f}）")
-
-    st.markdown("---")
-    st.caption("日本株: 7203 → 7203.T 自動変換")
-    st.caption("米国株: AAPL, MSFT など")
+        st.caption(f"今月のAI: {total}回（キャッシュ{cached}回）/ 推定¥{jpy:.0f}")
 
 
 # ─── ダッシュボード ───────────────────────────────────────────────────────────
@@ -183,29 +214,124 @@ if page == "🏠 ダッシュボード":
             price_str = f"{price:,.2f}" if price else "N/A"
             rsi_str = f"{rsi:.0f}" if rsi else "-"
             changed_badge = " 🔔NEW" if r.get("シグナル変化") else ""
+            sig_bg = {"買い": "#1e3a2f", "売り": "#3a1e1e", "様子見": "#2e2a14"}.get(sig, "#1a1d23")
 
             with st.container():
-                c1, c2, c3, c4, c5, c6 = st.columns([1.5, 1.5, 2, 1, 1, 3])
+                c1, c2, c3, c4, c5, c6, c7 = st.columns([1.5, 1.5, 1.5, 1.5, 1, 2.5, 1])
                 c1.markdown(f"**{r['ticker']}**{changed_badge}")
-                c2.markdown(f"{price_str}")
+                c2.markdown(f"**{price_str}**")
                 c3.markdown(f"<span style='{chg_color}'>{chg_str}</span>", unsafe_allow_html=True)
-                c4.markdown(f"{emoji} **{sig}**")
-                c5.markdown(f"RSI {rsi_str}")
-                c6.markdown(f"<small>{r['理由']}</small>", unsafe_allow_html=True)
+                c4.markdown(
+                    f"<span style='background:{sig_bg};padding:2px 8px;border-radius:8px'>"
+                    f"{emoji} **{sig}**</span>",
+                    unsafe_allow_html=True,
+                )
+                c5.markdown(f"<small>RSI {rsi_str}</small>", unsafe_allow_html=True)
+                c6.markdown(f"<small style='color:#999'>{r['理由']}</small>", unsafe_allow_html=True)
+                if c7.button("📊 分析", key=f"goto_{r['ticker']}", help=f"{r['ticker']}をテクニカル分析で開く"):
+                    st.session_state["current_ticker"] = r["ticker"]
+                    st.session_state["menu_page"] = "📊 テクニカル分析"
+                    st.rerun()
 
             # スコアバー
-            bar_pct = min(max((score + 12) / 24 * 100, 0), 100)
+            bar_pct = min(max((score + 14) / 28 * 100, 0), 100)
             bar_color = "#26a69a" if score > 0 else ("#ef5350" if score < 0 else "#ffd54f")
             st.markdown(
-                f"""<div style="background:#1a1d23;border-radius:4px;height:6px;margin-bottom:8px">
-                <div style="width:{bar_pct}%;background:{bar_color};height:6px;border-radius:4px"></div>
+                f"""<div style="background:#1a1d23;border-radius:4px;height:5px;margin-bottom:6px">
+                <div style="width:{bar_pct}%;background:{bar_color};height:5px;border-radius:4px"></div>
                 </div>""",
                 unsafe_allow_html=True,
             )
 
-        # 詳細分析へのリンク案内
-        st.markdown("---")
-        st.info("💡 詳しく分析したい銘柄は左メニューの「📊 テクニカル分析」で確認できます")
+    # ── 保有銘柄の売り時チェック ──────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("## 📊 保有銘柄の売り時チェック")
+    st.caption("投資日記に記録した保有ポジションに対して、今売るべきかを自動判定します")
+
+    from modules.data_fetcher import fetch_realtime_price
+    _trades_df = get_trades(limit=10000)
+    _pnl_data = calc_pnl(_trades_df)
+    _positions = _pnl_data["positions"]
+
+    if not _positions:
+        st.info("📝 保有銘柄がありません。「📔 投資日記」タブで購入記録を入力すると、ここで売り時を自動チェックします。")
+    else:
+        for _tk, _lots in _positions.items():
+            _total_qty = sum(lot[2] for lot in _lots)
+            _avg_price = sum(lot[1] * lot[2] for lot in _lots) / _total_qty
+
+            # 日記から損切り・目標価格を取得
+            _buys = _trades_df[(_trades_df["ticker"].str.upper() == _tk.upper()) & (_trades_df["action"] == "買い")]
+            _stop = _target = None
+            if not _buys.empty:
+                _last_buy = _buys.iloc[0]
+                _stop = _last_buy["stop_loss"] if pd.notna(_last_buy["stop_loss"]) and _last_buy["stop_loss"] > 0 else None
+                _target = _last_buy["target_price"] if pd.notna(_last_buy["target_price"]) and _last_buy["target_price"] > 0 else None
+
+            # 現在価格を取得
+            try:
+                _price_info = fetch_realtime_price(_tk)
+                _cur_price = _price_info.get("price")
+            except Exception:
+                _cur_price = None
+
+            _pnl_pct = (_cur_price - _avg_price) / _avg_price * 100 if _cur_price else None
+            _pnl_yen = (_cur_price - _avg_price) * _total_qty if _cur_price else None
+
+            # 売り時判定
+            _urgency = "🟡 様子見継続"
+            _urgency_detail = "現在のポジションを維持してください。"
+            _card_color = "#2e2a14"
+            _border_color = "#ffd54f"
+
+            if _cur_price and _stop and _cur_price <= _stop:
+                _urgency = "🚨 損切りライン到達！今すぐ売ることを検討"
+                _urgency_detail = f"損切りライン（{_stop:,.0f}円）を下回りました。ルール通り損切りを実行してください。"
+                _card_color = "#3a1a1a"
+                _border_color = "#ef5350"
+            elif _cur_price and _target and _cur_price >= _target:
+                _urgency = "🎯 目標価格達成！利確を検討"
+                _urgency_detail = f"目標価格（{_target:,.0f}円）に到達しました。利確のタイミングです。"
+                _card_color = "#1a3a2a"
+                _border_color = "#26a69a"
+            elif _pnl_pct and _pnl_pct <= -10:
+                _urgency = "⚠️ 含み損 -10% 超 損切り要検討"
+                _urgency_detail = f"含み損が{_pnl_pct:.1f}%に拡大。損切りラインを確認し、必要なら実行してください。"
+                _card_color = "#3a2214"
+                _border_color = "#ff7043"
+            elif _pnl_pct and _pnl_pct >= 20:
+                _urgency = "💰 含み益 +20% 超 一部利確も選択肢"
+                _urgency_detail = f"含み益が{_pnl_pct:.1f}%です。利益確保のため一部売却も検討できます。"
+                _card_color = "#1a3a2a"
+                _border_color = "#26a69a"
+
+            _pnl_str = f"¥{_pnl_yen:+,.0f}（{_pnl_pct:+.1f}%）" if _pnl_yen is not None else "取得中..."
+            _pnl_color = "#26a69a" if (_pnl_pct or 0) >= 0 else "#ef5350"
+            _price_str = f"{_cur_price:,.2f}" if _cur_price else "取得中..."
+
+            st.markdown(
+                f"""<div style="background:{_card_color};border:1px solid {_border_color};
+                    border-radius:12px;padding:16px;margin-bottom:12px">
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                        <div>
+                            <span style="font-size:1.2em;font-weight:bold">{_tk}</span>
+                            <span style="color:#999;margin-left:12px;font-size:0.9em">
+                                {_total_qty}株 @ 取得{_avg_price:,.0f}円 → 現在<b>{_price_str}</b>
+                            </span>
+                        </div>
+                        <span style="color:{_pnl_color};font-weight:bold">{_pnl_str}</span>
+                    </div>
+                    <div style="margin-top:10px;font-size:1.05em;font-weight:bold;color:{_border_color}">{_urgency}</div>
+                    <div style="color:#ccc;margin-top:4px;font-size:0.9em">{_urgency_detail}</div>
+                    {'<div style="color:#888;font-size:0.85em;margin-top:6px">損切ライン: ' + f'{_stop:,.0f}円' + '</div>' if _stop else ''}
+                    {'<div style="color:#888;font-size:0.85em">目標価格: ' + f'{_target:,.0f}円' + '</div>' if _target else ''}
+                </div>""",
+                unsafe_allow_html=True,
+            )
+            if st.button(f"📊 {_tk} を詳しく分析", key=f"sell_goto_{_tk}"):
+                st.session_state["current_ticker"] = _tk
+                st.session_state["menu_page"] = "📊 テクニカル分析"
+                st.rerun()
 
 
 # ─── テクニカル分析 ───────────────────────────────────────────────────────────
@@ -214,48 +340,55 @@ elif page == "📊 テクニカル分析":
 
     watchlist = load_watchlist()
 
-    # ── 銘柄選択（ウォッチリスト or 手入力） ──────────────────────────────
-    sel_col1, sel_col2 = st.columns([3, 1])
-    with sel_col1:
-        # ウォッチリストから選択
-        options = watchlist + ["✏️ 直接入力する"]
-        default_idx = 0
-        if st.session_state.get("ta_ticker") in watchlist:
-            default_idx = watchlist.index(st.session_state["ta_ticker"])
-        selected = st.selectbox(
-            "銘柄を選択（ウォッチリストから）",
-            options,
-            index=default_idx,
-        )
-    with sel_col2:
+    # ── 取引モード選択 ────────────────────────────────────────────────────
+    MODE_CONFIG = {
+        "📅 中長期（日足）":   {"interval": "1d",  "periods": ["6mo", "1y", "2y"],         "period_labels": {"6mo": "6ヶ月", "1y": "1年", "2y": "2年"},           "sma_default": (25, 75),  "period_default": 0},
+        "📈 スイング（1時間足）": {"interval": "1h",  "periods": ["5d", "14d", "30d", "60d"], "period_labels": {"5d": "5日", "14d": "2週間", "30d": "1ヶ月", "60d": "2ヶ月"}, "sma_default": (9, 21),   "period_default": 1},
+        "⚡ デイトレ（5分足）": {"interval": "5m",  "periods": ["1d", "3d", "5d"],          "period_labels": {"1d": "今日", "3d": "3日間", "5d": "5日間"},         "sma_default": (5, 20),   "period_default": 1},
+    }
+
+    mode = st.radio(
+        "取引モード",
+        list(MODE_CONFIG.keys()),
+        horizontal=True,
+        help="デイトレ=当日〜数日の短期売買 / スイング=数日〜数週間 / 中長期=数ヶ月以上",
+    )
+    cfg = MODE_CONFIG[mode]
+
+    if mode == "⚡ デイトレ（5分足）":
+        st.info("⚡ **デイトレモード**: 5分足チャートを表示します。当日〜5日間のデータを使用。VWAP（白点線）が特に重要な指標になります。")
+    elif mode == "📈 スイング（1時間足）":
+        st.info("📈 **スイングモード**: 1時間足チャートを表示します。数日〜数週間のトレードに適しています。")
+
+    # ── 銘柄はサイドバーのグローバル選択を使用 ────────────────────────
+    ticker = st.session_state.get("current_ticker", "")
+    _ta_col1, _ta_col2 = st.columns([3, 1])
+    with _ta_col1:
+        if ticker:
+            st.success(f"📌 分析銘柄: **{ticker}**　　← サイドバーで変更できます")
+        else:
+            st.warning("サイドバーで銘柄を選択してください")
+    with _ta_col2:
         period = st.selectbox(
             "期間",
-            ["3mo", "6mo", "1y", "2y"],
-            index=1,
-            format_func=lambda x: {"3mo": "3ヶ月", "6mo": "6ヶ月", "1y": "1年", "2y": "2年"}[x],
+            cfg["periods"],
+            index=cfg["period_default"],
+            format_func=lambda x: cfg["period_labels"].get(x, x),
         )
 
-    if selected == "✏️ 直接入力する":
-        ticker = st.text_input("銘柄コードを入力", placeholder="例: 7203 / AAPL")
-    else:
-        ticker = selected
-
-    if ticker:
-        st.session_state["ta_ticker"] = ticker
-
     # 詳細設定（折りたたみ）
-    sma_short, sma_long = 25, 75
+    sma_short, sma_long = cfg["sma_default"]
     with st.expander("⚙️ 詳細設定（移動平均の期間など）", expanded=False):
         c3, c4 = st.columns(2)
-        sma_short = c3.number_input("短期MA（日）", value=25, min_value=5, max_value=50, step=5)
-        sma_long = c4.number_input("長期MA（日）", value=75, min_value=20, max_value=200, step=5)
+        sma_short = c3.number_input("短期MA", value=cfg["sma_default"][0], min_value=3, max_value=100, step=1)
+        sma_long = c4.number_input("長期MA", value=cfg["sma_default"][1], min_value=5, max_value=300, step=1)
 
     analyze_btn = st.button("🔍 分析する", type="primary", use_container_width=True)
 
     if analyze_btn and ticker:
         with st.spinner("データ取得中..."):
             try:
-                df = fetch_ohlcv(ticker, period=period)
+                df = fetch_ohlcv(ticker, period=period, interval=cfg["interval"])
                 df = compute_all(df, sma_short=sma_short, sma_long=sma_long)
                 signals = evaluate_signals(df, sma_short=sma_short, sma_long=sma_long)
                 verdict, score = overall_signal(signals)
@@ -609,7 +742,8 @@ elif page == "🔍 スクリーニング":
 elif page == "📋 ファンダメンタル分析":
     st.title("📋 ファンダメンタル分析")
 
-    ticker_fa = st.text_input("銘柄コード", value="7203", key="fa_ticker")
+    ticker_fa = st.session_state.get("current_ticker", "7203")
+    st.success(f"📌 分析銘柄: **{ticker_fa}**　← サイドバーで変更できます")
     fa_btn = st.button("📋 分析する", type="primary")
 
     if fa_btn and ticker_fa:
@@ -786,9 +920,12 @@ elif page == "🔬 バックテスト":
     st.title("🔬 バックテスト")
     st.markdown("過去データで売買戦略の有効性を検証します")
 
-    c1, c2, c3 = st.columns([2, 1, 1])
-    with c1:
-        bt_ticker = st.text_input("銘柄コード", value="7203", key="bt_ticker")
+    bt_ticker = st.session_state.get("current_ticker", "7203")
+    st.success(f"📌 検証銘柄: **{bt_ticker}**　← サイドバーで変更できます")
+    _btc1, _btc2, _btc3 = st.columns([2, 1, 1])
+    with _btc1:
+        st.markdown("")  # spacer
+    c2, c3 = _btc2, _btc3
     with c2:
         bt_period = st.selectbox("検証期間", ["1y", "2y", "5y"], index=1,
                                  format_func=lambda x: {"1y": "1年", "2y": "2年", "5y": "5年"}[x])

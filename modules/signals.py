@@ -133,6 +133,28 @@ def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) 
             "スコア": score,
         })
 
+    # --- VWAP ---
+    vwap = _latest(df, "VWAP")
+    if vwap is not None:
+        close = row["Close"]
+        pct = (close - vwap) / vwap * 100
+        if close > vwap * 1.03:
+            judge, score = "VWAPより3%以上高い → 過熱・反落注意", -2
+        elif close > vwap * 1.01:
+            judge, score = "VWAPより上 → 上昇モメンタム継続", 1
+        elif close < vwap * 0.97:
+            judge, score = "VWAPより3%以上低い → 売られすぎ・反発期待", 2
+        elif close < vwap * 0.99:
+            judge, score = "VWAPより下 → 下落モメンタム", -1
+        else:
+            judge, score = "VWAP付近 → 均衡状態", 0
+        signals.append({
+            "指標": "VWAP（出来高加重平均）",
+            "値": f"VWAP {vwap:.1f} / 現在値との乖離 {pct:+.1f}%",
+            "判定": judge,
+            "スコア": score,
+        })
+
     return signals
 
 

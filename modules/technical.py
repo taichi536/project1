@@ -79,6 +79,27 @@ def add_obv(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def add_vwap(df: pd.DataFrame) -> pd.DataFrame:
+    tp = (df["High"] + df["Low"] + df["Close"]) / 3
+    tpv = (tp * df["Volume"]).fillna(0)
+    vol = df["Volume"].fillna(0)
+    # 分足など日中データは日次リセット、日足は20日ローリング
+    try:
+        dates = pd.Series([idx.date() for idx in df.index], index=df.index)
+        n_bars_per_day = len(df) / max(dates.nunique(), 1)
+        if n_bars_per_day > 1.5:
+            cum_tpv = tpv.groupby(dates).cumsum()
+            cum_vol = vol.groupby(dates).cumsum()
+        else:
+            cum_tpv = tpv.rolling(20).sum()
+            cum_vol = vol.rolling(20).sum()
+    except Exception:
+        cum_tpv = tpv.cumsum()
+        cum_vol = vol.cumsum()
+    df["VWAP"] = cum_tpv / cum_vol.replace(0, float("nan"))
+    return df
+
+
 def compute_all(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) -> pd.DataFrame:
     df = df.copy()
     df = add_moving_averages(df, sma_short, sma_long)
@@ -89,4 +110,5 @@ def compute_all(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) -> pd
     df = add_atr(df)
     df = add_stochastic(df)
     df = add_obv(df)
+    df = add_vwap(df)
     return df

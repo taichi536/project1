@@ -60,6 +60,14 @@ def build_main_chart(df: pd.DataFrame, ticker: str, sma_short: int = 25, sma_lon
                 name=name,
             ), row=1, col=1)
 
+    # VWAP
+    if "VWAP" in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["VWAP"],
+            line=dict(color="rgba(255,255,255,0.7)", width=1.5, dash="dot"),
+            name="VWAP",
+        ), row=1, col=1)
+
     # 一目均衡表（雲）
     if "Ichimoku_senkou_a" in df.columns and "Ichimoku_senkou_b" in df.columns:
         senkou_a = df["Ichimoku_senkou_a"]
