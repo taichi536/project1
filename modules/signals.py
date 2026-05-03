@@ -264,3 +264,138 @@ def generate_action_plan(
         "sell_trigger": sell_trigger,
         "atr": round(atr, 1),
     }
+
+
+def evaluate_hold_signal(df: pd.DataFrame, signals: list[dict], verdict: str, sma_long: int = 75) -> dict:
+    """
+    すでに保有している銘柄に対して「継続保有 or 利確 or 損切り」を判定する。
+
+    新規エントリー判定（overall_signal）とは視点が異なる:
+    - 上昇トレンド中でもRSIが高くなければ「まだ伸びる余地あり」と判定
+    - 損切りラインを下回った場合は即座に警告
+    - 利確ラインに近づいたら段階的な利確を促す
+    """
+    close = df["Close"].iloc[-1]
+    atr = df["ATR"].dropna().iloc[-1] if "ATR" in df.columns else close * 0.02
+    rsi = df["RSI"].dropna().iloc[-1] if "RSI" in df.columns else 50
+    macd_hist = _latest(df, "MACD_hist")
+
+    sma_col = f"SMA{sma_long}"
+    sma_l = _latest(df, sma_col)
+    sma_s = _latest(df, "SMA25")
+
+    recent = df.tail(60)
+    resistance = recent["High"].max()
+    support = recent["Low"].min()
+
+    # ── トレンド強度の評価 ──────────────────────────────
+    reasons = []
+    hold_score = 0  # +がポジティブ、-がネガティブ
+
+    # 1. 長期MAとの位置関係（最重要）
+    if sma_l and close > sma_l:
+        gap_pct = (close - sma_l) / sma_l * 100
+        if gap_pct > 10:
+            reasons.append(f"📈 長期MAより{gap_pct:.1f}%上: 強い上昇トレンド継続中")
+            hold_score += 2
+        else:
+            reasons.append(f"📈 長期MAより上({gap_pct:.1f}%): 上昇トレンド継続")
+            hold_score += 1
+    elif sma_l and close < sma_l:
+        gap_pct = (sma_l - close) / sma_l * 100
+        reasons.append(f"📉 長期MAを下回る({gap_pct:.1f}%下): トレンド悪化")
+        hold_score -= 2
+
+    # 2. 短期MAが長期MAの上（上昇継続サイン）
+    if sma_s and sma_l:
+        if sma_s > sma_l:
+            reasons.append("✅ 短期MAが長期MAの上: 上昇モメンタム維持")
+            hold_score += 1
+        else:
+            reasons.append("⚠️ 短期MAが長期MAを下抜け: モメンタム低下")
+            hold_score -= 1
+
+    # 3. RSI（過熱感チェック）
+    if rsi >= 80:
+        reasons.append(f"🔥 RSI {rsi:.0f}: かなり買われすぎ → 一部利確を検討")
+        hold_score -= 2
+    elif rsi >= 70:
+        reasons.append(f"⚠️ RSI {rsi:.0f}: 買われすぎ圏 → 利確ゾーンが近い")
+        hold_score -= 1
+    elif rsi >= 50:
+        reasons.append(f"🟢 RSI {rsi:.0f}: 適正水準 → まだ上昇余地あり")
+        hold_score += 1
+    else:
+        reasons.append(f"🟡 RSI {rsi:.0f}: 低め → 短期調整の可能性")
+        hold_score -= 1
+
+    # 4. MACDの向き（勢いの継続確認）
+    if macd_hist is not None:
+        prev_hist = df["MACD_hist"].dropna().iloc[-2] if len(df) >= 2 else macd_hist
+        if macd_hist > 0 and macd_hist >= prev_hist:
+            reasons.append("📊 MACDヒストグラム拡大中: 上昇勢いが加速")
+            hold_score += 1
+        elif macd_hist > 0 and macd_hist < prev_hist:
+            reasons.append("📊 MACDヒストグラム縮小中: 上昇勢いがやや鈍化")
+        elif macd_hist < 0:
+            reasons.append("📊 MACDがマイナス圏: 下落モメンタムに注意")
+            hold_score -= 1
+
+    # 5. 高値への距離（利確タイミング判定）
+    dist_to_res = (resistance - close) / close * 100
+    if dist_to_res < 2:
+        reasons.append(f"🎯 直近高値（{resistance:,.0f}）まで残り{dist_to_res:.1f}% → 利確検討タイミング")
+        hold_score -= 1
+    elif dist_to_res < 5:
+        reasons.append(f"🎯 直近高値（{resistance:,.0f}）まで{dist_to_res:.1f}%: 上値余地あり")
+    else:
+        reasons.append(f"🚀 直近高値まで{dist_to_res:.1f}%: 十分な上値余地")
+        hold_score += 1
+
+    # ── 総合判定 ──────────────────────────────────────
+    if hold_score >= 4:
+        hold_verdict = "💎 強く保有継続"
+        hold_detail = "トレンドは非常に強く、まだ上昇余地があります。あわてて売る必要はありません。"
+        color = "#26a69a"
+        emoji = "💎"
+    elif hold_score >= 2:
+        hold_verdict = "✅ 保有継続"
+        hold_detail = "上昇トレンドが続いています。損切りラインを守りながら保有継続が基本方針です。"
+        color = "#4caf50"
+        emoji = "✅"
+    elif hold_score >= 0:
+        hold_verdict = "🟡 様子見で保有"
+        hold_detail = "トレンドはまだ崩れていませんが、勢いがやや鈍化。高値圏なら一部利確も選択肢です。"
+        color = "#ffd54f"
+        emoji = "🟡"
+    elif hold_score >= -2:
+        hold_verdict = "⚠️ 一部利確を検討"
+        hold_detail = "上昇の勢いが落ちてきました。利益が出ている場合は一部売却して利益確定を検討してください。"
+        color = "#ff7043"
+        emoji = "⚠️"
+    else:
+        hold_verdict = "🚨 損切り・撤退を検討"
+        hold_detail = "トレンドが崩れているサインが複数出ています。損失を最小限にするため売却を検討してください。"
+        color = "#ef5350"
+        emoji = "🚨"
+
+    # 次のアクション提案
+    target_next = close + atr * 3
+    stop_line = close - atr * 2
+    if stop_line < support:
+        stop_line = support
+
+    return {
+        "hold_verdict": hold_verdict,
+        "hold_detail": hold_detail,
+        "hold_score": hold_score,
+        "color": color,
+        "emoji": emoji,
+        "reasons": reasons,
+        "resistance": round(resistance, 1),
+        "support": round(support, 1),
+        "dist_to_resistance_pct": round(dist_to_res, 1),
+        "next_target": round(target_next, 1),
+        "hold_stop": round(stop_line, 1),
+        "rsi": round(rsi, 1),
+    }

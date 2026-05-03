@@ -12,7 +12,7 @@ st.set_page_config(
 
 from modules.data_fetcher import fetch_ohlcv, fetch_info
 from modules.technical import compute_all
-from modules.signals import evaluate_signals, overall_signal, generate_action_plan
+from modules.signals import evaluate_signals, overall_signal, generate_action_plan, evaluate_hold_signal
 from modules.charts import build_main_chart
 from modules.fundamental import get_fundamental_summary, get_risk_metrics
 from modules.screening import screen_single
@@ -641,9 +641,60 @@ elif page == "📊 テクニカル分析":
             st.info(
                 f"**⏳ 今は待つ時期です。次のサインが出たら行動しましょう**\n\n"
                 f"🟢 **買いを検討するタイミング：** {plan['buy_trigger']}\n\n"
-                f"🔴 **売り・見送りを検討するタイミング：** {plan['sell_trigger']}"
+                f"🔴 **売り・見通しを検討するタイミング：** {plan['sell_trigger']}"
             )
             st.caption("💡 「様子見」は最も多い判定です。相場の70〜80%の時間は様子見が正解です。焦らず待つことも立派な投資判断です。")
+
+        # ── すでに保有している方向けの継続判定 ────────────────────
+        st.markdown("---")
+        st.markdown("### 📦 すでに保有中の方へ：今売るべき？まだ持つべき？")
+        st.caption("新規エントリーの判定とは別に、保有継続・利確・損切りを専用ロジックで判定します")
+
+        hold = evaluate_hold_signal(df, signals, verdict, sma_long=sma_long)
+
+        st.markdown(
+            f"""<div style="background:{hold['color']}22;border:2px solid {hold['color']};
+                border-radius:14px;padding:20px;margin-bottom:12px">
+                <div style="font-size:1.6em;font-weight:bold;color:{hold['color']}">{hold['hold_verdict']}</div>
+                <div style="color:#ccc;margin-top:6px;font-size:1.0em">{hold['hold_detail']}</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+        # 判定根拠
+        with st.expander("📋 判定根拠を見る（なぜそう判断したか）", expanded=True):
+            for r in hold["reasons"]:
+                st.markdown(f"- {r}")
+
+        hc1, hc2, hc3, hc4 = st.columns(4)
+        hc1.metric(
+            "直近高値まで",
+            f"{hold['dist_to_resistance_pct']:.1f}%",
+            help=f"直近60日の高値 {hold['resistance']:,.0f} まであと何%か。5%以上残っていれば上値余地あり",
+        )
+        hc2.metric(
+            "次の目標価格",
+            f"{hold['next_target']:,.0f}",
+            delta=f"+{hold['next_target'] - close_val:,.0f}",
+            help="ATR×3の水準。トレンドが続いた場合の次の利確候補",
+        )
+        hc3.metric(
+            "保有継続の損切りライン",
+            f"{hold['hold_stop']:,.0f}",
+            delta=f"{hold['hold_stop'] - close_val:,.0f}",
+            delta_color="inverse",
+            help="この価格を終値で下回ったら、トレンド崩壊と見て撤退を検討",
+        )
+        hc4.metric(
+            "現在のRSI",
+            f"{hold['rsi']:.0f}",
+            help="70超=買われすぎ（利確圏）/ 50〜70=適正（保有継続） / 50未満=弱め（要注意）",
+        )
+
+        st.caption(
+            "⚠️ **注意:** この判定はテクニカル指標のみに基づきます。決算発表・地政学リスク等のファンダメンタル要因は含みません。"
+            "最終判断は必ずご自身で行ってください。"
+        )
 
         # 初心者モードでは指標テーブルを折りたたみ
         if st.session_state.get("beginner_mode", True):
