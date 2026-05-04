@@ -12,7 +12,7 @@ st.set_page_config(
 
 from modules.data_fetcher import fetch_ohlcv, fetch_info
 from modules.technical import compute_all
-from modules.signals import evaluate_signals, overall_signal, generate_action_plan, evaluate_hold_signal
+from modules.signals import evaluate_signals, overall_signal, generate_action_plan, evaluate_hold_signal, evaluate_watch_signal, detect_breakout
 from modules.charts import build_main_chart
 from modules.fundamental import get_fundamental_summary, get_risk_metrics
 from modules.screening import screen_single
@@ -121,7 +121,11 @@ with st.sidebar:
 # ─── ダッシュボード ───────────────────────────────────────────────────────────
 if page == "🏠 ダッシュボード":
     st.title("🏠 ダッシュボード")
-    st.caption("登録銘柄のシグナルを一覧で確認できます")
+    _notif_active = bool(os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("SLACK_WEBHOOK_URL"))
+    if _notif_active:
+        st.caption("登録銘柄のシグナルを一覧で確認できます　🔔 シグナル変化の自動通知: **有効**")
+    else:
+        st.caption("登録銘柄のシグナルを一覧で確認できます　🔕 自動通知: 未設定（🔔通知設定で設定できます）")
 
     # ウォッチリスト編集
     watchlist = load_watchlist()
@@ -167,12 +171,37 @@ if page == "🏠 ダッシュボード":
                      for r in st.session_state.get("dashboard_data", [])}
         with st.spinner(f"{len(watchlist)}銘柄をスキャン中..."):
             new_data = scan_all(watchlist)
-        # シグナル変化を検出
+        # シグナル変化を検出 + 自動通知
+        changed_for_notif = []
         for r in new_data:
             prev_sig = prev_data.get(r["ticker"])
             r["シグナル変化"] = (prev_sig is not None and prev_sig != r["シグナル"])
             r["前回シグナル"] = prev_sig
+            if r["シグナル変化"] and r["シグナル"] in ("買い", "売り"):
+                changed_for_notif.append(r)
         st.session_state["dashboard_data"] = new_data
+
+        # 買い/売りシグナルに変化があればTelegram/Slack通知
+        _tg_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        _tg_chat = os.getenv("TELEGRAM_CHAT_ID")
+        _sl_url = os.getenv("SLACK_WEBHOOK_URL")
+        if changed_for_notif and (_tg_token or _sl_url):
+            for _r in changed_for_notif:
+                try:
+                    send_signal_alert(
+                        ticker=_r["ticker"],
+                        verdict=_r["シグナル"],
+                        score=_r["スコア"],
+                        price=_r["現在値"] or 0,
+                        signals=[],
+                        rsi=_r.get("RSI"),
+                        atr=None,
+                        telegram_token=_tg_token,
+                        telegram_chat_id=_tg_chat,
+                        slack_webhook=_sl_url,
+                    )
+                except Exception:
+                    pass
 
     rows = st.session_state.get("dashboard_data", [])
 
@@ -695,6 +724,63 @@ elif page == "📊 テクニカル分析":
             "⚠️ **注意:** この判定はテクニカル指標のみに基づきます。決算発表・地政学リスク等のファンダメンタル要因は含みません。"
             "最終判断は必ずご自身で行ってください。"
         )
+
+        # ── 下落トレンド中の「いつ買えるか」監視判定 ────────────────
+        st.markdown("---")
+        st.markdown("### 📡 これから買いたい方へ：今が買いのタイミング？まだ早い？")
+        st.caption("下落中の銘柄を「いつ買えるか」監視しているときに使ってください。底打ちの条件が揃っているかを判定します。")
+
+        watch = evaluate_watch_signal(df, sma_long=sma_long)
+
+        st.markdown(
+            f"""<div style="background:{watch['color']}22;border:2px solid {watch['color']};
+                border-radius:14px;padding:20px;margin-bottom:12px">
+                <div style="font-size:1.5em;font-weight:bold;color:{watch['color']}">{watch['verdict']}</div>
+                <div style="color:#ccc;margin-top:6px">{watch['detail']}</div>
+                <div style="background:rgba(0,0,0,0.3);border-radius:8px;padding:10px;margin-top:10px;color:#ffd54f">
+                    💡 <b>次のアクション:</b> {watch['action']}
+                </div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+        wc1, wc2, wc3 = st.columns(3)
+        wc1.metric("RSI（売られすぎ判定）", f"{watch['rsi']:.0f}",
+                   help="30以下=売られすぎ圏（反発しやすい）/ 40以下=底値圏に近づいている")
+        wc2.metric("直近安値（サポート）", f"{watch['support']:,.0f}",
+                   help="この価格より下に損切りを設定する。ここを維持できるかが鍵")
+        wc3.metric("損切り候補ライン", f"{watch['stop_loss']:,.0f}",
+                   delta=f"{watch['stop_loss'] - close_val:,.0f}",
+                   delta_color="inverse",
+                   help="エントリーした場合の損切り候補（直近安値の3%下）")
+
+        with st.expander("📋 エントリー条件チェックリスト（何が揃って何が足りないか）", expanded=True):
+            if watch["conditions_met"]:
+                st.markdown("**✅ 揃っている条件**")
+                for c in watch["conditions_met"]:
+                    st.markdown(f"- {c}")
+            if watch["conditions_missing"]:
+                st.markdown("**⏳ まだ揃っていない条件**")
+                for c in watch["conditions_missing"]:
+                    st.markdown(f"- {c}")
+
+        # ── ブレイクアウト・出来高急増の検出 ──────────────────────
+        bo = detect_breakout(df)
+        if bo and bo["alerts"]:
+            st.markdown("---")
+            st.markdown("### ⚡ 特殊シグナル検出")
+            for alert in bo["alerts"]:
+                reliability = "（出来高の裏付けあり ✅）" if alert.get("reliable") else "（出来高不足 → 信頼性低）"
+                st.markdown(
+                    f"""<div style="background:{alert['color']}22;border:2px solid {alert['color']};
+                        border-radius:10px;padding:14px;margin-bottom:8px">
+                        <div style="font-size:1.2em;font-weight:bold;color:{alert['color']}">
+                            {alert['emoji']} {alert['title']} {reliability if alert['type']=='breakout_up' else ''}
+                        </div>
+                        <div style="color:#ccc;margin-top:6px">{alert['detail']}</div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
 
         # 初心者モードでは指標テーブルを折りたたみ
         if st.session_state.get("beginner_mode", True):

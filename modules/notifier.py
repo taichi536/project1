@@ -111,6 +111,41 @@ def send_screening_alert(
     return results
 
 
+def send_breakout_alert(
+    ticker: str,
+    alert_type: str,
+    title: str,
+    detail: str,
+    price: float,
+    vol_ratio: float,
+    telegram_token: str | None = None,
+    telegram_chat_id: str | None = None,
+    slack_webhook: str | None = None,
+) -> dict[str, bool]:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    emoji_map = {"breakout_up": "🚀", "breakout_down": "💥", "volume_surge": "📊"}
+    emoji = emoji_map.get(alert_type, "⚡")
+    message = (
+        f"{emoji} <b>特殊シグナル: {ticker}</b>\n"
+        f"─────────────────\n"
+        f"{title}\n"
+        f"{detail}\n"
+        f"現在値: {price:,.2f}　出来高: 平均の{vol_ratio:.1f}倍\n"
+        f"─────────────────\n"
+        f"⏰ {now}"
+    )
+    results = {}
+    tg_token = telegram_token or os.getenv("TELEGRAM_BOT_TOKEN")
+    tg_chat = telegram_chat_id or os.getenv("TELEGRAM_CHAT_ID")
+    if tg_token and tg_chat:
+        results["telegram"] = _telegram(tg_token, tg_chat, message)
+    sw = slack_webhook or os.getenv("SLACK_WEBHOOK_URL")
+    if sw:
+        plain = message.replace("<b>", "*").replace("</b>", "*")
+        results["slack"] = _slack(sw, plain)
+    return results
+
+
 def send_stop_loss_alert(
     ticker: str,
     current_price: float,

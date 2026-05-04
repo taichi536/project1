@@ -399,3 +399,230 @@ def evaluate_hold_signal(df: pd.DataFrame, signals: list[dict], verdict: str, sm
         "hold_stop": round(stop_line, 1),
         "rsi": round(rsi, 1),
     }
+
+
+def evaluate_watch_signal(df: pd.DataFrame, sma_long: int = 75) -> dict:
+    """
+    下降トレンド中の銘柄を「いつ買えるか」監視している人向けの判定。
+
+    「まだ買うな」「そろそろ準備」「今がエントリーチャンス」を段階的に提示する。
+    保有継続判定とは逆の視点（下から上を狙う）で評価する。
+    """
+    close = df["Close"].iloc[-1]
+    atr = df["ATR"].dropna().iloc[-1] if "ATR" in df.columns else close * 0.02
+    rsi = df["RSI"].dropna().iloc[-1] if "RSI" in df.columns else 50
+    macd_hist = _latest(df, "MACD_hist")
+    bb_pct = _latest(df, "BB_pct")
+
+    sma_col = f"SMA{sma_long}"
+    sma_l = _latest(df, sma_col)
+    sma_s = _latest(df, "SMA25")
+
+    recent60 = df.tail(60)
+    recent20 = df.tail(20)
+    support_60 = recent60["Low"].min()
+    support_20 = recent20["Low"].min()
+    resistance_20 = recent20["High"].max()
+
+    # OBV反転チェック
+    obv_series = df["OBV"].dropna() if "OBV" in df.columns else pd.Series(dtype=float)
+    obv_rising = False
+    if len(obv_series) >= 10:
+        obv_recent = obv_series.iloc[-5:].mean()
+        obv_prev = obv_series.iloc[-10:-5].mean()
+        obv_rising = obv_recent > obv_prev * 1.03
+
+    # ── 各条件をチェック ──────────────────────────────────
+    conditions_met = []       # 買い条件が揃ってきた根拠
+    conditions_missing = []   # まだ足りない条件
+    watch_score = 0
+
+    # 1. 長期MAとの位置（最重要）
+    if sma_l:
+        gap_pct = (close - sma_l) / sma_l * 100
+        if close < sma_l:
+            if gap_pct < -15:
+                conditions_met.append(f"📉 長期MAより{abs(gap_pct):.1f}%下: 大幅な売られすぎ圏（反発バーゲンゾーン）")
+                watch_score += 1
+            else:
+                conditions_missing.append(f"📉 まだ長期MAの下（{gap_pct:.1f}%）: 下落トレンド継続中")
+                watch_score -= 1
+        else:
+            conditions_met.append(f"✅ 長期MAを上抜け({gap_pct:+.1f}%): トレンド転換の可能性")
+            watch_score += 2
+
+    # 2. 短期MAが長期MAを上抜けたか
+    if sma_s and sma_l:
+        if sma_s > sma_l:
+            conditions_met.append("✅ 短期MAが長期MAを上抜け（ゴールデンクロス）: 買いサイン")
+            watch_score += 2
+        else:
+            conditions_missing.append("⏳ 短期MAがまだ長期MAの下: クロスを待っている状態")
+
+    # 3. RSI（売られすぎからの反発を狙う）
+    if rsi < 30:
+        conditions_met.append(f"✅ RSI {rsi:.0f}: 売られすぎ圏 → 反発が近い可能性")
+        watch_score += 2
+    elif rsi < 40:
+        conditions_met.append(f"🟡 RSI {rsi:.0f}: やや売られすぎ → 底値圏に近づいている")
+        watch_score += 1
+    elif rsi > 50:
+        conditions_missing.append(f"⏳ RSI {rsi:.0f}: まだ高め → もう少し下がってから買う方が安全")
+        watch_score -= 1
+
+    # 4. ボリンジャーバンド下限タッチ
+    if bb_pct is not None:
+        if bb_pct < 0:
+            conditions_met.append("✅ ボリンジャー下限を突破: 統計的に売られすぎの極限")
+            watch_score += 2
+        elif bb_pct < 0.2:
+            conditions_met.append("🟡 ボリンジャー下限付近: 反発しやすいゾーン")
+            watch_score += 1
+        else:
+            conditions_missing.append("⏳ ボリンジャー帯の中央以上: まだ割安水準ではない")
+
+    # 5. MACDのゼロライン接近（モメンタム転換の兆候）
+    if macd_hist is not None:
+        prev_hist = df["MACD_hist"].dropna().iloc[-2] if len(df) >= 2 else macd_hist
+        if macd_hist < 0 and macd_hist > prev_hist:
+            conditions_met.append("🟡 MACDヒストグラムが縮小中: 下落の勢いが鈍化している")
+            watch_score += 1
+        elif macd_hist > 0:
+            conditions_met.append("✅ MACDがプラス転換: モメンタムが上向きに")
+            watch_score += 1
+        else:
+            conditions_missing.append("⏳ MACDはまだマイナス圏で拡大中: 下落モメンタム継続")
+
+    # 6. 出来高（大口の買い集め）
+    if obv_rising:
+        conditions_met.append("✅ OBVが上昇中: 下落中でも大口が買い集めている可能性")
+        watch_score += 1
+    else:
+        conditions_missing.append("⏳ OBV（出来高）は上昇していない: 大口の買いがまだ入っていない")
+
+    # 7. 直近安値からの距離（二番底チェック）
+    dist_from_support = (close - support_60) / support_60 * 100
+    if abs(dist_from_support) < 3:
+        conditions_met.append(f"✅ 直近安値（{support_60:,.0f}）付近: 二番底の可能性あり")
+        watch_score += 1
+    elif close < support_60:
+        conditions_missing.append(f"⚠️ 直近安値（{support_60:,.0f}）を更新中: まだ底打ちしていない")
+        watch_score -= 2
+
+    # ── 総合判定 ──────────────────────────────────────────
+    if watch_score >= 6:
+        verdict = "🎯 今がエントリーチャンス"
+        detail = "底打ちの複数のサインが確認できます。リスク管理しながらエントリーを検討してください。"
+        color = "#26a69a"
+        action = f"エントリー候補: {close:,.0f}円付近。損切りラインは直近安値（{support_20:,.0f}円）の少し下に設定。"
+    elif watch_score >= 3:
+        verdict = "🔔 そろそろ準備を始めよう"
+        detail = "底打ちの兆候が出てきています。まだ確定ではないので、一部だけ試しに入るか、完全な反転確認を待つかを判断してください。"
+        color = "#ffd54f"
+        action = f"もう少し待ってRSIが30以下、またはMACD転換を確認してからエントリーが安全。"
+    elif watch_score >= 0:
+        verdict = "👀 引き続き監視中"
+        detail = "下落の勢いがやや鈍化してきましたが、まだ買いのサインは出ていません。条件が揃うのを待ちましょう。"
+        color = "#7e57c2"
+        action = "慌ててエントリーせず、ゴールデンクロスかRSI30以下の売られすぎサインを待ちましょう。"
+    else:
+        verdict = "🚫 まだ買うのは早い"
+        detail = "下落トレンドが継続中です。「落ちるナイフをつかむ」リスクがあります。まだ待ってください。"
+        color = "#ef5350"
+        action = f"長期MA（現在 {sma_l:,.0f}円）を株価が上回るまで、または大幅な売られすぎサインが出るまで待機。"
+
+    # エントリーチェックリスト
+    checklist = []
+    for c in conditions_met:
+        checklist.append({"status": "✅", "text": c.lstrip("✅🟡📉⏳⚠️").strip()})
+    for c in conditions_missing:
+        checklist.append({"status": "⏳", "text": c.lstrip("✅🟡📉⏳⚠️").strip()})
+
+    return {
+        "verdict": verdict,
+        "detail": detail,
+        "action": action,
+        "color": color,
+        "watch_score": watch_score,
+        "conditions_met": conditions_met,
+        "conditions_missing": conditions_missing,
+        "support": round(support_60, 1),
+        "support_20": round(support_20, 1),
+        "resistance": round(resistance_20, 1),
+        "rsi": round(rsi, 1),
+        "entry_price": round(close, 1),
+        "stop_loss": round(support_20 * 0.97, 1),
+    }
+
+
+def detect_breakout(df: pd.DataFrame) -> dict | None:
+    """
+    ブレイクアウト（抵抗線を突破した瞬間）と出来高急増を検出する。
+
+    ブレイクアウトは最も信頼性の高いエントリーサインの一つ。
+    ただし出来高の裏付けがないと「騙し」になりやすい。
+    """
+    if len(df) < 20:
+        return None
+
+    close = df["Close"].iloc[-1]
+    prev_close = df["Close"].iloc[-2]
+    recent = df.tail(20)
+    prior = df.tail(60).head(40)  # 直近20日より前の40日
+
+    # 抵抗線 = 過去40日の高値
+    resistance = prior["High"].max()
+    support = prior["Low"].min()
+
+    # 出来高急増チェック
+    vol_today = df["Volume"].iloc[-1]
+    vol_avg = df["Volume"].tail(20).mean()
+    vol_ratio = vol_today / vol_avg if vol_avg > 0 else 1.0
+
+    alerts = []
+
+    # 上方ブレイクアウト（抵抗線を出来高急増で突破）
+    if close > resistance and prev_close <= resistance:
+        strength = "強い" if vol_ratio >= 1.5 else "弱い（出来高不足）"
+        alerts.append({
+            "type": "breakout_up",
+            "emoji": "🚀",
+            "title": f"上方ブレイクアウト！（{strength}）",
+            "detail": f"過去40日の高値 {resistance:,.0f} を突破。出来高は平均の{vol_ratio:.1f}倍。",
+            "color": "#26a69a",
+            "reliable": vol_ratio >= 1.5,
+        })
+
+    # 下方ブレイクアウト（サポートを割り込む）
+    if close < support and prev_close >= support:
+        alerts.append({
+            "type": "breakout_down",
+            "emoji": "💥",
+            "title": "サポート割り込み警告",
+            "detail": f"過去40日の安値 {support:,.0f} を下抜け。保有中なら損切りを検討。",
+            "color": "#ef5350",
+            "reliable": True,
+        })
+
+    # 出来高急増（価格変化なしでも大口の動き）
+    price_chg = (close - prev_close) / prev_close * 100
+    if vol_ratio >= 2.0 and abs(price_chg) < 2:
+        alerts.append({
+            "type": "volume_surge",
+            "emoji": "📊",
+            "title": f"出来高急増（平均の{vol_ratio:.1f}倍）",
+            "detail": f"価格変化{price_chg:+.1f}%に対して出来高が急増。大口の動きの可能性。方向感が出る前兆のことが多い。",
+            "color": "#7e57c2",
+            "reliable": True,
+        })
+
+    if not alerts:
+        return None
+
+    return {
+        "alerts": alerts,
+        "resistance": round(resistance, 1),
+        "support": round(support, 1),
+        "vol_ratio": round(vol_ratio, 2),
+        "price_chg_pct": round(price_chg, 2),
+    }
