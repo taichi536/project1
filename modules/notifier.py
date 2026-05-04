@@ -111,6 +111,53 @@ def send_screening_alert(
     return results
 
 
+def send_strong_buy_alert(
+    ticker: str,
+    price: float,
+    score: int,
+    reasons: list[str],
+    stop_loss: float,
+    target: float,
+    rsi: float | None = None,
+    earnings_days: int | None = None,
+    telegram_token: str | None = None,
+    telegram_chat_id: str | None = None,
+    slack_webhook: str | None = None,
+) -> dict[str, bool]:
+    """強い買い推奨シグナルをスマホに通知する"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    top_reasons = "\n".join(f"  ✅ {r}" for r in reasons[:3])
+    earnings_warn = ""
+    if earnings_days is not None and earnings_days <= 14:
+        earnings_warn = f"\n⚠️ 決算まであと{earnings_days}日 → ポジションは小さめに\n"
+    rsi_str = f"{rsi:.0f}" if rsi else "-"
+    rr = (target - price) / (price - stop_loss) if price > stop_loss else 0
+    message = (
+        f"🚀 <b>強い買い推奨シグナル</b>\n"
+        f"─────────────────\n"
+        f"銘柄: <b>{ticker}</b>\n"
+        f"現在値: {price:,.2f}　RSI: {rsi_str}　スコア: {score:+d}\n"
+        f"─────────────────\n"
+        f"根拠:\n{top_reasons}\n"
+        f"{earnings_warn}"
+        f"─────────────────\n"
+        f"🎯 目標: {target:,.0f}  🛑 損切: {stop_loss:,.0f}\n"
+        f"リスクリワード比: 1:{rr:.1f}\n"
+        f"─────────────────\n"
+        f"⏰ {now}"
+    )
+    results = {}
+    tg_token = telegram_token or os.getenv("TELEGRAM_BOT_TOKEN")
+    tg_chat = telegram_chat_id or os.getenv("TELEGRAM_CHAT_ID")
+    if tg_token and tg_chat:
+        results["telegram"] = _telegram(tg_token, tg_chat, message)
+    sw = slack_webhook or os.getenv("SLACK_WEBHOOK_URL")
+    if sw:
+        plain = message.replace("<b>", "*").replace("</b>", "*")
+        results["slack"] = _slack(sw, plain)
+    return results
+
+
 def send_breakout_alert(
     ticker: str,
     alert_type: str,

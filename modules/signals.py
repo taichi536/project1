@@ -626,3 +626,85 @@ def detect_breakout(df: pd.DataFrame) -> dict | None:
         "vol_ratio": round(vol_ratio, 2),
         "price_chg_pct": round(price_chg, 2),
     }
+
+
+def calc_signal_accuracy(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) -> dict | None:
+    """
+    過去データでシグナルの的中率を高速計算する。
+    「RSI<45 かつ 長期MAの上 かつ MACDプラス」の日の翌5/10/20日後の上昇確率を算出。
+    完全なシグナル評価を毎日再計算するのは遅すぎるため、主要3条件で近似する。
+    """
+    sma_l_col = f"SMA{sma_long}"
+    required = ["RSI", "MACD_hist", sma_l_col]
+    if len(df) < 80 or any(c not in df.columns for c in required):
+        return None
+
+    cond = (
+        (df["RSI"] < 45) &
+        (df["Close"] > df[sma_l_col]) &
+        (df["MACD_hist"] > 0)
+    ).fillna(False)
+
+    wins_5, wins_10, wins_20 = [], [], []
+    idxs = [i for i in range(len(df)) if cond.iloc[i]]
+
+    for i in idxs:
+        price = df["Close"].iloc[i]
+        for horizon, wins in [(5, wins_5), (10, wins_10), (20, wins_20)]:
+            if i + horizon < len(df):
+                wins.append(df["Close"].iloc[i + horizon] > price)
+
+    if len(wins_10) < 5:
+        return None
+
+    return {
+        "signal_count": len(wins_10),
+        "win_rate_5d":  round(sum(wins_5)  / len(wins_5)  * 100, 1) if wins_5  else None,
+        "win_rate_10d": round(sum(wins_10) / len(wins_10) * 100, 1) if wins_10 else None,
+        "win_rate_20d": round(sum(wins_20) / len(wins_20) * 100, 1) if wins_20 else None,
+    }
+
+
+def multi_timeframe_signal(ticker: str, sma_short: int = 25, sma_long: int = 75) -> list[dict]:
+    """
+    週足・日足・1時間足の3つのタイムフレームでシグナルを同時評価する。
+    3つが一致するほど信頼性が高い。
+    """
+    from modules.data_fetcher import fetch_ohlcv
+    from modules.technical import compute_all
+
+    timeframes = [
+        ("週足（大局）", "1wk", "2y"),
+        ("日足（中期）", "1d", "6mo"),
+        ("1時間足（短期）", "1h", "60d"),
+    ]
+    results = []
+    for label, interval, period in timeframes:
+        try:
+            df = fetch_ohlcv(ticker, period=period, interval=interval)
+            df = compute_all(df, sma_short=sma_short, sma_long=sma_long)
+            sigs = evaluate_signals(df, sma_short=sma_short, sma_long=sma_long)
+            verdict, score = overall_signal(sigs, df=df, sma_long=sma_long)
+            rsi = float(df["RSI"].dropna().iloc[-1]) if "RSI" in df.columns else None
+            ma_col = f"SMA{sma_long}"
+            ma = float(df[ma_col].dropna().iloc[-1]) if ma_col in df.columns else None
+            close = float(df["Close"].iloc[-1])
+            trend = "上昇" if (ma and close > ma) else "下落"
+            results.append({
+                "timeframe": label,
+                "verdict": verdict,
+                "score": score,
+                "rsi": round(rsi, 1) if rsi else None,
+                "trend": trend,
+                "close": round(close, 2),
+            })
+        except Exception as e:
+            results.append({
+                "timeframe": label,
+                "verdict": "取得失敗",
+                "score": 0,
+                "rsi": None,
+                "trend": "-",
+                "close": None,
+            })
+    return results

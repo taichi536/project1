@@ -10,9 +10,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from modules.data_fetcher import fetch_ohlcv, fetch_info
+from modules.data_fetcher import fetch_ohlcv, fetch_info, fetch_earnings_date
 from modules.technical import compute_all
-from modules.signals import evaluate_signals, overall_signal, generate_action_plan, evaluate_hold_signal, evaluate_watch_signal, detect_breakout
+from modules.signals import evaluate_signals, overall_signal, generate_action_plan, evaluate_hold_signal, evaluate_watch_signal, detect_breakout, calc_signal_accuracy, multi_timeframe_signal
 from modules.charts import build_main_chart
 from modules.fundamental import get_fundamental_summary, get_risk_metrics
 from modules.screening import screen_single
@@ -23,7 +23,7 @@ from modules.macro_analysis import get_macro_context, analyze_news_sentiment, qu
 from modules.backtest import run_backtest, STRATEGIES
 from modules.portfolio import build_portfolio_summary
 from modules.charts import build_backtest_chart, build_correlation_heatmap, build_portfolio_pie
-from modules.notifier import send_signal_alert, send_screening_alert, send_stop_loss_alert
+from modules.notifier import send_signal_alert, send_screening_alert, send_stop_loss_alert, send_strong_buy_alert
 from modules.dashboard import load_watchlist, save_watchlist, scan_all
 from modules.ml_model import train_model, trend_regression, detect_candlestick_patterns
 from modules.market_utils import market_status
@@ -188,18 +188,37 @@ if page == "🏠 ダッシュボード":
         if changed_for_notif and (_tg_token or _sl_url):
             for _r in changed_for_notif:
                 try:
-                    send_signal_alert(
-                        ticker=_r["ticker"],
-                        verdict=_r["シグナル"],
-                        score=_r["スコア"],
-                        price=_r["現在値"] or 0,
-                        signals=[],
-                        rsi=_r.get("RSI"),
-                        atr=None,
-                        telegram_token=_tg_token,
-                        telegram_chat_id=_tg_chat,
-                        slack_webhook=_sl_url,
-                    )
+                    _price = _r["現在値"] or 0
+                    _score = _r["スコア"]
+                    _rsi = _r.get("RSI")
+                    # 強い買いシグナル（スコア4以上）は専用の詳細通知を送る
+                    if _r["シグナル"] == "買い" and _score >= 4:
+                        _reasons = [_r["理由"]] if _r.get("理由") and _r["理由"] != "-" else ["複数の指標が上昇を示しています"]
+                        send_strong_buy_alert(
+                            ticker=_r["ticker"],
+                            price=_price,
+                            score=_score,
+                            reasons=_reasons,
+                            stop_loss=_price * 0.95,
+                            target=_price * 1.10,
+                            rsi=_rsi,
+                            telegram_token=_tg_token,
+                            telegram_chat_id=_tg_chat,
+                            slack_webhook=_sl_url,
+                        )
+                    else:
+                        send_signal_alert(
+                            ticker=_r["ticker"],
+                            verdict=_r["シグナル"],
+                            score=_score,
+                            price=_price,
+                            signals=[],
+                            rsi=_rsi,
+                            atr=None,
+                            telegram_token=_tg_token,
+                            telegram_chat_id=_tg_chat,
+                            slack_webhook=_sl_url,
+                        )
                 except Exception:
                     pass
 
@@ -549,6 +568,26 @@ elif page == "📊 テクニカル分析":
         prev_val = df["Close"].iloc[-2] if len(df) >= 2 else close_val
         chg_pct = (close_val - prev_val) / prev_val * 100
 
+        # 決算日を取得（バックグラウンドで）
+        try:
+            _earnings = fetch_earnings_date(ticker)
+        except Exception:
+            _earnings = {"date": None, "days_until": None}
+
+        # ── 決算接近警告（最優先で表示） ──────────────────────
+        if _earnings.get("days_until") is not None and _earnings["days_until"] <= 14:
+            _ed = _earnings["days_until"]
+            _color = "#ef5350" if _ed <= 7 else "#ff7043"
+            st.markdown(
+                f"""<div style="background:{_color}22;border:2px solid {_color};
+                    border-radius:10px;padding:12px;margin-bottom:12px;text-align:center">
+                    ⚠️ <b>決算発表まであと{_ed}日（{_earnings['date']}）</b><br>
+                    <span style="color:#ccc;font-size:0.9em">
+                    決算前後は予測困難な急変動が起きやすいため、ポジションを小さくするか見送りを検討してください</span>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+
         # ── 大きなシグナル表示 ──────────────────────────────
         sig_color = {"買い": "#26a69a", "売り": "#ef5350", "様子見": "#ffd54f"}.get(verdict, "#888")
         sig_emoji = {"買い": "🟢", "売り": "🔴", "様子見": "🟡"}.get(verdict, "⚪")
@@ -673,6 +712,135 @@ elif page == "📊 テクニカル分析":
                 f"🔴 **売り・見通しを検討するタイミング：** {plan['sell_trigger']}"
             )
             st.caption("💡 「様子見」は最も多い判定です。相場の70〜80%の時間は様子見が正解です。焦らず待つことも立派な投資判断です。")
+
+        # ── 決算日（メトリクス近くにも表示） ──────────────────────
+        if _earnings.get("date") and _earnings.get("days_until") is not None and _earnings["days_until"] > 14:
+            st.caption(f"📅 次回決算発表予定: {_earnings['date']}（あと{_earnings['days_until']}日）")
+
+        # ── ポジションサイズ計算 ────────────────────────────────────
+        st.markdown("---")
+        st.markdown("### 🧮 ポジションサイズ計算（何株買えばいいか）")
+        st.caption("リスク管理の基本: 1回の取引で資金の何%を失っても大丈夫かを先に決め、そこから株数を逆算します")
+
+        _ps_col1, _ps_col2, _ps_col3 = st.columns(3)
+        with _ps_col1:
+            _total_funds = st.number_input(
+                "💰 投資に使える総資金（円）",
+                value=1_000_000, min_value=10_000, step=100_000,
+                help="口座残高全体ではなく、株式投資に充てる金額",
+                key="ps_funds",
+            )
+        with _ps_col2:
+            _risk_pct = st.slider(
+                "⚠️ 1回の取引で許容する損失（%）",
+                min_value=0.5, max_value=5.0, value=1.0, step=0.5,
+                help="プロは1〜2%が標準。初心者は1%以下を推奨",
+                key="ps_risk",
+            )
+        with _ps_col3:
+            _stop_price = st.number_input(
+                "🛑 損切りライン（円）",
+                value=float(plan["stop_loss"]),
+                min_value=1.0, step=1.0,
+                help="ここを割ったら必ず売る価格",
+                key="ps_stop",
+            )
+
+        _max_loss_yen = _total_funds * (_risk_pct / 100)
+        _loss_per_share = close_val - _stop_price
+        if _loss_per_share > 0:
+            _recommend_shares = int(_max_loss_yen / _loss_per_share)
+            _invest_yen = _recommend_shares * close_val
+            _invest_pct = _invest_yen / _total_funds * 100
+            _p1, _p2, _p3, _p4 = st.columns(4)
+            _p1.metric("📊 推奨購入株数", f"{_recommend_shares:,} 株",
+                       help="損切りライン×株数 = 許容損失額になる株数")
+            _p2.metric("💴 投資金額", f"¥{_invest_yen:,.0f}",
+                       delta=f"資金の{_invest_pct:.1f}%",
+                       help="推奨株数 × 現在値")
+            _p3.metric("📉 最大損失額", f"¥{_max_loss_yen:,.0f}",
+                       delta=f"-{_risk_pct}%",
+                       delta_color="inverse",
+                       help="損切りラインで売った場合の損失")
+            _p4.metric("🎯 利確時の利益（目標1）", f"¥{_recommend_shares * (plan['target1'] - close_val):,.0f}",
+                       delta=f"リワード×{plan['risk_reward']:.1f}",
+                       help="利確ラインで売った場合の利益")
+            if _invest_pct > 20:
+                st.warning(f"⚠️ 投資金額が総資金の{_invest_pct:.0f}%になります。集中しすぎに注意してください（1銘柄は10〜20%以内が目安）。")
+        else:
+            st.info("損切りラインが現在値より高いか、現在値と同じです。損切りラインを現在値より低く設定してください。")
+
+        # ── シグナル的中率（過去データから算出） ─────────────────────
+        st.markdown("---")
+        with st.expander("📊 シグナル的中率（過去データでどのくらい当たったか）", expanded=False):
+            st.caption("過去のデータで「買い条件が揃った日の翌5/10/20日後に上昇していた確率」を算出します")
+            _acc = calc_signal_accuracy(df, sma_short=sma_short, sma_long=sma_long)
+            if _acc:
+                _a1, _a2, _a3, _a4 = st.columns(4)
+                _a1.metric("過去のシグナル発生回数", f"{_acc['signal_count']} 回",
+                           help="分析期間中に買い条件が揃った回数")
+                if _acc["win_rate_5d"] is not None:
+                    _a2.metric("5日後の上昇確率", f"{_acc['win_rate_5d']:.0f}%",
+                               help="買いシグナル後5営業日で株価が上昇した割合")
+                if _acc["win_rate_10d"] is not None:
+                    _a3.metric("10日後の上昇確率", f"{_acc['win_rate_10d']:.0f}%",
+                               help="買いシグナル後10営業日で株価が上昇した割合")
+                if _acc["win_rate_20d"] is not None:
+                    _a4.metric("20日後の上昇確率", f"{_acc['win_rate_20d']:.0f}%",
+                               help="買いシグナル後20営業日で株価が上昇した割合")
+                _best = max(v for v in [_acc["win_rate_10d"], _acc["win_rate_20d"]] if v)
+                if _best >= 60:
+                    st.success(f"✅ この銘柄はシグナルの信頼性が高め（10日後的中率{_acc['win_rate_10d']:.0f}%）")
+                elif _best >= 50:
+                    st.info(f"🟡 シグナルの信頼性は中程度。他の指標との組み合わせで判断してください。")
+                else:
+                    st.warning(f"⚠️ シグナルの的中率が低め。この銘柄への適用には注意が必要です。")
+                st.caption("⚠️ 過去の成績は将来を保証しません。あくまで参考値です。")
+            else:
+                st.info("的中率の計算に必要なデータが不足しています（最低80日分のデータが必要）")
+
+        # ── マルチタイムフレーム分析 ─────────────────────────────────
+        st.markdown("---")
+        with st.expander("🕐 マルチタイムフレーム分析（週足・日足・1時間足の一致確認）", expanded=False):
+            st.caption("3つのタイムフレームが「買い」で一致するほど信頼性が高い。日足だけで判断するのは危険。")
+            if st.button("🔍 マルチタイムフレームを分析（数秒かかります）", key="mtf_btn"):
+                with st.spinner("3つの時間足でデータ取得・分析中..."):
+                    st.session_state[f"mtf_{ticker}"] = multi_timeframe_signal(
+                        ticker, sma_short=sma_short, sma_long=sma_long
+                    )
+            _mtf = st.session_state.get(f"mtf_{ticker}")
+            if _mtf:
+                _mtf_cols = st.columns(3)
+                _agree_count = 0
+                for i, row in enumerate(_mtf):
+                    _vc = {"買い": "#26a69a", "売り": "#ef5350", "様子見": "#ffd54f"}.get(row["verdict"], "#888")
+                    _ve = {"買い": "🟢", "売り": "🔴", "様子見": "🟡"}.get(row["verdict"], "⚪")
+                    if row["verdict"] == "買い":
+                        _agree_count += 1
+                    with _mtf_cols[i]:
+                        st.markdown(
+                            f"""<div style="background:{_vc}22;border:2px solid {_vc};
+                                border-radius:10px;padding:14px;text-align:center">
+                                <div style="font-size:0.85em;color:#999">{row['timeframe']}</div>
+                                <div style="font-size:1.6em">{_ve}</div>
+                                <div style="font-weight:bold;color:{_vc}">{row['verdict']}</div>
+                                <div style="font-size:0.85em;color:#aaa;margin-top:4px">
+                                    スコア {row['score']:+d} / RSI {row['rsi'] or '-'} / {row['trend']}トレンド
+                                </div>
+                            </div>""",
+                            unsafe_allow_html=True,
+                        )
+                st.markdown("")
+                if _agree_count == 3:
+                    st.success("✅ **3時間足すべて「買い」一致** → 最も信頼性の高いエントリーサイン")
+                elif _agree_count == 2:
+                    st.info("🟡 **2時間足で一致** → 信頼性は中程度。ズレている時間足の方向に注意")
+                elif _agree_count == 0 and all(r["verdict"] == "売り" for r in _mtf):
+                    st.error("🔴 **全時間足が「売り」** → エントリーは見送りを強く推奨")
+                else:
+                    st.warning("⚠️ **時間足間でシグナルが不一致** → エントリーは慎重に。一致するまで待つのが安全")
+            else:
+                st.info("上のボタンを押すとマルチタイムフレーム分析を実行します。")
 
         # ── すでに保有している方向けの継続判定 ────────────────────
         st.markdown("---")

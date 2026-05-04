@@ -193,6 +193,27 @@ def fetch_ohlcv(ticker: str, period: str = "6mo", interval: str = "1d") -> pd.Da
     return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
 
 
+def fetch_earnings_date(ticker: str) -> dict:
+    """次の決算発表日と残り日数を返す"""
+    try:
+        t = normalize_ticker(ticker)
+        info = yf.Ticker(t).info
+        ed = info.get("earningsDate") or info.get("earningsTimestamp")
+        if ed:
+            if isinstance(ed, (list, tuple)) and ed:
+                ed = ed[0]
+            if isinstance(ed, (int, float)):
+                d = datetime.fromtimestamp(ed).date()
+            else:
+                d = pd.Timestamp(ed).date()
+            days_until = (d - datetime.now().date()).days
+            if 0 <= days_until <= 180:
+                return {"date": str(d), "days_until": days_until}
+    except Exception:
+        pass
+    return {"date": None, "days_until": None}
+
+
 def fetch_info(ticker: str) -> dict:
     t = normalize_ticker(ticker)
     return yf.Ticker(t).info
