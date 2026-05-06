@@ -53,7 +53,7 @@ def scan_ticker(ticker: str) -> dict:
             "前日比(%)": round(change_pct, 2),
             "シグナル": verdict,
             "スコア": score,
-            "RSI": round(rsi, 1) if rsi else None,
+            "RSI": round(rsi, 1) if rsi is not None else None,
             "MACD方向": "↑" if macd_hist and macd_hist > 0 else "↓",
             "理由": " / ".join(reasons) if reasons else "-",
             "エラー": None,

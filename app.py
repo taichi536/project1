@@ -194,6 +194,11 @@ if page == "🏠 ダッシュボード":
                     # 強い買いシグナル（スコア4以上）は専用の詳細通知を送る
                     if _r["シグナル"] == "買い" and _score >= 4:
                         _reasons = [_r["理由"]] if _r.get("理由") and _r["理由"] != "-" else ["複数の指標が上昇を示しています"]
+                        _ed_days = None
+                        try:
+                            _ed_days = fetch_earnings_date(_r["ticker"]).get("days_until")
+                        except Exception:
+                            pass
                         send_strong_buy_alert(
                             ticker=_r["ticker"],
                             price=_price,
@@ -202,6 +207,7 @@ if page == "🏠 ダッシュボード":
                             stop_loss=_price * 0.95,
                             target=_price * 1.10,
                             rsi=_rsi,
+                            earnings_days=_ed_days,
                             telegram_token=_tg_token,
                             telegram_chat_id=_tg_chat,
                             slack_webhook=_sl_url,
@@ -788,7 +794,8 @@ elif page == "📊 テクニカル分析":
                 if _acc["win_rate_20d"] is not None:
                     _a4.metric("20日後の上昇確率", f"{_acc['win_rate_20d']:.0f}%",
                                help="買いシグナル後20営業日で株価が上昇した割合")
-                _best = max(v for v in [_acc["win_rate_10d"], _acc["win_rate_20d"]] if v)
+                _rates = [v for v in [_acc["win_rate_10d"], _acc["win_rate_20d"]] if v is not None]
+                _best = max(_rates) if _rates else 0
                 if _best >= 60:
                     st.success(f"✅ この銘柄はシグナルの信頼性が高め（10日後的中率{_acc['win_rate_10d']:.0f}%）")
                 elif _best >= 50:

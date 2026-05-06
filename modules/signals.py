@@ -3,7 +3,10 @@ import numpy as np
 
 
 def _latest(df: pd.DataFrame, col: str):
-    return df[col].dropna().iloc[-1] if col in df.columns else None
+    if col not in df.columns:
+        return None
+    s = df[col].dropna()
+    return s.iloc[-1] if len(s) > 0 else None
 
 
 def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) -> list[dict]:
@@ -529,7 +532,8 @@ def evaluate_watch_signal(df: pd.DataFrame, sma_long: int = 75) -> dict:
         verdict = "🚫 まだ買うのは早い"
         detail = "下落トレンドが継続中です。「落ちるナイフをつかむ」リスクがあります。まだ待ってください。"
         color = "#ef5350"
-        action = f"長期MA（現在 {sma_l:,.0f}円）を株価が上回るまで、または大幅な売られすぎサインが出るまで待機。"
+        _sma_str = f"{sma_l:,.0f}円" if sma_l is not None else "長期MA"
+        action = f"長期MA（現在 {_sma_str}）を株価が上回るまで、または大幅な売られすぎサインが出るまで待機。"
 
     # エントリーチェックリスト
     checklist = []
@@ -658,7 +662,7 @@ def calc_signal_accuracy(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 
         return None
 
     return {
-        "signal_count": len(wins_10),
+        "signal_count": len(idxs),
         "win_rate_5d":  round(sum(wins_5)  / len(wins_5)  * 100, 1) if wins_5  else None,
         "win_rate_10d": round(sum(wins_10) / len(wins_10) * 100, 1) if wins_10 else None,
         "win_rate_20d": round(sum(wins_20) / len(wins_20) * 100, 1) if wins_20 else None,

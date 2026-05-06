@@ -50,7 +50,7 @@ def send_signal_alert(
         f"銘柄: <b>{ticker}</b>\n"
         f"現在値: {price:,.2f}\n"
         f"シグナル: {emoji} <b>{verdict}</b>（スコア: {score:+d}）\n"
-        f"RSI: {rsi:.1f}  ATR: {atr:.2f}\n"
+        f"RSI: {f'{rsi:.1f}' if rsi is not None else '-'}  ATR: {f'{atr:.2f}' if atr is not None else '-'}\n"
         f"─────────────────\n"
         f"注目指標:\n{top_signals}\n"
         f"─────────────────\n"
@@ -130,7 +130,7 @@ def send_strong_buy_alert(
     earnings_warn = ""
     if earnings_days is not None and earnings_days <= 14:
         earnings_warn = f"\n⚠️ 決算まであと{earnings_days}日 → ポジションは小さめに\n"
-    rsi_str = f"{rsi:.0f}" if rsi else "-"
+    rsi_str = f"{rsi:.0f}" if rsi is not None else "-"
     rr = (target - price) / (price - stop_loss) if price > stop_loss else 0
     message = (
         f"🚀 <b>強い買い推奨シグナル</b>\n"
