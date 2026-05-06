@@ -19,7 +19,7 @@ from modules.screening import screen_single
 from modules.diary import add_trade, get_trades, add_review, get_reviews, trade_stats, init_db, calc_pnl, calc_unrealized
 from modules.ai_analysis import analyze_five_forces, analyze_chart_ai
 from modules.news_fetcher import fetch_market_news, score_macro_relevance
-from modules.macro_analysis import get_macro_context, analyze_news_sentiment, quick_market_sentiment
+from modules.macro_analysis import get_macro_context, analyze_news_sentiment, quick_market_sentiment, fetch_live_market_data, get_market_sentiment_rule, get_sector_impact
 from modules.backtest import run_backtest, STRATEGIES
 from modules.portfolio import build_portfolio_summary
 from modules.charts import build_backtest_chart, build_correlation_heatmap, build_portfolio_pie
@@ -79,7 +79,7 @@ with st.sidebar:
 
     page = st.radio(
         "メニュー",
-        ["🏠 ダッシュボード", "🔭 銘柄スキャン", "📊 テクニカル分析", "🔍 スクリーニング", "📋 ファンダメンタル分析", "🌐 マクロ・ニュース", "🔬 バックテスト", "📐 ポートフォリオ", "📔 投資日記", "🔔 通知設定"],
+        ["🏠 ダッシュボード", "🔭 銘柄スキャン", "📊 テクニカル分析", "🔍 スクリーニング", "📋 ファンダメンタル分析", "🌐 マクロ・ニュース", "🔬 バックテスト", "📐 ポートフォリオ", "📔 投資日記", "🔔 通知設定", "📖 トレードガイド"],
         label_visibility="collapsed",
         key="menu_page",
     )
@@ -1367,17 +1367,101 @@ elif page == "📋 ファンダメンタル分析":
 # ─── マクロ・ニュース分析 ─────────────────────────────────────────────────────
 elif page == "🌐 マクロ・ニュース":
     st.title("🌐 マクロ経済・ニュース分析")
-    st.markdown("社会情勢・経済指標・最新ニュースから相場への影響を分析します")
+    st.markdown("リアルタイムの市場データと経済ニュースから、今日の相場環境を把握します")
 
-    macro_tab1, macro_tab2 = st.tabs(["📰 市場ニュース＆センチメント", "📊 マクロ経済指標"])
+    macro_tab1, macro_tab2, macro_tab3 = st.tabs([
+        "📡 リアルタイム市場データ",
+        "📰 市場ニュース",
+        "📊 金融政策・経済指標",
+    ])
 
     with macro_tab1:
+        st.markdown("### 📡 主要市場指標（リアルタイム）")
+        st.caption("yfinanceで取得した最新値です。15分程度の遅延があります。")
+
+        if st.button("🔄 今すぐ更新", key="refresh_market"):
+            st.session_state.pop("_live_market_cache", None)
+
+        if "_live_market_cache" not in st.session_state:
+            with st.spinner("市場データを取得中..."):
+                st.session_state["_live_market_cache"] = fetch_live_market_data()
+
+        live_data = st.session_state.get("_live_market_cache", [])
+
+        if live_data:
+            # センチメント判定
+            sentiment = get_market_sentiment_rule(live_data)
+            label = sentiment["label"]
+            score_val = sentiment["score"]
+            if "強気" in label:
+                st.success(f"### 🎯 市場センチメント: **{label}**（スコア: {score_val:+d}）")
+            elif "弱気" in label:
+                st.error(f"### 🎯 市場センチメント: **{label}**（スコア: {score_val:+d}）")
+            else:
+                st.warning(f"### 🎯 市場センチメント: **{label}**（スコア: {score_val:+d}）")
+
+            for reason in sentiment["reasons"]:
+                st.caption(f"  ・{reason}")
+
+            st.markdown("---")
+
+            # 指標テーブル
+            _cols = st.columns(3)
+            for i, d in enumerate(live_data):
+                c = d.get("change_pct", 0) or 0
+                color = "#26a69a" if c >= 0 else "#ef5350"
+                arrow = "▲" if c >= 0 else "▼"
+                with _cols[i % 3]:
+                    st.markdown(
+                        f"""<div style='border:1px solid #333;border-radius:8px;padding:10px 14px;margin-bottom:8px'>
+                        <div style='font-size:12px;color:#aaa'>{d['指標']}</div>
+                        <div style='font-size:22px;font-weight:bold'>{d['現在値']}</div>
+                        <div style='font-size:13px;color:{color}'>{arrow} {c:+.2f}%</div>
+                        </div>""",
+                        unsafe_allow_html=True,
+                    )
+
+            # セクター影響
+            st.markdown("---")
+            st.markdown("### 🏭 セクター別・今日の注目点")
+            impacts = get_sector_impact(live_data)
+            if impacts:
+                df_impact = pd.DataFrame(impacts)
+                st.dataframe(df_impact, use_container_width=True, hide_index=True)
+                st.caption("⚠️ これは機械的なルールによる参考情報です。最終判断は自己責任でお願いします。")
+            else:
+                st.info("現在のデータでは特筆すべきセクター影響はありません（市場が落ち着いている状態）")
+
+            # 投資判断への使い方ガイド
+            with st.expander("💡 この情報を投資判断にどう使う？"):
+                st.markdown("""
+**マクロ環境は「追い風/向かい風」の確認に使います。**
+
+| センチメント | 推奨アクション |
+|---|---|
+| 強気・やや強気 | テクニカル分析でエントリーポイントを積極探索。シグナルが「買い」なら信頼度UP |
+| 中立 | シグナルに従って通常通り判断。ポジション大きくしすぎない |
+| やや弱気・弱気 | 新規買いは慎重に。損切りラインをいつもより厳しく設定 |
+
+**セクター影響の読み方:**
+- 円安 → 輸出株（トヨタ・ソニー等）に有利。買いシグナルが重なれば信頼度UP
+- 金利上昇 → 銀行株に有利、グロース株に不利
+- VIX高 → リスクオフ。新規買いを控え、キャッシュポジション増やす
+
+**使い方のポイント:**
+1. 毎朝この画面を開いてセンチメントを確認（30秒）
+2. 「弱気」なら今日はその銘柄の新規買いを見送る
+3. 「強気」なら通常の判断でOK
+""")
+        else:
+            st.warning("市場データを取得できませんでした。しばらくしてから再度お試しください。")
+
+    with macro_tab2:
+        st.markdown("### 📰 最新市場ニュース")
         col_l, col_r = st.columns([1, 2])
         with col_l:
-            ticker_macro = st.text_input("個別銘柄への影響を分析（任意）", placeholder="7203 / AAPL")
-        with col_r:
-            st.markdown("")  # spacer
-        news_btn = st.button("📰 ニュース取得＆分析", type="primary")
+            ticker_macro = st.text_input("個別銘柄への影響を分析（任意）", placeholder="7203 / AAPL", key="macro_ticker")
+        news_btn = st.button("📰 ニュース取得", type="primary")
 
         if news_btn:
             with st.spinner("ニュースを収集中..."):
@@ -1386,47 +1470,25 @@ elif page == "🌐 マクロ・ニュース":
             if news:
                 st.success(f"{len(news)}件のニュースを取得しました")
 
-                # 市場全体センチメント
-                st.markdown("### 🎯 市場センチメント（AI判定）")
-                if not (st.session_state.get("ai_enabled") and os.getenv("ANTHROPIC_API_KEY")):
-                    st.warning("ANTHROPIC_API_KEY が未設定です。")
-                else:
-                    with st.spinner("AIが市場センチメントを判定中..."):
-                        try:
-                            sentiment = quick_market_sentiment(news)
-                            lines = sentiment.strip().split("\n")
-                            for line in lines:
-                                if "強気" in line:
-                                    st.success(line)
-                                elif "弱気" in line:
-                                    st.error(line)
-                                elif "中立" in line:
-                                    st.warning(line)
-                                else:
-                                    st.info(line)
-                        except Exception as e:
-                            st.warning(f"センチメント分析エラー: {e}")
-
                 # ニュース一覧
-                st.markdown("### 📋 注目ニュース")
                 high = [n for n in news if score_macro_relevance(n["title"], n.get("summary", "")) >= 2]
                 other = [n for n in news if score_macro_relevance(n["title"], n.get("summary", "")) < 2]
 
                 if high:
-                    st.markdown("**🔴 マクロ高関連ニュース**")
+                    st.markdown("**🔴 市場への影響が大きいニュース**")
                     for n in high[:8]:
                         st.markdown(f"- **[{n['source']}]** {n['title']}")
                         if n.get("summary"):
-                            st.caption(f"  {n['summary'][:120]}...")
+                            st.caption(f"  {n['summary'][:150]}")
 
                 if other:
                     with st.expander(f"その他のニュース（{len(other)}件）"):
                         for n in other[:10]:
                             st.markdown(f"- [{n['source']}] {n['title']}")
 
-                # 個別銘柄への影響分析
+                # AI分析（オプション）
                 if ticker_macro and st.session_state.get("ai_enabled") and os.getenv("ANTHROPIC_API_KEY"):
-                    st.markdown(f"### 🔍 {ticker_macro} への影響分析")
+                    st.markdown(f"### 🔍 {ticker_macro} への影響分析（AI）")
                     with st.spinner(f"{ticker_macro} への影響を分析中..."):
                         try:
                             try:
@@ -1440,12 +1502,14 @@ elif page == "🌐 マクロ・ニュース":
                             st.markdown(impact)
                         except Exception as e:
                             st.warning(f"影響分析エラー: {e}")
+                elif ticker_macro and not os.getenv("ANTHROPIC_API_KEY"):
+                    st.info("個別銘柄への詳細AI分析はANTHROPIC_API_KEY設定後に利用可能です。上の「リアルタイム市場データ」タブのセクター影響を参考にしてください。")
             else:
                 st.warning("ニュースを取得できませんでした。ネットワーク接続を確認してください。")
 
-    with macro_tab2:
-        st.markdown("### 📊 主要マクロ経済指標")
-        st.caption("投資判断に使うマクロコンテキスト（手動更新・随時見直し）")
+    with macro_tab3:
+        st.markdown("### 📊 金融政策・主要経済指標")
+        st.caption("※ 下記は定期的に手動更新している参考値です。正確な値は日銀・FRBの公式発表をご確認ください。")
 
         macro_ctx = get_macro_context()
         for region, indicators in macro_ctx.items():
@@ -1462,14 +1526,14 @@ elif page == "🌐 マクロ・ニュース":
             st.dataframe(df_macro, use_container_width=True, hide_index=True)
 
         st.markdown("---")
-        st.markdown("#### 📌 投資に関わる主要イベントカレンダー")
+        st.markdown("#### 📌 今後の主要イベントカレンダー")
         events = [
-            {"日付": "随時", "イベント": "日銀金融政策決定会合", "注目度": "★★★", "影響": "円相場・金融株・REITに直結"},
-            {"日付": "毎月初旬", "イベント": "米雇用統計 (NFP)", "注目度": "★★★", "影響": "FRB政策観測・ドル円に影響"},
-            {"日付": "毎月中旬", "イベント": "米CPI（消費者物価指数）", "注目度": "★★★", "影響": "インフレ→利下げ観測→グロース株"},
-            {"日付": "四半期", "イベント": "決算シーズン（3・6・9・12月）", "注目度": "★★★", "影響": "個別株の最大の変動要因"},
-            {"日付": "随時", "イベント": "地政学リスク（中東・台湾海峡等）", "注目度": "★★☆", "影響": "リスクオフ・原油・防衛株"},
-            {"日付": "随時", "イベント": "米中貿易摩擦・関税動向", "注目度": "★★☆", "影響": "製造業・半導体・自動車に逆風"},
+            {"タイミング": "随時", "イベント": "日銀金融政策決定会合", "注目度": "★★★", "影響": "円相場・金融株・REITに直結"},
+            {"タイミング": "毎月初旬", "イベント": "米雇用統計 (NFP)", "注目度": "★★★", "影響": "FRB政策観測・ドル円に影響"},
+            {"タイミング": "毎月中旬", "イベント": "米CPI（消費者物価指数）", "注目度": "★★★", "影響": "インフレ→利下げ観測→グロース株"},
+            {"タイミング": "四半期", "イベント": "決算シーズン（3・6・9・12月）", "注目度": "★★★", "影響": "個別株の最大の変動要因"},
+            {"タイミング": "随時", "イベント": "地政学リスク（中東・台湾海峡等）", "注目度": "★★☆", "影響": "リスクオフ・原油・防衛株"},
+            {"タイミング": "随時", "イベント": "米中貿易摩擦・関税動向", "注目度": "★★☆", "影響": "製造業・半導体・自動車に逆風"},
         ]
         st.dataframe(pd.DataFrame(events), use_container_width=True, hide_index=True)
 
@@ -2259,3 +2323,265 @@ python alert_runner.py --mode signal     # シグナルのみ
 python alert_runner.py --tickers 7203,AAPL  # 銘柄を指定
 ```
 """)
+
+
+# ─── トレードガイド ───────────────────────────────────────────────────────────
+elif page == "📖 トレードガイド":
+    st.title("📖 トレードガイド")
+    st.markdown("通知を受けてから購入・保有・売却まで、このシステムをどう使うかをステップで説明します。")
+
+    guide_tab1, guide_tab2, guide_tab3 = st.tabs([
+        "🗺️ 全体フロー",
+        "📋 各ステップ詳細",
+        "❓ よくある疑問",
+    ])
+
+    with guide_tab1:
+        st.markdown("### 🗺️ 売買の全体フロー")
+        st.markdown("""
+```
+【毎朝・毎夕 2分チェック】
+       ↓
+  🌐 マクロ・ニュース
+  「今日の市場は強気？弱気？」を確認
+       ↓
+  🏠 ダッシュボード
+  ウォッチリスト銘柄のシグナルを一覧確認
+       ↓
+  🔔 強い買いシグナル通知（スマホ）
+  スコア+4以上で自動的にTelegramに届く
+       ↓
+  📊 テクニカル分析で確認（2〜3分）
+  シグナル・チャート・マルチタイムフレームを見る
+       ↓
+  ✅ エントリー判断（買うか見送るか）
+       ↓
+  📔 投資日記に購入記録（必ず損切りライン設定）
+       ↓
+  🏠 ダッシュボードで毎日監視
+  損切りライン近づくと🚨通知が届く
+       ↓
+  📊 売りシグナル確認（テクニカル分析）
+       ↓
+  📔 投資日記に売却記録・損益確認
+```
+""")
+
+        st.markdown("---")
+        st.markdown("### ⏱️ 1日の時間配分（目安）")
+        time_table = [
+            {"時間帯": "朝 8:50〜9:00（10分）", "やること": "マクロ確認 → ダッシュボードでシグナル確認",
+             "ページ": "🌐 マクロ・ニュース → 🏠 ダッシュボード"},
+            {"時間帯": "必要時のみ（5〜10分）", "やること": "買いシグナルが来た銘柄のテクニカル分析",
+             "ページ": "📊 テクニカル分析"},
+            {"時間帯": "夕方 15:30〜（5分）", "やること": "ダッシュボード確認・損切りラインの確認",
+             "ページ": "🏠 ダッシュボード"},
+            {"時間帯": "週末（15〜30分）", "やること": "週次振り返り・ポートフォリオ確認",
+             "ページ": "📔 投資日記 → 📐 ポートフォリオ"},
+        ]
+        st.dataframe(pd.DataFrame(time_table), use_container_width=True, hide_index=True)
+
+    with guide_tab2:
+        st.markdown("### 📋 各ステップの詳細")
+
+        with st.expander("**STEP 1: マクロ確認（毎朝30秒）**", expanded=True):
+            st.markdown("""
+**ページ: 🌐 マクロ・ニュース → 「リアルタイム市場データ」タブ**
+
+1. **「🔄 今すぐ更新」** ボタンを押す
+2. **市場センチメント** を確認
+   - 🟢 **強気・やや強気** → 通常通り判断してOK
+   - 🟡 **中立** → 新規買いは慎重に。小さめポジションで
+   - 🔴 **弱気** → 新規買いは見送り。既存保有の損切りラインを確認
+3. **セクター影響** を確認 → 今日注目するセクターを把握
+
+**ポイント:** 市場全体が弱い日はいくら良いシグナルが出ても確率が下がります
+""")
+
+        with st.expander("**STEP 2: ダッシュボード確認（毎朝1分）**"):
+            st.markdown("""
+**ページ: 🏠 ダッシュボード**
+
+1. ウォッチリストの一覧を確認
+2. **スコアが高い（+3以上）** 銘柄に注目
+3. **「強い買い」シグナル** が出ている銘柄を次のステップへ
+
+**補足:** スマホのTelegramに通知が届いた場合も同じ銘柄を確認しに来ます
+""")
+
+        with st.expander("**STEP 3: テクニカル分析で詳細確認（5〜10分）**"):
+            st.markdown("""
+**ページ: 📊 テクニカル分析**
+
+サイドバーで銘柄を選択してから:
+
+1. **チャート** で現在のトレンドを目視確認
+   - 移動平均線（SMA25/SMA75）の向き
+   - 最近の高値・安値の動き
+
+2. **シグナル一覧** でスコアを確認
+   - +4以上: 強い買いサイン
+   - +2〜3: 買い候補（様子見もあり）
+   - マイナス: まだ早い
+
+3. **マルチタイムフレーム** ボタンを押す
+   - 週足・日足・1時間足が同じ方向か確認
+   - 3つ揃ってたら信頼度大
+
+4. **決算日** に注意（赤バナーが出たら決算直前 → ポジション小さく）
+
+5. **ポジションサイズ計算** で何株買うか計算
+""")
+
+        with st.expander("**STEP 4: エントリー判断チェックリスト**"):
+            st.markdown("""
+以下の条件を確認してから注文を出してください:
+
+| 確認項目 | 基準 |
+|---|---|
+| ① マクロセンチメント | 中立以上（弱気なら見送り推奨） |
+| ② シグナルスコア | +3以上 |
+| ③ RSI | 30〜65の範囲（70超は過熱） |
+| ④ 移動平均線 | 株価がSMA25・SMA75より上 |
+| ⑤ マルチタイムフレーム | 週足・日足が同じ方向 |
+| ⑥ 決算日 | 14日以内でないこと（リスク高） |
+| ⑦ 損切りライン | 買値の-5〜-8%を事前に決めた |
+
+**「5つ以上OK」なら買い。3つ以下なら見送り。**
+""")
+
+        with st.expander("**STEP 5: 購入後 → 投資日記に記録（必須）**"):
+            st.markdown("""
+**ページ: 📔 投資日記**
+
+記録する内容:
+- 銘柄コード
+- 購入価格・株数
+- **損切りライン（← これが最重要！）**
+  - 目安: 購入価格の-5〜-8%
+  - ATRの2倍分下に設定するのも有効（テクニカル分析画面で確認）
+- 購入理由（シグナルのスコア、主な根拠）
+
+**なぜ記録が必要か:**
+損切りラインを決めておかないと、「もう少し待てば上がるかも」と判断が揺れて大損します。
+事前に決めたルールを守ることが長期的な利益につながります。
+""")
+
+        with st.expander("**STEP 6: 保有中の管理（毎夕1分）**"):
+            st.markdown("""
+**ページ: 🏠 ダッシュボード**
+
+毎日確認すること:
+1. 保有銘柄の現在値と前日比
+2. **損切りラインに近づいていないか**
+   - 通知設定済みなら🚨アラートが届く
+3. テクニカル分析で **「保有継続判定」** を確認
+   - 「継続保有OK」: 何もしない
+   - 「注意」: 損切りラインを引き上げることを検討
+   - 「売り検討」: 売却の準備
+
+**保有の目安期間:**
+- スイング取引: 1〜3週間
+- 長期: 3ヶ月以上（ファンダメンタル面も確認）
+""")
+
+        with st.expander("**STEP 7: 売却判断**"):
+            st.markdown("""
+以下のいずれかに該当したら売却を検討:
+
+| 売却サイン | 対応 |
+|---|---|
+| 🚨 **損切りライン到達** | 迷わず売る（損を小さく抑える最重要ルール） |
+| 🔴 **シグナルスコアがマイナスに転落** | 売り検討（トレンド転換の可能性） |
+| 📉 **RSIが75以上の過熱** | 一部利確を検討 |
+| 🎯 **目標価格到達** | 利確（または損切りラインを引き上げて継続） |
+| ⚠️ **決算前14日以内** | ポジションを半分に減らすのが無難 |
+
+**最も大切なルール:**
+「損切りラインに来たら必ず売る」。この一つを守るだけで大損は防げます。
+""")
+
+        with st.expander("**STEP 8: 売却後 → 日記に記録・振り返り**"):
+            st.markdown("""
+**ページ: 📔 投資日記**
+
+売却後にやること:
+1. 売却価格・損益を記録
+2. **振り返りタブで週次レビューを書く**
+   - うまくいったこと
+   - うまくいかなかったこと
+   - 次回改善すること
+
+振り返りを続けることで、自分がどのシグナルで勝率が高いかが見えてきます。
+""")
+
+    with guide_tab3:
+        st.markdown("### ❓ よくある疑問")
+
+        with st.expander("**Q: 通知が来たら必ず買わないといけないの？**"):
+            st.markdown("""
+**A: いいえ、通知は「候補を教えてくれるもの」です。**
+
+通知が来てからテクニカル分析画面で確認し、自分でOKと判断してから買ってください。
+以下のどれかに当てはまる場合は見送りが賢明です:
+- マクロが弱気
+- RSIが70以上（過熱）
+- 決算が2週間以内
+- チャートを見て「なんかおかしい」と感じる
+""")
+
+        with st.expander("**Q: シグナルが「買い」でも下がることはある？**"):
+            st.markdown("""
+**A: はい、あります。シグナルは確率を上げるツールです。**
+
+どんな優れた指標でも正解率は60〜70%程度です。
+だから **損切りライン** が重要です。
+
+- 勝率70%・利益率10%・損切り5% で計算すると:
+  - 10回中7回勝ち → +70%
+  - 10回中3回負け → -15%
+  - 合計: +55%（十分な利益）
+
+負けを小さく抑えれば、勝率70%で長期的には必ずプラスになります。
+""")
+
+        with st.expander("**Q: 1日に何銘柄まで保有すればいい？**"):
+            st.markdown("""
+**A: 初心者は2〜3銘柄、慣れてきたら5銘柄程度が目安です。**
+
+多すぎると管理できなくなり、損切りのタイミングを逃します。
+少ない銘柄数で確実な管理をする方が長期的に有利です。
+""")
+
+        with st.expander("**Q: どのくらいの資金で始めればいい？**"):
+            st.markdown("""
+**A: 最初は「失っても生活に支障のない金額」で始めてください。**
+
+ポジションサイズの計算ツール（テクニカル分析ページ）を使えば、
+総資金の何%を1銘柄に投入するかを計算できます。
+
+目安:
+- 1銘柄あたり総資金の10〜20%まで
+- 損切り設定: 総資金の1〜2%以内のリスクになるよう調整
+""")
+
+        with st.expander("**Q: このシステムは完璧に機能するの？**"):
+            st.markdown("""
+**A: 完璧ではありません。ツールは判断を助けるものです。**
+
+このシステムが提供するのは:
+- ✅ 見落としを減らす（複数の指標を自動チェック）
+- ✅ 感情的な判断を減らす（ルールベースのシグナル）
+- ✅ 損切りリマインダー（ダッシュボードでの監視）
+- ✅ 振り返りによる自己改善
+
+このシステムが補えないもの:
+- ❌ 突発的なニュース・事件（ブラックスワン）
+- ❌ 市場の急変動
+- ❌ 最終的な投資判断
+
+**投資は自己責任です。損失リスクを理解した上でご利用ください。**
+""")
+
+        st.markdown("---")
+        st.info("💡 **最初の1ヶ月は「少額で試してみる」期間と割り切って、ルールに従って実際に操作することを優先しましょう。**")
