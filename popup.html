@@ -297,6 +297,25 @@
     }
 
     .position-row { margin-bottom: 10px; }
+
+    /* 履歴タブ */
+    .history-item {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 7px 10px;
+      border-bottom: 0.5px solid #e0ddd6; font-size: 11px;
+    }
+    .history-item:last-child { border-bottom: none; }
+    .history-item-platform {
+      font-size: 10px; font-weight: 600; padding: 2px 6px;
+      border-radius: 10px; background: #EEEDFE; color: #3C3489;
+      white-space: nowrap; flex-shrink: 0; margin-top: 1px;
+    }
+    .history-item-body { flex: 1; min-width: 0; }
+    .history-item-company { font-weight: 600; color: #2c2c2a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .history-item-meta { font-size: 10px; color: #888780; margin-top: 1px; }
+    .history-item-days { font-size: 10px; padding: 2px 6px; border-radius: 10px; flex-shrink: 0; margin-top: 1px; }
+    .history-item-days.rescoutable { background: #FEF3C7; color: #D97706; }
+    .history-item-days.recent { background: #FEE2E2; color: #B91C1C; }
   </style>
 </head>
 <body>
@@ -305,7 +324,7 @@
   <div class="logo">S</div>
   <div class="header-text">
     <div class="title">パーソナライズ文ジェネレーター</div>
-    <div class="sub">Snow-we.Inc — v1.12.0</div>
+    <div class="sub">Snow-we.Inc — v1.13.0</div>
   </div>
 </div>
 
@@ -321,6 +340,7 @@
   <button class="tab-btn active" data-tab="generate">✍️ 文生成</button>
   <button class="tab-btn" data-tab="suggest">🎯 ポジション</button>
   <button class="tab-btn" data-tab="screening">🔍 一次選定</button>
+  <button class="tab-btn" data-tab="history">📋 履歴</button>
   <button class="tab-btn" data-tab="settings">⚙️ 設定</button>
 </div>
 
@@ -406,7 +426,43 @@
   </div>
 </div>
 
-<!-- タブ4: 設定 -->
+<!-- タブ4: 履歴 -->
+<div class="tab-content" id="tab-history">
+  <div id="history-stats" style="display:flex; gap:8px; margin-bottom:10px;">
+    <div style="flex:1; background:#F0F4FF; border:1px solid #A5B4FC; border-radius:8px; padding:8px 10px; text-align:center;">
+      <div style="font-size:20px; font-weight:700; color:#4338CA;" id="history-total">0</div>
+      <div style="font-size:10px; color:#6366F1; margin-top:2px;">スカウト済み</div>
+    </div>
+    <div style="flex:1; background:#F0FDF4; border:1px solid #86EFAC; border-radius:8px; padding:8px 10px; text-align:center;">
+      <div style="font-size:20px; font-weight:700; color:#16A34A;" id="history-recent">0</div>
+      <div style="font-size:10px; color:#16A34A; margin-top:2px;">直近30日</div>
+    </div>
+    <div style="flex:1; background:#FEF3C7; border:1px solid #FCD34D; border-radius:8px; padding:8px 10px; text-align:center;">
+      <div style="font-size:20px; font-weight:700; color:#D97706;" id="history-rescoutable">0</div>
+      <div style="font-size:10px; color:#D97706; margin-top:2px;">再スカウト可</div>
+    </div>
+  </div>
+
+  <div style="display:flex; gap:6px; margin-bottom:10px;">
+    <button class="save-btn" id="history-export-btn" style="flex:1; font-size:11px;">📥 CSVエクスポート</button>
+    <button class="save-btn" id="history-import-btn" style="flex:1; font-size:11px;">📤 CSVインポート</button>
+    <input type="file" id="history-import-file" accept=".csv" style="display:none;">
+  </div>
+  <div id="history-import-hint" style="font-size:10px; color:#888; margin-bottom:8px; display:none; line-height:1.5;">
+    CSVの列: 送信日時, 会社名, 年齢, 媒体, ポジション名, 業界<br>
+    ※1行目がヘッダーの場合は自動スキップします
+  </div>
+
+  <div style="font-size:10px; color:#888780; margin-bottom:5px;" id="history-count-label">読み込み中...</div>
+  <div id="history-list" style="max-height:260px; overflow-y:auto; border:0.5px solid #e0ddd6; border-radius:6px;">
+    <div style="padding:20px; text-align:center; color:#aaa; font-size:12px;">データなし</div>
+  </div>
+
+  <button class="debug-btn" id="history-clear-btn" style="margin-top:8px; color:#c04040;">🗑️ 履歴をすべてクリア</button>
+  <div id="history-msg" style="font-size:11px; text-align:center; margin-top:5px; display:none;"></div>
+</div>
+
+<!-- タブ5: 設定 -->
 <div class="tab-content" id="tab-settings">
 
   <div class="setting-group">

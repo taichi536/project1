@@ -1,4 +1,4 @@
-// popup.js v1.12.0
+// popup.js v1.13.0
 
 const $ = id => document.getElementById(id);
 
@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
       btn.classList.add('active');
       $(`tab-${btn.dataset.tab}`).classList.add('active');
+      if (btn.dataset.tab === 'history') renderHistory();
     });
   });
 
@@ -834,6 +835,219 @@ $('debug-btn').addEventListener('click', async () => {
     setStatus('generate', 'error', `エラー: ${e.message}`);
   }
 });
+
+// ============================================================
+// タブ4: 履歴
+// ============================================================
+const SCOUT_KEY = 'scoutHistory';
+
+async function loadHistory() {
+  const r = await chrome.storage.local.get([SCOUT_KEY]);
+  return r[SCOUT_KEY] || {};
+}
+
+async function saveHistory(history) {
+  await chrome.storage.local.set({ [SCOUT_KEY]: history });
+}
+
+async function renderHistory() {
+  const history = await loadHistory();
+  const entries = Object.entries(history);
+  const now = Date.now();
+  const day = 1000 * 60 * 60 * 24;
+
+  const recentCount = entries.filter(([, v]) => (now - (v.date || 0)) < 30 * day).length;
+  const rescoutableCount = entries.filter(([, v]) => (now - (v.date || 0)) >= 90 * day).length;
+
+  $('history-total').textContent = entries.length;
+  $('history-recent').textContent = recentCount;
+  $('history-rescoutable').textContent = rescoutableCount;
+  $('history-count-label').textContent = `${entries.length}件のスカウト記録`;
+
+  const list = $('history-list');
+  if (entries.length === 0) {
+    list.innerHTML = '<div style="padding:20px; text-align:center; color:#aaa; font-size:12px;">スカウト履歴なし</div>';
+    return;
+  }
+
+  // Sort by date descending
+  entries.sort((a, b) => (b[1].date || 0) - (a[1].date || 0));
+
+  list.innerHTML = entries.slice(0, 200).map(([id, v]) => {
+    const daysAgo = Math.floor((now - (v.date || 0)) / day);
+    const rescoutable = daysAgo >= 90;
+    const dateStr = v.date ? new Date(v.date).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric', year: '2-digit' }) : '不明';
+    const company = v.company || id.split('/').pop() || '不明';
+    const platform = v.platform || 'unknown';
+    const platformLabel = { bizreach: 'BR', rds: 'RDS', dodax: 'DX', ambi: 'AMBI', green: 'Green', mynavi: 'MY' }[platform] || platform;
+    const ageStr = v.age ? ` · ${v.age}` : '';
+
+    return `<div class="history-item">
+      <span class="history-item-platform">${platformLabel}</span>
+      <div class="history-item-body">
+        <div class="history-item-company">${escapeHtml(company)}</div>
+        <div class="history-item-meta">${dateStr}${ageStr}</div>
+      </div>
+      <span class="history-item-days ${rescoutable ? 'rescoutable' : 'recent'}">${daysAgo}日前${rescoutable ? ' ↩' : ''}</span>
+    </div>`;
+  }).join('');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// CSVエクスポート
+$('history-export-btn').addEventListener('click', async () => {
+  const history = await loadHistory();
+  const entries = Object.entries(history);
+  if (entries.length === 0) {
+    showHistoryMsg('履歴がありません', '#888');
+    return;
+  }
+
+  entries.sort((a, b) => (b[1].date || 0) - (a[1].date || 0));
+
+  const headers = ['送信日時', '会社名', '年齢', '媒体', '候補者ID'];
+  const rows = entries.map(([id, v]) => {
+    const dateStr = v.date ? new Date(v.date).toLocaleString('ja-JP') : '';
+    return [dateStr, v.company || '', v.age || '', v.platform || '', id]
+      .map(c => `"${String(c).replace(/"/g, '""')}"`).join(',');
+  });
+
+  const csv = '﻿' + [headers.join(','), ...rows].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `scout_history_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showHistoryMsg(`${entries.length}件をエクスポートしました`, '#085041');
+});
+
+// CSVインポートボタン
+$('history-import-btn').addEventListener('click', () => {
+  $('history-import-hint').style.display = 'block';
+  $('history-import-file').click();
+});
+
+$('history-import-file').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim());
+  if (lines.length === 0) { showHistoryMsg('CSVが空です', '#b91c1c'); return; }
+
+  // Detect header row (contains any Japanese header keyword)
+  const headerKeywords = ['送信日時', '会社名', '年齢', '媒体', 'date', 'company', 'platform'];
+  let startLine = 0;
+  if (headerKeywords.some(k => lines[0].toLowerCase().includes(k.toLowerCase()))) startLine = 1;
+
+  const history = await loadHistory();
+  let imported = 0;
+  let skipped = 0;
+
+  for (let i = startLine; i < lines.length; i++) {
+    const cols = parseCSVLine(lines[i]);
+    if (cols.length < 2) { skipped++; continue; }
+
+    // Support two formats:
+    // Format A (Excel export): 送信日時, 会社名, 年齢, 媒体, ポジション名, 業界
+    // Format B (Extension export): 送信日時, 会社名, 年齢, 媒体, 候補者ID
+    const dateRaw = cols[0] || '';
+    const company = cols[1] || '';
+    const age = cols[2] || '';
+    const platform = cols[3] || '';
+    const idOrPos = cols[4] || '';
+
+    const dateVal = parseJapaneseDate(dateRaw);
+
+    // Use candidate ID if it looks like a URL, otherwise generate one
+    let candidateId;
+    if (idOrPos.startsWith('http') || idOrPos.includes('/')) {
+      candidateId = idOrPos.replace(/[?#].*$/, '');
+    } else {
+      // Generate stable key from date+company
+      const dateKey = dateVal ? new Date(dateVal).toISOString().slice(0, 10) : 'unknown';
+      candidateId = `import_${dateKey}_${company.replace(/\s/g, '_')}`;
+    }
+
+    if (history[candidateId]) { skipped++; continue; }
+
+    history[candidateId] = {
+      date: dateVal || Date.now(),
+      company,
+      age,
+      platform: normalizePlatform(platform),
+      name: '',
+    };
+    imported++;
+  }
+
+  await saveHistory(history);
+  await renderHistory();
+  showHistoryMsg(`${imported}件をインポート（${skipped}件スキップ）`, imported > 0 ? '#085041' : '#888');
+  e.target.value = '';
+});
+
+function parseCSVLine(line) {
+  const result = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (ch === ',' && !inQuotes) {
+      result.push(cur.trim()); cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  result.push(cur.trim());
+  return result;
+}
+
+function parseJapaneseDate(s) {
+  if (!s) return null;
+  // Try ISO format first
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return d.getTime();
+  // Japanese format: 2024/5/1, 2024年5月1日
+  const m = s.match(/(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
+  if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3])).getTime();
+  return null;
+}
+
+function normalizePlatform(s) {
+  const map = {
+    'ビズリーチ': 'bizreach', 'bizreach': 'bizreach', 'br': 'bizreach',
+    'リクナビ': 'rds', 'rds': 'rds', 'hrtech': 'rds',
+    'doda': 'dodax', 'dodax': 'dodax', 'doda-x': 'dodax',
+    'ambi': 'ambi',
+    'green': 'green', 'グリーン': 'green',
+    'マイナビ': 'mynavi', 'mynavi': 'mynavi',
+  };
+  return map[(s || '').toLowerCase()] || s || 'unknown';
+}
+
+// 履歴クリア
+$('history-clear-btn').addEventListener('click', async () => {
+  if (!confirm('スカウト履歴をすべて削除しますか？この操作は取り消せません。')) return;
+  await chrome.storage.local.remove([SCOUT_KEY]);
+  await renderHistory();
+  showHistoryMsg('履歴をクリアしました', '#888');
+});
+
+function showHistoryMsg(msg, color) {
+  const el = $('history-msg');
+  el.textContent = msg;
+  el.style.color = color || '#2c2c2a';
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
 
 // ============================================================
 // ユーティリティ
