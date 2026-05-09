@@ -369,9 +369,137 @@ function renderSuggestion(result) {
 }
 
 // ============================================================
-// タブ3: 一次選定
+// タブ3: 一次選定（一括）
 // ============================================================
+$('batch-screening-btn').addEventListener('click', () => runBatchScreening());
 $('screening-btn').addEventListener('click', () => runScreening());
+
+async function runBatchScreening() {
+  const apiKey = $('api-key').value.trim();
+  if (!apiKey) {
+    setStatus('screening', 'error', 'APIキーを入力して保存してください');
+    return;
+  }
+
+  setStatus('screening', 'loading', '一覧の候補者カードを取得中...');
+  $('batch-screening-btn').disabled = true;
+  $('screening-result').style.display = 'none';
+
+  let tab;
+  try {
+    [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  } catch (e) {
+    setStatus('screening', 'error', 'タブを取得できませんでした');
+    $('batch-screening-btn').disabled = false;
+    return;
+  }
+
+  let batchData;
+  try {
+    batchData = await chrome.tabs.sendMessage(tab.id, { action: 'getBatchCandidates' });
+  } catch (e) {
+    setStatus('screening', 'error', '候補者カードを取得できませんでした。RDSの一覧画面で実行してください。');
+    $('batch-screening-btn').disabled = false;
+    return;
+  }
+
+  if (!batchData || !batchData.success || !batchData.cards || batchData.cards.length === 0) {
+    setStatus('screening', 'error', '候補者カードが見つかりませんでした。画面を確認してください。');
+    $('batch-screening-btn').disabled = false;
+    return;
+  }
+
+  const count = batchData.cards.length;
+  setStatus('screening', 'loading', `${count}人を判定中...`);
+
+  const r = await chrome.storage.local.get(['screeningCriteria']);
+  const criteria = r.screeningCriteria || {};
+
+  try {
+    const results = await runBatchScreeningAI(apiKey, batchData.cards, criteria);
+    await chrome.tabs.sendMessage(tab.id, { action: 'setBatchResults', results });
+
+    const okCount = results.filter(r => r.overall === 'OK').length;
+    const ngCount = results.filter(r => r.overall === 'NG').length;
+    const warnCount = results.filter(r => r.overall === '要確認').length;
+
+    setStatus('screening', 'success',
+      `判定完了 ${count}人 — ✅${okCount}人 ⚠️${warnCount}人 ❌${ngCount}人`);
+  } catch (e) {
+    setStatus('screening', 'error', `判定エラー: ${e.message}`);
+  }
+
+  $('batch-screening-btn').disabled = false;
+}
+
+async function runBatchScreeningAI(apiKey, cards, criteria) {
+  const criteriaLines = buildCriteriaLines(criteria);
+
+  const candidateList = cards.map((c, i) =>
+    `候補者${i + 1}: ${c.summary}`
+  ).join('\n');
+
+  const prompt = `あなたは転職エージェントの一次選定アシスタントです。
+
+以下の【選定基準】に照らして、各候補者を判定してください。
+カード情報は概要のみのため、読み取れない項目は「情報なし」として扱ってください。
+
+【選定基準】
+${criteriaLines}
+
+【候補者一覧】
+${candidateList}
+
+以下のJSON形式のみで出力してください（説明不要）:
+{
+  "results": [
+    { "index": 1, "overall": "OK" | "NG" | "要確認", "reason": "判定理由を1文で" },
+    { "index": 2, "overall": "OK" | "NG" | "要確認", "reason": "判定理由を1文で" }
+  ]
+}`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || `APIエラー (${response.status})`);
+  }
+  const data = await response.json();
+  const text = (data.content?.[0]?.text || '').trim();
+  const clean = text.replace(/```json|```/g, '').trim();
+  const parsed = JSON.parse(clean);
+  return parsed.results || [];
+}
+
+function buildCriteriaLines(criteria) {
+  const lines = [];
+  if (criteria.ageMin || criteria.ageMax) {
+    const min = criteria.ageMin ? `${criteria.ageMin}歳以上` : '';
+    const max = criteria.ageMax ? `${criteria.ageMax}歳以下` : '';
+    lines.push(`- 年齢: ${[min, max].filter(Boolean).join('かつ')}`);
+  }
+  if (criteria.incomeMin) lines.push(`- 年収: ${criteria.incomeMin}万円以上`);
+  if (criteria.companyTiers?.length > 0 && !criteria.companyTiers.includes('不問'))
+    lines.push(`- 社格: ${criteria.companyTiers.join('または')}`);
+  if (criteria.educationReq && criteria.educationReq !== '不問')
+    lines.push(`- 学歴: ${criteria.educationReq}`);
+  if (criteria.requiredKeywords) lines.push(`- 必須経験: ${criteria.requiredKeywords}`);
+  if (criteria.excludeKeywords) lines.push(`- 除外: ${criteria.excludeKeywords}`);
+  return lines.length > 0 ? lines.join('\n') : '- 条件未設定';
+}
 
 async function runScreening() {
   const apiKey = $('api-key').value.trim();

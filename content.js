@@ -98,6 +98,58 @@ function showBadge(cls, text) {
 setupClickTracking();
 
 // -------------------------------------------------------
+// 一括判定：一覧の候補者カードを全て取得
+// -------------------------------------------------------
+function extractAllCandidateCards() {
+  const agePattern = /(\d{2})歳/;
+  const vw = window.innerWidth;
+  const seen = new Set();
+  const results = [];
+
+  // 候補者カードの候補要素を収集（左側リストエリア限定）
+  const allEls = Array.from(document.querySelectorAll('div, li, article'));
+
+  for (const el of allEls) {
+    const rect = el.getBoundingClientRect();
+    // 左側エリア・適度なサイズのカードに限定
+    if (rect.left > vw * 0.55) continue;
+    if (rect.width < 180 || rect.width > vw * 0.6) continue;
+    if (rect.height < 60 || rect.height > 500) continue;
+    if (rect.top < 0 || rect.bottom > window.innerHeight + 200) continue;
+
+    const text = (el.innerText || '').trim();
+    if (!agePattern.test(text)) continue;
+    if (text.length < 40 || text.length > 2000) continue;
+
+    // 親子関係で重複除外
+    let isDup = false;
+    for (const r of results) {
+      if (r.el.contains(el) || el.contains(r.el)) { isDup = true; break; }
+    }
+    if (isDup || seen.has(el)) continue;
+    seen.add(el);
+
+    // カードから基本情報を抽出
+    const ageMatch = text.match(/(\d{2})歳/);
+    const incomeMatch = text.match(/(\d{3,4})[〜~～](\d{3,4})万円/) ||
+                        text.match(/(\d{3,4})万円/) ||
+                        text.match(/(\d{4})万/);
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+    results.push({
+      el,
+      text,
+      age: ageMatch ? parseInt(ageMatch[1]) : null,
+      incomeText: incomeMatch ? incomeMatch[0] : null,
+      summary: lines.slice(0, 8).join(' / ')
+    });
+  }
+
+  // カード面積が近いものをグループ化して最小単位を選ぶ
+  return results.slice(0, 20);
+}
+
+// -------------------------------------------------------
 // ユーティリティ：セレクターで要素を取得しテキスト結合
 // -------------------------------------------------------
 function extractBySelectors(selectors, root) {
@@ -439,6 +491,46 @@ function extractProfile() {
 // メッセージリスナー
 // -------------------------------------------------------
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'getBatchCandidates') {
+    try {
+      injectStyles();
+      const cards = extractAllCandidateCards();
+      // 判定中バッジを全カードに表示
+      cards.forEach(c => {
+        if (getComputedStyle(c.el).position === 'static') c.el.style.position = 'relative';
+        c.el.classList.add('snow-we-selected');
+        const badge = document.createElement('div');
+        badge.className = 'snow-we-badge checking';
+        badge.textContent = '🔍 判定中...';
+        c.el.appendChild(badge);
+      });
+      sendResponse({ success: true, cards: cards.map(c => ({ summary: c.summary, age: c.age, incomeText: c.incomeText, text: c.text.substring(0, 600) })) });
+    } catch (e) {
+      sendResponse({ success: false, error: e.message });
+    }
+  }
+
+  if (request.action === 'setBatchResults') {
+    try {
+      const cards = extractAllCandidateCards();
+      const results = request.results || [];
+      results.forEach((r, i) => {
+        if (!cards[i]) return;
+        const el = cards[i].el;
+        el.querySelectorAll('.snow-we-badge').forEach(b => b.remove());
+        const map = { OK: ['ok', '✅ スカウト推奨'], NG: ['ng', '❌ 見送り'], '要確認': ['warn', '⚠️ 要確認'] };
+        const [cls, text] = map[r.overall] || ['warn', '⚠️ 要確認'];
+        const badge = document.createElement('div');
+        badge.className = `snow-we-badge ${cls}`;
+        badge.textContent = text;
+        el.appendChild(badge);
+      });
+      sendResponse({ success: true });
+    } catch (e) {
+      sendResponse({ success: false, error: e.message });
+    }
+  }
+
   if (request.action === 'showBadgeChecking') {
     injectStyles();
     showBadge('checking', '🔍 判定中...');
