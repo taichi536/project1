@@ -349,7 +349,11 @@ async function runSuggestPosition() {
   }
 
   if (!profileData || !profileData.success || !profileData.profileText) {
-    setStatus('suggest', 'error', 'プロフィール情報が取得できませんでした');
+    if (profileData && profileData.needsCandidateSelection) {
+      setStatus('suggest', 'error', '👆 候補者カードをクリックして右パネルにプロフィールを表示してから実行してください');
+    } else {
+      setStatus('suggest', 'error', 'プロフィール情報が取得できませんでした');
+    }
     $('suggest-btn').disabled = false;
     return;
   }
