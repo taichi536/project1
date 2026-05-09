@@ -246,6 +246,79 @@ function showBadge(cls, text) {
 setupClickTracking();
 
 // -------------------------------------------------------
+// スカウト送信履歴の管理
+// -------------------------------------------------------
+const SCOUT_KEY = 'scoutHistory';
+const RESCOUNT_DAYS = 90; // 3ヶ月 = 90日
+
+async function getScoutHistory() {
+  const r = await chrome.storage.local.get([SCOUT_KEY]);
+  return r[SCOUT_KEY] || {};
+}
+
+async function recordScoutSent(candidateId, info) {
+  if (!candidateId) return;
+  const history = await getScoutHistory();
+  history[candidateId] = {
+    date: Date.now(),
+    platform: getPlatform(),
+    name: info.name || '',
+    company: info.company || '',
+    age: info.age || '',
+  };
+  await chrome.storage.local.set({ [SCOUT_KEY]: history });
+}
+
+// 直近90日以内にスカウト済みかを返す
+function scoutStatus(history, candidateId) {
+  if (!candidateId) return { scouted: false };
+  const record = history[candidateId];
+  if (!record) return { scouted: false };
+  const daysAgo = Math.floor((Date.now() - record.date) / (1000 * 60 * 60 * 24));
+  return { scouted: true, daysAgo, reScoutable: daysAgo >= RESCOUNT_DAYS };
+}
+
+// カードから候補者の一意IDを取得（プロフィールURL を優先）
+function getCandidateId(cardEl) {
+  const url = findProfileUrl(cardEl);
+  if (url) return url.replace(/[?#].*$/, ''); // クエリ・ハッシュを除去
+
+  // フォールバック：カードテキストから候補者番号を抽出
+  const text = (cardEl.innerText || '');
+  const m = text.match(/No\.(\d{5,})|^(\d{6,})\s/m) ||
+            text.match(/\b([0-9]{6,10})\b/);
+  if (m) return `${getPlatform()}_${m[1] || m[2]}`;
+  return null;
+}
+
+// カードから基本情報を抽出（履歴保存用）
+function extractBasicInfo(cardEl) {
+  const text = (cardEl.innerText || '');
+  const ageMatch = text.match(/(\d{2})歳/);
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  return {
+    age: ageMatch ? `${ageMatch[1]}歳` : '',
+    company: lines[0] || '',
+    name: '',
+  };
+}
+
+// スカウトボタンのクリックを検知して履歴に記録
+document.addEventListener('click', async e => {
+  const btn = e.target.closest('button, a');
+  if (!btn) return;
+  const text = (btn.innerText || '').trim();
+  if (text !== 'スカウト' && !text.includes('スカウトを送る')) return;
+
+  const cards = findCandidateCardsByPlatform();
+  const card = cards.find(c => c.contains(btn) || c === btn.closest('[class*="card"],[class*="row"],li,article'));
+  if (!card) return;
+
+  const id = getCandidateId(card);
+  if (id) await recordScoutSent(id, extractBasicInfo(card));
+}, true);
+
+// -------------------------------------------------------
 // 「さらに読み込む」ボタンを押して全候補者をDOMに展開
 // -------------------------------------------------------
 async function loadAllCandidatesIntoDOM() {
@@ -474,6 +547,9 @@ async function triggerAutoAdd() {
   let addedCount = progress.added || 0;
   let totalProcessed = progress.processed || 0;
 
+  // スカウト履歴をまとめて取得（ループ内で何度も呼ばないよう）
+  const scoutHistory = await getScoutHistory();
+
   for (let i = 0; i < cards.length; i++) {
     const { el, text: cardText } = cards[i];
     setPanelBtnState('snow-we-btn-auto', 'loading',
@@ -482,7 +558,21 @@ async function triggerAutoAdd() {
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     await sleep(500);
 
-    setBatchBadge(el, 'checking', '🔍 判定中...');
+    // 3ヶ月チェック：最近スカウト済みならスキップ
+    const candidateId = getCandidateId(el);
+    const status = scoutStatus(scoutHistory, candidateId);
+    if (status.scouted && !status.reScoutable) {
+      setBatchBadge(el, 'warn', `⏸ 送信済（${status.daysAgo}日前）`);
+      totalProcessed++;
+      await sleep(200);
+      continue;
+    }
+    if (status.scouted && status.reScoutable) {
+      // 3ヶ月以上経過 → 通常通り処理（バッジに表示）
+      setBatchBadge(el, 'checking', `🔄 再追加可（${status.daysAgo}日前）`);
+    } else {
+      setBatchBadge(el, 'checking', '🔍 判定中...');
+    }
 
     // プロフィール全文取得（プラットフォーム別）
     let profileText = await getFullProfile(el, cardText);
@@ -495,7 +585,13 @@ async function triggerAutoAdd() {
 
       if (overall === 'OK' || overall === '要確認') {
         const added = await clickAddButton(el, criteria.autoTagName || '');
-        if (added) addedCount++;
+        if (added) {
+          addedCount++;
+          // リスト追加時点の情報を履歴に仮記録（スカウト送信とは別）
+          if (candidateId) {
+            scoutHistory[`listed_${candidateId}`] = { date: Date.now(), platform: getPlatform() };
+          }
+        }
       }
     } catch (_) {
       setBatchBadge(el, 'warn', '⚠️ 判定失敗');
