@@ -70,6 +70,7 @@ async function loadSettings() {
   if (c.educationReq) $('education-req').value = c.educationReq;
   if (c.requiredKeywords) $('required-keywords').value = c.requiredKeywords;
   if (c.excludeKeywords) $('exclude-keywords').value = c.excludeKeywords;
+  if (c.autoTagName) $('auto-tag-name').value = c.autoTagName;
 
   if (c.companyTiers && c.companyTiers.length > 0) {
     document.querySelectorAll('#company-tier-group .checkbox-item').forEach(label => {
@@ -97,6 +98,7 @@ $('settings-save-btn').addEventListener('click', async () => {
     educationReq: $('education-req').value,
     requiredKeywords: $('required-keywords').value.trim(),
     excludeKeywords: $('exclude-keywords').value.trim(),
+    autoTagName: $('auto-tag-name').value.trim(),
   };
 
   await chrome.storage.local.set({ screeningCriteria: criteria });

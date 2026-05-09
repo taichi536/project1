@@ -503,7 +503,7 @@ async function triggerAutoAdd() {
         overall === 'OK' ? '✅ スカウト候補' : overall === 'NG' ? '❌ 見送り' : '⚠️ 要確認');
 
       if (overall === 'OK' || overall === '要確認') {
-        const added = await clickAddButton(el);
+        const added = await clickAddButton(el, criteria.autoTagName || '');
         if (added) addedCount++;
       }
     } catch (_) {
@@ -532,7 +532,7 @@ async function triggerAutoAdd() {
 }
 
 // 候補者カードの追加ボタンを探してクリックする
-async function clickAddButton(cardEl) {
+async function clickAddButton(cardEl, tagName) {
   const platform = getPlatform();
   const labelMap = {
     rds:      '検討中リスト追加',
@@ -558,18 +558,39 @@ async function clickAddButton(cardEl) {
   btn.click();
   await sleep(600);
 
-  // ダイアログが開いた場合は最初の確定ボタンをクリック
-  await handleAddDialog();
+  // ダイアログが開いた場合：タグ名入力＋確定
+  await handleAddDialog(tagName);
   return true;
 }
 
-// 追加確認ダイアログを処理する
-async function handleAddDialog() {
-  await sleep(400);
-  const confirmTexts = ['追加', '確認', 'OK', 'はい', '保存', '完了'];
-  for (const dialog of document.querySelectorAll('[role="dialog"],[class*="modal"],[class*="dialog"],[class*="popup"]')) {
-    if (getComputedStyle(dialog).display === 'none' || getComputedStyle(dialog).visibility === 'hidden') continue;
-    const btns = Array.from(dialog.querySelectorAll('button,a'));
+// 追加ダイアログを処理する（タグ名入力にも対応）
+async function handleAddDialog(tagName) {
+  await sleep(500);
+
+  // 表示中のダイアログ・ドロップダウンを探す
+  const dialogs = Array.from(document.querySelectorAll(
+    '[role="dialog"],[class*="modal"],[class*="dialog"],[class*="dropdown"],[class*="popup"],[class*="tooltip"]'
+  )).filter(el => {
+    const s = getComputedStyle(el);
+    return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+  });
+
+  for (const dialog of dialogs) {
+    // タグ入力欄があれば入力する
+    if (tagName) {
+      const input = dialog.querySelector('input[type="text"],input:not([type]),textarea');
+      if (input) {
+        input.focus();
+        input.value = tagName;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(300);
+      }
+    }
+
+    // 確定ボタンをクリック
+    const confirmTexts = ['追加', '確認', 'OK', 'はい', '保存', '完了', '適用'];
+    const btns = Array.from(dialog.querySelectorAll('button,a,[role="button"]'));
     for (const text of confirmTexts) {
       const found = btns.find(b => (b.innerText || '').trim().includes(text));
       if (found) { found.click(); return; }
