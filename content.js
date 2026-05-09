@@ -408,13 +408,8 @@ ${criteriaLines}
 【候補者一覧】
 ${candidateList}
 
-以下のJSON形式のみで出力してください（説明不要）:
-{
-  "results": [
-    { "index": 1, "overall": "OK", "reason": "判定理由を1文で" },
-    { "index": 2, "overall": "NG", "reason": "判定理由を1文で" }
-  ]
-}`;
+以下のJSON形式のみで出力してください（説明不要・reasonは10文字以内）:
+{"results":[{"i":1,"o":"OK"},{"i":2,"o":"NG"}]}`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -426,7 +421,7 @@ ${candidateList}
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1200,
+      max_tokens: 2000,
       messages: [{ role: 'user', content: prompt }]
     })
   });
@@ -438,7 +433,11 @@ ${candidateList}
   const data = await response.json();
   const text = (data.content?.[0]?.text || '').trim();
   const clean = text.replace(/```json|```/g, '').trim();
-  return JSON.parse(clean).results || [];
+  const parsed = JSON.parse(clean);
+  // 短縮キー(i/o)と通常キー(index/overall)の両方に対応
+  return (parsed.results || []).map(r => ({
+    overall: r.overall || r.o || '要確認'
+  }));
 }
 
 function buildCriteriaText(criteria) {

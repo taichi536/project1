@@ -468,12 +468,7 @@ ${criteriaLines}
 ${candidateList}
 
 以下のJSON形式のみで出力してください（説明不要）:
-{
-  "results": [
-    { "index": 1, "overall": "OK" | "NG" | "要確認", "reason": "判定理由を1文で" },
-    { "index": 2, "overall": "OK" | "NG" | "要確認", "reason": "判定理由を1文で" }
-  ]
-}`;
+{"results":[{"i":1,"o":"OK"},{"i":2,"o":"NG"}]}`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -485,7 +480,7 @@ ${candidateList}
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1000,
+      max_tokens: 2000,
       messages: [{ role: 'user', content: prompt }]
     })
   });
@@ -498,7 +493,9 @@ ${candidateList}
   const text = (data.content?.[0]?.text || '').trim();
   const clean = text.replace(/```json|```/g, '').trim();
   const parsed = JSON.parse(clean);
-  return parsed.results || [];
+  return (parsed.results || []).map(r => ({
+    overall: r.overall || r.o || '要確認'
+  }));
 }
 
 function buildCriteriaLines(criteria) {
