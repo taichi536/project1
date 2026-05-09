@@ -1,10 +1,23 @@
-// content.js v1.4.0
+// content.js v1.5.0
 // 各媒体のプロフィールページからテキストを抽出する
+
+// -------------------------------------------------------
+// プラットフォーム判定
+// -------------------------------------------------------
+function getPlatform() {
+  const h = location.hostname;
+  if (h.includes('rikunabi') || h.includes('hrtech')) return 'rds';
+  if (h.includes('bizreach') || h.includes('es-support'))  return 'bizreach';
+  if (h.includes('doda-x') || h.includes('dodax'))         return 'dodax';
+  if (h.includes('ambi') || h.includes('en-ambi'))         return 'ambi';
+  if (h.includes('green-japan'))                            return 'green';
+  if (h.includes('mynavi'))                                 return 'mynavi';
+  return 'unknown';
+}
 
 // -------------------------------------------------------
 // 候補者カードへのビジュアルフィードバック
 // -------------------------------------------------------
-
 let _selectedCard = null;
 
 function injectStyles() {
@@ -39,42 +52,143 @@ function injectStyles() {
       0%,100% { opacity: 1; } 50% { opacity: .6; }
     }
     .snow-we-badge.checking { animation: snow-we-pulse 1.2s ease-in-out infinite; }
+
+    /* 追加ボタンのハイライト */
+    .snow-we-btn-highlight {
+      outline: 3px solid #6366F1 !important;
+      outline-offset: 3px !important;
+      box-shadow: 0 0 10px rgba(99,102,241,0.7) !important;
+      animation: snow-we-pulse 1s ease-in-out infinite !important;
+      position: relative !important;
+      z-index: 9999 !important;
+    }
+    .snow-we-btn-tip {
+      position: absolute !important;
+      background: #6366F1 !important;
+      color: #fff !important;
+      font-size: 10px !important;
+      font-weight: 700 !important;
+      padding: 2px 8px !important;
+      border-radius: 10px !important;
+      white-space: nowrap !important;
+      z-index: 99999 !important;
+      top: -22px !important;
+      left: 50% !important;
+      transform: translateX(-50%) !important;
+      pointer-events: none !important;
+    }
   `;
   document.head.appendChild(style);
 }
 
-function findCandidateCards() {
-  // RDS / リクナビ: 候補者カードを特定
+// -------------------------------------------------------
+// プラットフォーム別：候補者カードの取得
+// -------------------------------------------------------
+function findCandidateCardsByPlatform() {
+  const platform = getPlatform();
   const agePattern = /\d{2}歳/;
+
+  if (platform === 'ambi') {
+    // AMBIは全幅カード。年齢・会社名を含む大きなブロック
+    return Array.from(document.querySelectorAll('div, article, li')).filter(el => {
+      const rect = el.getBoundingClientRect();
+      const text = (el.innerText || '');
+      return rect.width > window.innerWidth * 0.5 &&
+             rect.height > 100 && rect.height < 800 &&
+             agePattern.test(text) &&
+             text.length > 100 && text.length < 5000;
+    }).filter((el, _, arr) => !arr.some(p => p !== el && p.contains(el)));
+  }
+
+  if (platform === 'bizreach') {
+    // Bizreachは全幅カード。ラベルなし・コメントなしを含む
+    return Array.from(document.querySelectorAll('div, article, li')).filter(el => {
+      const rect = el.getBoundingClientRect();
+      const text = (el.innerText || '');
+      return rect.width > window.innerWidth * 0.5 &&
+             rect.height > 80 && rect.height < 600 &&
+             agePattern.test(text) &&
+             (text.includes('ラベル') || text.includes('コメント') || text.includes('万円')) &&
+             text.length > 80 && text.length < 4000;
+    }).filter((el, _, arr) => !arr.some(p => p !== el && p.contains(el)));
+  }
+
+  if (platform === 'dodax') {
+    // doda-Xはカードにタグ・コメントボタンがある
+    return Array.from(document.querySelectorAll('div, article, li')).filter(el => {
+      const rect = el.getBoundingClientRect();
+      const text = (el.innerText || '');
+      return rect.width > window.innerWidth * 0.4 &&
+             rect.height > 80 && rect.height < 700 &&
+             agePattern.test(text) &&
+             (text.includes('タグ') || text.includes('コメント') || text.includes('万円')) &&
+             text.length > 80 && text.length < 5000;
+    }).filter((el, _, arr) => !arr.some(p => p !== el && p.contains(el)));
+  }
+
+  // RDS・その他：左側リストのカード
   const vw = window.innerWidth;
-
-  // まずクラス名ベースで探す
-  const byClass = document.querySelectorAll(
-    '[class*="candidate"],[class*="Candidate"],[class*="scout"],[class*="Scout"],' +
-    '[class*="person"],[class*="Person"],[class*="result-item"],[class*="resultItem"]'
-  );
-  if (byClass.length > 1) return Array.from(byClass);
-
-  // フォールバック: 左半分にあり年齢テキストを含む適度なサイズの要素
   return Array.from(document.querySelectorAll('div, li, article')).filter(el => {
     const rect = el.getBoundingClientRect();
     const text = (el.innerText || '');
     return rect.left < vw * 0.55 &&
-           rect.width > 180 && rect.width < vw * 0.55 &&
-           rect.height > 50 && rect.height < 400 &&
+           rect.width > 180 && rect.width < vw * 0.6 &&
+           rect.height > 50 && rect.height < 500 &&
            agePattern.test(text) &&
-           text.length > 40 && text.length < 1500;
+           text.length > 40 && text.length < 2000;
+  }).filter((el, _, arr) => !arr.some(p => p !== el && p.contains(el)));
+}
+
+// -------------------------------------------------------
+// プラットフォーム別：追加ボタンをハイライト
+// -------------------------------------------------------
+function highlightAddButton(cardEl) {
+  const platform = getPlatform();
+  const btnTextMap = {
+    ambi:     'この検討人材リストに追加',
+    bizreach: 'ラベル',
+    dodax:    'タグ',
+    rds:      '検討中リスト追加',
+  };
+  const label = btnTextMap[platform];
+  if (!label) return;
+
+  // カード内 or カードの兄弟・親から検索
+  const searchRoot = cardEl.closest('li, article, [class*="row"], [class*="item"]') || cardEl.parentElement || document;
+  let btn = null;
+  searchRoot.querySelectorAll('button, a, span, div').forEach(el => {
+    if (!btn && (el.innerText || '').trim().includes(label)) btn = el;
   });
+  // カード内で見つからなければページ全体から
+  if (!btn) {
+    document.querySelectorAll('button, a, span, div').forEach(el => {
+      if (!btn && (el.innerText || '').trim() === label) btn = el;
+    });
+  }
+  if (!btn) return;
+
+  // ハイライト
+  btn.classList.add('snow-we-btn-highlight');
+  if (getComputedStyle(btn).position === 'static') btn.style.position = 'relative';
+  const tip = document.createElement('span');
+  tip.className = 'snow-we-btn-tip';
+  tip.textContent = '👆 ここをクリック';
+  btn.appendChild(tip);
+
+  // 10秒後に自動解除
+  setTimeout(() => {
+    btn.classList.remove('snow-we-btn-highlight');
+    tip.remove();
+  }, 10000);
 }
 
 function setupClickTracking() {
   injectStyles();
   document.addEventListener('click', e => {
-    const cards = findCandidateCards();
+    const cards = findCandidateCardsByPlatform();
     const clicked = cards.find(c => c.contains(e.target) || c === e.target);
     if (!clicked) return;
 
-    // 前の選択をリセット
     document.querySelectorAll('.snow-we-badge').forEach(b => b.remove());
     document.querySelectorAll('.snow-we-selected').forEach(el => el.classList.remove('snow-we-selected'));
 
@@ -87,7 +201,6 @@ function setupClickTracking() {
 function showBadge(cls, text) {
   if (!_selectedCard) return;
   document.querySelectorAll('.snow-we-badge').forEach(b => b.remove());
-
   const badge = document.createElement('div');
   badge.className = `snow-we-badge ${cls}`;
   badge.textContent = text;
