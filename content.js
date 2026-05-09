@@ -602,7 +602,8 @@ async function triggerAutoAdd() {
     }
 
     // プロフィール全文取得（プラットフォーム別）
-    let profileText = await getFullProfile(el, cardText);
+    let profileText = cardText;
+    try { profileText = await getFullProfile(el, cardText); } catch (_) {}
 
     try {
       const overall = await judgeSingleCandidate(apiKey, profileText, criteria);
@@ -896,6 +897,7 @@ function buildCriteriaText(criteria) {
     lines.push(`- 社格: ${criteria.companyTiers.join('または')}`);
   if (criteria.educationReq && criteria.educationReq !== '不問')
     lines.push(`- 学歴: ${criteria.educationReq}`);
+  if (criteria.minTenure) lines.push(`- 在籍期間: 直近または現職で最低${criteria.minTenure}年以上同じ会社に在籍していること。転職が多い・最短在籍が${criteria.minTenure}年未満の場合はNG`);
   if (criteria.requiredKeywords) lines.push(`- 必須経験: ${criteria.requiredKeywords}`);
   if (criteria.excludeKeywords)  lines.push(`- 除外: ${criteria.excludeKeywords}`);
   return lines.length > 0 ? lines.join('\n') : '- 条件未設定';
@@ -919,7 +921,7 @@ window.addEventListener('load', () => {
 function extractAllCandidateCards() {
   const cards = findCandidateCardsByPlatform();
 
-  return cards.slice(0, 50).map(el => {
+  return cards.slice(0, 200).map(el => {
     const text = (el.innerText || '').trim();
     const ageMatch = text.match(/(\d{2})歳/);
     const incomeMatch = text.match(/(\d{3,4})[〜~～](\d{3,4})万円/) ||

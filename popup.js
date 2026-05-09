@@ -76,6 +76,7 @@ async function loadSettings() {
   if (c.ageMax) $('age-max').value = c.ageMax;
   if (c.incomeMin) $('income-min').value = c.incomeMin;
   if (c.educationReq) $('education-req').value = c.educationReq;
+  if (c.minTenure) $('min-tenure').value = c.minTenure;
   if (c.requiredKeywords) $('required-keywords').value = c.requiredKeywords;
   if (c.excludeKeywords) $('exclude-keywords').value = c.excludeKeywords;
   if (c.autoTagName) $('auto-tag-name').value = c.autoTagName;
@@ -108,6 +109,7 @@ $('settings-save-btn').addEventListener('click', async () => {
     incomeMin: $('income-min').value ? parseInt($('income-min').value) : null,
     companyTiers,
     educationReq: $('education-req').value,
+    minTenure: $('min-tenure').value ? parseFloat($('min-tenure').value) : null,
     requiredKeywords: $('required-keywords').value.trim(),
     excludeKeywords: $('exclude-keywords').value.trim(),
     autoTagName: $('auto-tag-name').value.trim(),
@@ -574,6 +576,7 @@ function buildCriteriaLines(criteria) {
     lines.push(`- 社格: ${criteria.companyTiers.join('または')}`);
   if (criteria.educationReq && criteria.educationReq !== '不問')
     lines.push(`- 学歴: ${criteria.educationReq}`);
+  if (criteria.minTenure) lines.push(`- 在籍期間: 直近または現職で最低${criteria.minTenure}年以上同じ会社に在籍していること。転職が多い・最短在籍が${criteria.minTenure}年未満の場合はNG`);
   if (criteria.requiredKeywords) lines.push(`- 必須経験: ${criteria.requiredKeywords}`);
   if (criteria.excludeKeywords) lines.push(`- 除外: ${criteria.excludeKeywords}`);
   return lines.length > 0 ? lines.join('\n') : '- 条件未設定';
