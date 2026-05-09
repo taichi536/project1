@@ -440,6 +440,179 @@ ${candidateList}
   }));
 }
 
+// -------------------------------------------------------
+// 自動リスト追加モード
+// -------------------------------------------------------
+async function triggerAutoAdd() {
+  const stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria']);
+  const apiKey = (stored.apiKey || '').replace(/[^\x21-\x7E]/g, '').trim();
+
+  if (!apiKey || apiKey.length < 20) {
+    setPanelBtnState('snow-we-btn-auto', 'error', '❌ APIキー未設定');
+    showAutoStatus('⚙️設定タブでAPIキーを保存してください', 4000);
+    setTimeout(() => setPanelBtnState('snow-we-btn-auto', 'ready', '🤖 自動リスト追加'), 3000);
+    return;
+  }
+
+  const criteria = stored.screeningCriteria || {};
+  injectStyles();
+
+  setPanelBtnState('snow-we-btn-auto', 'loading', '📥 読み込み中...');
+  document.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
+
+  await loadAllCandidatesIntoDOM();
+
+  const cards = extractAllCandidateCards();
+  if (cards.length === 0) {
+    setPanelBtnState('snow-we-btn-auto', 'error', '❌ 候補者なし');
+    setTimeout(() => setPanelBtnState('snow-we-btn-auto', 'ready', '🤖 自動リスト追加'), 3000);
+    return;
+  }
+
+  let addedCount = 0, ngCount = 0;
+
+  for (let i = 0; i < cards.length; i++) {
+    const { el, text: cardText } = cards[i];
+    setPanelBtnState('snow-we-btn-auto', 'loading', `🤖 ${i + 1}/${cards.length}人 ✅${addedCount}追加`);
+
+    // カードを画面中央にスクロール
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    await sleep(500);
+
+    // 判定中バッジ
+    setBatchBadge(el, 'checking', '🔍 判定中...');
+
+    // プロフィールテキスト取得（RDSは右パネルを優先）
+    let profileText = cardText.substring(0, 900);
+    if (getPlatform() === 'rds') {
+      el.click();
+      await sleep(1500);
+      const panel = findRDSDetailPanel();
+      if (panel) {
+        const full = extractMainText(panel, 2500);
+        if (full.length > profileText.length) profileText = full;
+      }
+    }
+
+    try {
+      const overall = await judgeSingleCandidate(apiKey, profileText, criteria);
+      setBatchBadge(el, overall === 'OK' ? 'ok' : overall === 'NG' ? 'ng' : 'warn',
+        overall === 'OK' ? '✅ スカウト候補' : overall === 'NG' ? '❌ 見送り' : '⚠️ 要確認');
+
+      if (overall === 'OK' || overall === '要確認') {
+        const added = await clickAddButton(el);
+        if (added) addedCount++;
+      } else {
+        ngCount++;
+      }
+    } catch (_) {
+      setBatchBadge(el, 'warn', '⚠️ 判定失敗');
+    }
+
+    await sleep(700);
+  }
+
+  setPanelBtnState('snow-we-btn-auto', 'done',
+    `🤖 完了 ✅${addedCount}人追加 ❌${ngCount}人見送り | 再実行`);
+}
+
+// 候補者カードの追加ボタンを探してクリックする
+async function clickAddButton(cardEl) {
+  const platform = getPlatform();
+  const labelMap = {
+    rds:      '検討中リスト追加',
+    ambi:     'この検討人材リストに追加',
+    dodax:    'タグ',
+    bizreach: 'ラベル',
+    green:    '気になる',
+    mynavi:   '検討リスト',
+  };
+  const label = labelMap[platform];
+  if (!label) return false;
+
+  // カード→親要素→ページ全体の順で検索
+  const roots = [cardEl, cardEl.parentElement, cardEl.closest('li,tr,article,[class*="row"]'), document.body].filter(Boolean);
+  let btn = null;
+  for (const root of roots) {
+    btn = Array.from(root.querySelectorAll('button,a,[role="button"]'))
+      .find(el => (el.innerText || '').trim().includes(label));
+    if (btn) break;
+  }
+  if (!btn) return false;
+
+  btn.click();
+  await sleep(600);
+
+  // ダイアログが開いた場合は最初の確定ボタンをクリック
+  await handleAddDialog();
+  return true;
+}
+
+// 追加確認ダイアログを処理する
+async function handleAddDialog() {
+  await sleep(400);
+  const confirmTexts = ['追加', '確認', 'OK', 'はい', '保存', '完了'];
+  for (const dialog of document.querySelectorAll('[role="dialog"],[class*="modal"],[class*="dialog"],[class*="popup"]')) {
+    if (getComputedStyle(dialog).display === 'none' || getComputedStyle(dialog).visibility === 'hidden') continue;
+    const btns = Array.from(dialog.querySelectorAll('button,a'));
+    for (const text of confirmTexts) {
+      const found = btns.find(b => (b.innerText || '').trim().includes(text));
+      if (found) { found.click(); return; }
+    }
+  }
+}
+
+// 1候補者のAI判定（Haiku使用：高速・低コスト）
+async function judgeSingleCandidate(apiKey, profileText, criteria) {
+  const criteriaLines = buildCriteriaText(criteria);
+  const prompt = `転職エージェントの一次選定アシスタントです。
+
+【選定基準】
+${criteriaLines}
+
+【候補者情報】
+${profileText}
+
+JSON1行のみで出力:
+{"o":"OK"} または {"o":"NG"} または {"o":"要確認"}`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 20,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || `APIエラー (${response.status})`);
+  }
+  const data = await response.json();
+  const text = (data.content?.[0]?.text || '').trim();
+  const match = text.match(/"o"\s*:\s*"([^"]+)"/);
+  return match ? match[1] : '要確認';
+}
+
+// バッジをセット（バッチ用）
+function setBatchBadge(el, cls, text) {
+  el.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
+  if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
+  const badge = document.createElement('div');
+  badge.className = `snow-we-badge batch ${cls}`;
+  badge.textContent = text;
+  el.appendChild(badge);
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 function buildCriteriaText(criteria) {
   const lines = [];
   if (criteria.ageMin || criteria.ageMax) {
@@ -459,51 +632,67 @@ function buildCriteriaText(criteria) {
 }
 
 // -------------------------------------------------------
-// 浮かぶ判定ボタン（ページ上に常時表示）
+// 浮かぶ操作パネル（2ボタン）
 // -------------------------------------------------------
 function injectFloatingButton() {
-  if (document.getElementById('snow-we-fab')) return;
+  if (document.getElementById('snow-we-panel')) return;
 
-  const fab = document.createElement('button');
-  fab.id = 'snow-we-fab';
-  fab.textContent = '⚡ 一括判定';
-  fab.style.cssText = `
-    position: fixed; bottom: 24px; right: 24px; z-index: 2147483647;
-    background: #4f46e5; color: #fff; font-size: 14px; font-weight: 700;
-    padding: 12px 22px; border-radius: 28px; border: none; cursor: pointer;
-    box-shadow: 0 4px 16px rgba(79,70,229,0.45);
+  const panel = document.createElement('div');
+  panel.id = 'snow-we-panel';
+  panel.style.cssText = `
+    position: fixed; bottom: 20px; right: 20px; z-index: 2147483647;
+    display: flex; flex-direction: column; gap: 8px; align-items: stretch;
     font-family: -apple-system, sans-serif;
-    transition: background 0.2s, transform 0.1s;
   `;
-  fab.onmouseenter = () => { fab.style.background = '#4338ca'; fab.style.transform = 'scale(1.04)'; };
-  fab.onmouseleave = () => { fab.style.background = '#4f46e5'; fab.style.transform = 'scale(1)'; };
-  fab.onclick = () => triggerScreening();
-  document.body.appendChild(fab);
+
+  const makeBtn = (id, text, bg) => {
+    const btn = document.createElement('button');
+    btn.id = id;
+    btn.textContent = text;
+    btn.dataset.bg = bg;
+    btn.style.cssText = `
+      background: ${bg}; color: #fff; font-size: 13px; font-weight: 700;
+      padding: 11px 20px; border-radius: 24px; border: none; cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.25); white-space: nowrap;
+      transition: filter 0.15s, transform 0.1s;
+    `;
+    btn.onmouseenter = () => { btn.style.filter = 'brightness(1.1)'; btn.style.transform = 'scale(1.03)'; };
+    btn.onmouseleave = () => { btn.style.filter = ''; btn.style.transform = ''; };
+    return btn;
+  };
+
+  const screenBtn = makeBtn('snow-we-btn-screen', '⚡ 一括判定', '#4f46e5');
+  const autoBtn   = makeBtn('snow-we-btn-auto',   '🤖 自動リスト追加', '#0369a1');
+
+  screenBtn.onclick = () => triggerScreening();
+  autoBtn.onclick   = () => triggerAutoAdd();
+
+  panel.appendChild(screenBtn);
+  panel.appendChild(autoBtn);
+  document.body.appendChild(panel);
 }
 
-function setFabState(state, text) {
-  const fab = document.getElementById('snow-we-fab');
-  if (!fab) return;
-  const styles = {
-    ready:    { bg: '#4f46e5', cursor: 'pointer' },
-    loading:  { bg: '#7c3aed', cursor: 'not-allowed' },
-    done:     { bg: '#059669', cursor: 'pointer' },
-    error:    { bg: '#dc2626', cursor: 'pointer' },
+function setPanelBtnState(btnId, state, text) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  const bgMap = {
+    ready:   btn.dataset.bg,
+    loading: '#7c3aed',
+    done:    '#059669',
+    error:   '#dc2626',
   };
-  const s = styles[state] || styles.ready;
-  fab.style.background = s.bg;
-  fab.style.cursor = s.cursor;
-  fab.textContent = text;
-  fab.disabled = state === 'loading';
+  btn.style.background = bgMap[state] || btn.dataset.bg;
+  btn.style.cursor = state === 'loading' ? 'not-allowed' : 'pointer';
+  btn.disabled = state === 'loading';
+  btn.textContent = text;
 }
+
+// 後方互換のためsetFabStateも残す
+function setFabState(state, text) { setPanelBtnState('snow-we-btn-screen', state, text); }
 
 async function triggerScreening() {
   const stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria']);
   const apiKey = (stored.apiKey || '').replace(/[^\x21-\x7E]/g, '').trim();
-
-  // デバッグ：取得したキーの先頭10文字と長さを表示
-  showAutoStatus(`🔑 キー確認: "${apiKey.substring(0, 12)}..." (${apiKey.length}文字)`, 6000);
-  await new Promise(r => setTimeout(r, 2000));
 
   if (!apiKey || apiKey.length < 20) {
     setFabState('error', '❌ APIキー未設定');
