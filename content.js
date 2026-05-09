@@ -258,15 +258,37 @@ async function getScoutHistory() {
 
 async function recordScoutSent(candidateId, info) {
   if (!candidateId) return;
+  const now = Date.now();
+  const platform = getPlatform();
   const history = await getScoutHistory();
   history[candidateId] = {
-    date: Date.now(),
-    platform: getPlatform(),
+    date: now,
+    platform,
     name: info.name || '',
     company: info.company || '',
     age: info.age || '',
   };
   await chrome.storage.local.set({ [SCOUT_KEY]: history });
+
+  // Googleスプレッドシートへ自動記録
+  const r = await chrome.storage.local.get(['gasSettings']);
+  const gas = r.gasSettings || {};
+  if (gas.url && gas.recruiter) {
+    const ageNum = (info.age || '').replace(/[歳才]/, '');
+    fetch(gas.url, {
+      method: 'POST',
+      body: JSON.stringify({
+        secret: gas.secret || 'snowwe2024',
+        recruiter: gas.recruiter,
+        company: info.company || '',
+        age: ageNum,
+        media: platform,
+        position: '',
+        industry: '',
+        ts: now,
+      }),
+    }).catch(() => {}); // バックグラウンド送信、失敗しても無視
+  }
 }
 
 // 直近90日以内にスカウト済みかを返す

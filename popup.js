@@ -1,4 +1,4 @@
-// popup.js v1.13.0
+// popup.js v1.14.0
 
 const $ = id => document.getElementById(id);
 
@@ -62,8 +62,9 @@ $('save-btn').addEventListener('click', () => {
 // 設定の保存・読み込み
 // ============================================================
 async function loadSettings() {
-  const r = await chrome.storage.local.get(['screeningCriteria']);
+  const r = await chrome.storage.local.get(['screeningCriteria', 'gasSettings']);
   const c = r.screeningCriteria || {};
+  const gas = r.gasSettings || {};
 
   if (c.ageMin) $('age-min').value = c.ageMin;
   if (c.ageMax) $('age-max').value = c.ageMax;
@@ -72,6 +73,10 @@ async function loadSettings() {
   if (c.requiredKeywords) $('required-keywords').value = c.requiredKeywords;
   if (c.excludeKeywords) $('exclude-keywords').value = c.excludeKeywords;
   if (c.autoTagName) $('auto-tag-name').value = c.autoTagName;
+
+  if (gas.recruiter) $('gas-recruiter').value = gas.recruiter;
+  if (gas.url) $('gas-url').value = gas.url;
+  if (gas.secret) $('gas-secret').value = gas.secret;
 
   if (c.companyTiers && c.companyTiers.length > 0) {
     document.querySelectorAll('#company-tier-group .checkbox-item').forEach(label => {
@@ -102,10 +107,59 @@ $('settings-save-btn').addEventListener('click', async () => {
     autoTagName: $('auto-tag-name').value.trim(),
   };
 
-  await chrome.storage.local.set({ screeningCriteria: criteria });
+  const gasSettings = {
+    recruiter: $('gas-recruiter').value,
+    url: $('gas-url').value.trim(),
+    secret: $('gas-secret').value.trim() || 'snowwe2024',
+  };
+
+  await chrome.storage.local.set({ screeningCriteria: criteria, gasSettings });
   const saved = $('settings-saved');
   saved.style.display = 'block';
   setTimeout(() => { saved.style.display = 'none'; }, 2000);
+});
+
+// GAS接続テスト
+$('gas-test-btn').addEventListener('click', async () => {
+  const url = $('gas-url').value.trim();
+  const recruiter = $('gas-recruiter').value;
+  const secret = $('gas-secret').value.trim() || 'snowwe2024';
+  const resultEl = $('gas-test-result');
+  resultEl.style.display = 'block';
+  resultEl.style.color = '#2c2c2a';
+
+  if (!url) { resultEl.textContent = '❌ GAS URLを入力してください'; return; }
+  if (!recruiter) { resultEl.textContent = '❌ 担当者を選択してください'; return; }
+
+  resultEl.textContent = '接続中...';
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      body: JSON.stringify({
+        secret,
+        recruiter,
+        company: '【テスト】接続確認',
+        age: '30',
+        media: 'rds',
+        position: 'テスト',
+        industry: 'テスト',
+        ts: Date.now(),
+      }),
+    });
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = { raw: text }; }
+    if (data.ok) {
+      resultEl.style.color = '#085041';
+      resultEl.textContent = `✅ 接続成功！シート「${data.sheet}」の${data.row}行目に書き込みました`;
+    } else {
+      resultEl.style.color = '#b91c1c';
+      resultEl.textContent = `❌ エラー: ${data.error || text}`;
+    }
+  } catch (e) {
+    resultEl.style.color = '#b91c1c';
+    resultEl.textContent = `❌ 通信エラー: ${e.message}`;
+  }
 });
 
 // ============================================================
