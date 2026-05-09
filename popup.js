@@ -574,7 +574,7 @@ function buildCriteriaLines(criteria) {
     lines.push(`- 社格: ${criteria.companyTiers.join('または')}`);
   if (criteria.educationReq && criteria.educationReq !== '不問')
     lines.push(`- 学歴: ${criteria.educationReq}`);
-  if (criteria.minTenure) lines.push(`- 在籍期間: 過去の全職歴を含め、どの会社でも${criteria.minTenure}年未満の在籍があればNG。短期離職歴がある場合はNG`);
+  if (criteria.minTenure) lines.push(`- 在籍期間: 過去の全職歴を含め、${criteria.minTenure}年未満の在籍が明確に確認できる場合のみNG。在籍期間が不明・記載なしの場合はOKとして扱う`);
   if (criteria.requiredKeywords) lines.push(`- 必須経験: ${criteria.requiredKeywords}`);
   if (criteria.excludeKeywords) lines.push(`- 除外: ${criteria.excludeKeywords}`);
   return lines.length > 0 ? lines.join('\n') : '- 条件未設定';
