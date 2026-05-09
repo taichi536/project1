@@ -502,7 +502,11 @@ async function triggerScreening() {
   const stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria']);
   const apiKey = (stored.apiKey || '').replace(/[^\x20-\x7E]/g, '').trim();
 
-  if (!apiKey || !apiKey.startsWith('sk-')) {
+  // デバッグ：取得したキーの先頭10文字と長さを表示
+  showAutoStatus(`🔑 キー確認: "${apiKey.substring(0, 12)}..." (${apiKey.length}文字)`, 6000);
+  await new Promise(r => setTimeout(r, 2000));
+
+  if (!apiKey || apiKey.length < 20) {
     setFabState('error', '❌ APIキー未設定');
     showAutoStatus('拡張機能の⚙️設定タブでAPIキーを保存してください', 5000);
     setTimeout(() => setFabState('ready', '⚡ 一括判定'), 3000);
