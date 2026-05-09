@@ -87,56 +87,86 @@ function injectStyles() {
 function findCandidateCardsByPlatform() {
   const platform = getPlatform();
   const agePattern = /\d{2}歳/;
+  const vw = window.innerWidth;
+
+  // 親子重複を除外するフィルター（最小要素を優先）
+  function dedup(els) {
+    return els.filter((el, _, arr) => !arr.some(p => p !== el && p.contains(el)));
+  }
 
   if (platform === 'ambi') {
-    // AMBIは全幅カード。年齢・会社名を含む大きなブロック
-    return Array.from(document.querySelectorAll('div, article, li')).filter(el => {
+    // AMBIは全幅カード。「この検討人材リストに追加」ボタンを含む
+    return dedup(Array.from(document.querySelectorAll('div, article, li')).filter(el => {
       const rect = el.getBoundingClientRect();
       const text = (el.innerText || '');
-      return rect.width > window.innerWidth * 0.5 &&
-             rect.height > 100 && rect.height < 800 &&
+      return rect.width > vw * 0.45 &&
+             rect.height > 120 && rect.height < 900 &&
              agePattern.test(text) &&
-             text.length > 100 && text.length < 5000;
-    }).filter((el, _, arr) => !arr.some(p => p !== el && p.contains(el)));
+             (text.includes('スカウト') || text.includes('検討人材') || text.includes('万円')) &&
+             text.length > 120 && text.length < 8000;
+    }));
   }
 
   if (platform === 'bizreach') {
-    // Bizreachは全幅カード。ラベルなし・コメントなしを含む
-    return Array.from(document.querySelectorAll('div, article, li')).filter(el => {
+    // Bizreachは全幅カード。ラベル・コメントボタンを含む
+    return dedup(Array.from(document.querySelectorAll('div, article, li')).filter(el => {
       const rect = el.getBoundingClientRect();
       const text = (el.innerText || '');
-      return rect.width > window.innerWidth * 0.5 &&
-             rect.height > 80 && rect.height < 600 &&
+      return rect.width > vw * 0.45 &&
+             rect.height > 80 && rect.height < 700 &&
              agePattern.test(text) &&
              (text.includes('ラベル') || text.includes('コメント') || text.includes('万円')) &&
-             text.length > 80 && text.length < 4000;
-    }).filter((el, _, arr) => !arr.some(p => p !== el && p.contains(el)));
+             text.length > 80 && text.length < 6000;
+    }));
   }
 
   if (platform === 'dodax') {
-    // doda-Xはカードにタグ・コメントボタンがある
-    return Array.from(document.querySelectorAll('div, article, li')).filter(el => {
+    // doda-Xは全幅カード。タグ・コメントボタンを含む
+    return dedup(Array.from(document.querySelectorAll('div, article, li')).filter(el => {
       const rect = el.getBoundingClientRect();
       const text = (el.innerText || '');
-      return rect.width > window.innerWidth * 0.4 &&
-             rect.height > 80 && rect.height < 700 &&
+      return rect.width > vw * 0.4 &&
+             rect.height > 80 && rect.height < 900 &&
              agePattern.test(text) &&
              (text.includes('タグ') || text.includes('コメント') || text.includes('万円')) &&
-             text.length > 80 && text.length < 5000;
-    }).filter((el, _, arr) => !arr.some(p => p !== el && p.contains(el)));
+             text.length > 100 && text.length < 8000;
+    }));
   }
 
-  // RDS・その他：左側リストのカード
-  const vw = window.innerWidth;
-  return Array.from(document.querySelectorAll('div, li, article')).filter(el => {
+  if (platform === 'rds') {
+    // RDS(リクナビHRTech)の検索一覧：全幅カード（スカウト・検討中リスト追加ボタンあり）
+    const fullWidthCards = dedup(Array.from(document.querySelectorAll('div, article, li')).filter(el => {
+      const rect = el.getBoundingClientRect();
+      const text = (el.innerText || '');
+      return rect.width > vw * 0.5 &&
+             rect.height > 100 && rect.height < 900 &&
+             agePattern.test(text) &&
+             (text.includes('スカウト') || text.includes('検討中リスト') || text.includes('万円') || text.includes('レジュメ')) &&
+             text.length > 100 && text.length < 8000;
+    }));
+    if (fullWidthCards.length > 0) return fullWidthCards;
+
+    // フォールバック：左パネル型（詳細が右に表示される旧レイアウト）
+    return dedup(Array.from(document.querySelectorAll('div, li, article')).filter(el => {
+      const rect = el.getBoundingClientRect();
+      const text = (el.innerText || '');
+      return rect.left < vw * 0.55 &&
+             rect.width > 180 && rect.width < vw * 0.6 &&
+             rect.height > 50 && rect.height < 500 &&
+             agePattern.test(text) &&
+             text.length > 40 && text.length < 3000;
+    }));
+  }
+
+  // green・mynavi・その他：年齢を含む適度なサイズのカード
+  return dedup(Array.from(document.querySelectorAll('div, li, article')).filter(el => {
     const rect = el.getBoundingClientRect();
     const text = (el.innerText || '');
-    return rect.left < vw * 0.55 &&
-           rect.width > 180 && rect.width < vw * 0.6 &&
-           rect.height > 50 && rect.height < 500 &&
+    return rect.width > vw * 0.4 &&
+           rect.height > 80 && rect.height < 800 &&
            agePattern.test(text) &&
-           text.length > 40 && text.length < 2000;
-  }).filter((el, _, arr) => !arr.some(p => p !== el && p.contains(el)));
+           text.length > 80 && text.length < 6000;
+  }));
 }
 
 // -------------------------------------------------------
@@ -211,55 +241,27 @@ function showBadge(cls, text) {
 setupClickTracking();
 
 // -------------------------------------------------------
-// 一括判定：一覧の候補者カードを全て取得
+// 一括判定：プラットフォーム別カード検出で全候補者を取得
 // -------------------------------------------------------
 function extractAllCandidateCards() {
-  const agePattern = /(\d{2})歳/;
-  const vw = window.innerWidth;
-  const seen = new Set();
-  const results = [];
+  const cards = findCandidateCardsByPlatform();
 
-  // 候補者カードの候補要素を収集（左側リストエリア限定）
-  const allEls = Array.from(document.querySelectorAll('div, li, article'));
-
-  for (const el of allEls) {
-    const rect = el.getBoundingClientRect();
-    // 左側エリア・適度なサイズのカードに限定
-    if (rect.left > vw * 0.55) continue;
-    if (rect.width < 180 || rect.width > vw * 0.6) continue;
-    if (rect.height < 60 || rect.height > 500) continue;
-    if (rect.top < 0 || rect.bottom > window.innerHeight + 200) continue;
-
+  return cards.slice(0, 20).map(el => {
     const text = (el.innerText || '').trim();
-    if (!agePattern.test(text)) continue;
-    if (text.length < 40 || text.length > 2000) continue;
-
-    // 親子関係で重複除外
-    let isDup = false;
-    for (const r of results) {
-      if (r.el.contains(el) || el.contains(r.el)) { isDup = true; break; }
-    }
-    if (isDup || seen.has(el)) continue;
-    seen.add(el);
-
-    // カードから基本情報を抽出
     const ageMatch = text.match(/(\d{2})歳/);
     const incomeMatch = text.match(/(\d{3,4})[〜~～](\d{3,4})万円/) ||
                         text.match(/(\d{3,4})万円/) ||
                         text.match(/(\d{4})万/);
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
-    results.push({
+    return {
       el,
       text,
-      age: ageMatch ? parseInt(ageMatch[1]) : null,
-      incomeText: incomeMatch ? incomeMatch[0] : null,
-      summary: lines.slice(0, 8).join(' / ')
-    });
-  }
-
-  // カード面積が近いものをグループ化して最小単位を選ぶ
-  return results.slice(0, 20);
+      age:        ageMatch   ? parseInt(ageMatch[1]) : null,
+      incomeText: incomeMatch ? incomeMatch[0]       : null,
+      summary:    lines.slice(0, 12).join(' / ')
+    };
+  });
 }
 
 // -------------------------------------------------------
@@ -617,7 +619,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         badge.textContent = '🔍 判定中...';
         c.el.appendChild(badge);
       });
-      sendResponse({ success: true, cards: cards.map(c => ({ summary: c.summary, age: c.age, incomeText: c.incomeText, text: c.text.substring(0, 600) })) });
+      sendResponse({ success: true, cards: cards.map(c => ({ summary: c.summary, age: c.age, incomeText: c.incomeText, text: c.text.substring(0, 900) })) });
     } catch (e) {
       sendResponse({ success: false, error: e.message });
     }
