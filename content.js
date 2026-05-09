@@ -1038,36 +1038,36 @@ function hasProfileContent(text) {
 }
 
 // -------------------------------------------------------
-// RDS詳細パネルを特定する（プロフィール内容を必須条件に）
+// RDS詳細パネルを特定する
 // -------------------------------------------------------
 function findRDSDetailPanel() {
-  const vw = window.innerWidth;
   const candidates = [];
 
-  // 方法1: 「職務経歴」など複数のプロフィールキーワードを含む右側パネルを探す
-  document.querySelectorAll('div, section, article, main').forEach(el => {
-    const rect = el.getBoundingClientRect();
-    if (rect.left < vw * 0.3 || rect.width < 250 || rect.height < 300) return;
-    const text = (el.innerText || '').trim();
-    if (text.length < 200 || text.length > 20000) return;
-    if (!hasProfileContent(text)) return;
-    candidates.push({ el, score: text.length });
+  // 方法1: 「候補者詳細」見出しを持つ親コンテナ
+  document.querySelectorAll('h1,h2,h3,h4,h5,h6,div,span').forEach(el => {
+    const t = (el.innerText || el.textContent || '').trim();
+    if (t !== '候補者詳細' && t !== '候補者 詳細') return;
+    let parent = el.parentElement;
+    for (let i = 0; i < 8; i++) {
+      if (!parent) break;
+      const rect = parent.getBoundingClientRect();
+      const innerText = (parent.innerText || '').trim();
+      if (rect.width > 300 && innerText.length > 200) {
+        candidates.push({ el: parent, score: innerText.length });
+        break;
+      }
+      parent = parent.parentElement;
+    }
   });
 
-  // 方法2: 「候補者詳細」見出しを持つ親コンテナ
+  // 方法2: 右側寄りの大きなコンテナをスコアリング
   if (candidates.length === 0) {
-    document.querySelectorAll('h1,h2,h3,h4,h5,h6,div,span').forEach(el => {
-      const t = (el.innerText || el.textContent || '').trim();
-      if (t !== '候補者詳細' && t !== '候補者 詳細') return;
-      let parent = el.parentElement;
-      for (let i = 0; i < 10; i++) {
-        if (!parent) break;
-        const text = (parent.innerText || '').trim();
-        if (text.length > 300 && hasProfileContent(text)) {
-          candidates.push({ el: parent, score: text.length });
-          break;
-        }
-        parent = parent.parentElement;
+    const viewportWidth = window.innerWidth;
+    document.querySelectorAll('div, section, article, main').forEach(el => {
+      const rect = el.getBoundingClientRect();
+      if (rect.left > viewportWidth * 0.35 && rect.width > 300 && rect.height > 400) {
+        const innerText = (el.innerText || '').trim();
+        if (innerText.length > 200) candidates.push({ el, score: innerText.length });
       }
     });
   }
