@@ -460,18 +460,134 @@ function buildCriteriaText(criteria) {
   return lines.length > 0 ? lines.join('\n') : '- 条件未設定';
 }
 
-// ページロード完了後に自動実行
+// -------------------------------------------------------
+// 浮かぶ判定ボタン（ページ上に常時表示）
+// -------------------------------------------------------
+function injectFloatingButton() {
+  if (document.getElementById('snow-we-fab')) return;
+
+  const fab = document.createElement('button');
+  fab.id = 'snow-we-fab';
+  fab.textContent = '⚡ 一括判定';
+  fab.style.cssText = `
+    position: fixed; bottom: 24px; right: 24px; z-index: 2147483647;
+    background: #4f46e5; color: #fff; font-size: 14px; font-weight: 700;
+    padding: 12px 22px; border-radius: 28px; border: none; cursor: pointer;
+    box-shadow: 0 4px 16px rgba(79,70,229,0.45);
+    font-family: -apple-system, sans-serif;
+    transition: background 0.2s, transform 0.1s;
+  `;
+  fab.onmouseenter = () => { fab.style.background = '#4338ca'; fab.style.transform = 'scale(1.04)'; };
+  fab.onmouseleave = () => { fab.style.background = '#4f46e5'; fab.style.transform = 'scale(1)'; };
+  fab.onclick = () => triggerScreening();
+  document.body.appendChild(fab);
+}
+
+function setFabState(state, text) {
+  const fab = document.getElementById('snow-we-fab');
+  if (!fab) return;
+  const styles = {
+    ready:    { bg: '#4f46e5', cursor: 'pointer' },
+    loading:  { bg: '#7c3aed', cursor: 'not-allowed' },
+    done:     { bg: '#059669', cursor: 'pointer' },
+    error:    { bg: '#dc2626', cursor: 'pointer' },
+  };
+  const s = styles[state] || styles.ready;
+  fab.style.background = s.bg;
+  fab.style.cursor = s.cursor;
+  fab.textContent = text;
+  fab.disabled = state === 'loading';
+}
+
+async function triggerScreening() {
+  const stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria']);
+  const apiKey = stored.apiKey;
+  if (!apiKey) {
+    setFabState('error', '❌ APIキー未設定');
+    setTimeout(() => setFabState('ready', '⚡ 一括判定'), 3000);
+    return;
+  }
+
+  const criteria = stored.screeningCriteria || {};
+  injectStyles();
+
+  setFabState('loading', '📥 読み込み中...');
+
+  // 既存バッジをクリア
+  document.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
+
+  // 「さらに読み込む」を押して全員をDOMに展開
+  await loadAllCandidatesIntoDOM();
+
+  const cards = extractAllCandidateCards();
+  if (cards.length === 0) {
+    setFabState('error', '❌ 候補者なし');
+    setTimeout(() => setFabState('ready', '⚡ 一括判定'), 3000);
+    return;
+  }
+
+  // 判定中バッジ表示
+  cards.forEach(c => {
+    if (getComputedStyle(c.el).position === 'static') c.el.style.position = 'relative';
+    const badge = document.createElement('div');
+    badge.className = 'snow-we-badge batch checking';
+    badge.textContent = '🔍 判定中...';
+    c.el.appendChild(badge);
+  });
+
+  setFabState('loading', `🔍 ${cards.length}人を判定中...`);
+
+  try {
+    const results = await callBatchScreeningAPI(apiKey, cards, criteria);
+
+    results.forEach((r, i) => {
+      if (!cards[i]) return;
+      const el = cards[i].el;
+      el.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
+
+      const map = {
+        'OK':    ['ok',   '✅ スカウト候補'],
+        'NG':    ['ng',   '❌ 見送り'],
+        '要確認': ['warn', '⚠️ 要確認'],
+      };
+      const [cls, text] = map[r.overall] || ['warn', '⚠️ 要確認'];
+      const badge = document.createElement('div');
+      badge.className = `snow-we-badge batch ${cls}`;
+      badge.textContent = text;
+      el.appendChild(badge);
+
+      if (r.overall === 'OK') highlightAddButton(el);
+    });
+
+    const okCount   = results.filter(r => r.overall === 'OK').length;
+    const ngCount   = results.filter(r => r.overall === 'NG').length;
+    const warnCount = results.filter(r => r.overall === '要確認').length;
+    setFabState('done', `✅ ${okCount}人 ⚠️${warnCount} ❌${ngCount} | 🔄 再判定`);
+
+  } catch (e) {
+    setFabState('error', `❌ エラー`);
+    setTimeout(() => setFabState('ready', '⚡ 一括判定'), 4000);
+  }
+}
+
+// ページロード後にボタンを表示（分析は自動では走らない）
 window.addEventListener('load', () => {
-  // SPAのルート変化にも対応するため少し遅延
-  setTimeout(autoScreenCandidates, 1800);
+  setTimeout(() => {
+    injectStyles();
+    injectFloatingButton();
+  }, 1000);
 });
 
-// SPA（Next.js等）のページ遷移を検知して再実行
+// SPA のルート変化でボタンを再表示・状態リセット
 let _lastUrl = location.href;
 new MutationObserver(() => {
   if (location.href !== _lastUrl) {
     _lastUrl = location.href;
-    setTimeout(autoScreenCandidates, 1800);
+    setTimeout(() => {
+      injectStyles();
+      injectFloatingButton();
+      setFabState('ready', '⚡ 一括判定');
+    }, 1200);
   }
 }).observe(document.body, { childList: true, subtree: true });
 
