@@ -185,8 +185,8 @@ async function runGenerate() {
   $('generate-btn').disabled = false;
 }
 
-async function generatePersonalizedLine(apiKeyRaw, profileText) {
-  const apiKey = apiKeyRaw.replace(/[^\x20-\x7E]/g, '').trim();
+async function generatePersonalizedLine(apiKey, profileText) {
+  apiKey = apiKey.trim();
   const prompt = `あなたはハイクラスコンサル転職エージェントのアシスタントです。
 
 以下の候補者プロフィールを読んで、スカウトメールに挿入するパーソナライズ文を1文で作成してください。
@@ -227,7 +227,7 @@ ${profileText}`;
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 200,
       messages: [{ role: 'user', content: prompt }]
     })
@@ -289,8 +289,8 @@ async function runSuggestPosition() {
   $('suggest-btn').disabled = false;
 }
 
-async function suggestPosition(apiKeyRaw, profileText) {
-  const apiKey = apiKeyRaw.replace(/[^\x20-\x7E]/g, '').trim();
+async function suggestPosition(apiKey, profileText) {
+  apiKey = apiKey.trim();
   const prompt = `あなたはアクセンチュアへの転職支援を専門とするハイクラスエージェントのアシスタントです。
 
 以下の候補者プロフィールを読み、アクセンチュアで募集されている（または募集される可能性が高い）ポジションの中から最も適したものを3つ提案してください。
@@ -322,7 +322,7 @@ ${profileText}
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 600,
       messages: [{ role: 'user', content: prompt }]
     })
@@ -434,8 +434,8 @@ async function runBatchScreening() {
   $('batch-screening-btn').disabled = false;
 }
 
-async function runBatchScreeningAI(apiKeyRaw, cards, criteria) {
-  const apiKey = apiKeyRaw.replace(/[^\x20-\x7E]/g, '').trim();
+async function runBatchScreeningAI(apiKey, cards, criteria) {
+  apiKey = apiKey.trim();
   const criteriaLines = buildCriteriaLines(criteria);
 
   const candidateList = cards.map((c, i) =>
@@ -470,7 +470,7 @@ ${candidateList}
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }]
     })
@@ -577,8 +577,8 @@ async function runScreening() {
   $('screening-btn').disabled = false;
 }
 
-async function runScreeningAI(apiKeyRaw, profileText, criteria) {
-  const apiKey = apiKeyRaw.replace(/[^\x20-\x7E]/g, '').trim();
+async function runScreeningAI(apiKey, profileText, criteria) {
+  apiKey = apiKey.trim();
   const criteriaLines = [];
 
   if (criteria.ageMin || criteria.ageMax) {
@@ -651,7 +651,7 @@ ${profileText}
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 800,
       messages: [{ role: 'user', content: prompt }]
     })

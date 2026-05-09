@@ -425,7 +425,7 @@ ${candidateList}
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1200,
       messages: [{ role: 'user', content: prompt }]
     })
@@ -500,7 +500,7 @@ function setFabState(state, text) {
 
 async function triggerScreening() {
   const stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria']);
-  const apiKey = (stored.apiKey || '').replace(/[^\x20-\x7E]/g, '').trim();
+  const apiKey = (stored.apiKey || '').trim();
 
   // デバッグ：取得したキーの先頭10文字と長さを表示
   showAutoStatus(`🔑 キー確認: "${apiKey.substring(0, 12)}..." (${apiKey.length}文字)`, 6000);
