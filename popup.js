@@ -6,8 +6,14 @@ const $ = id => document.getElementById(id);
 // 初期化
 // ============================================================
 document.addEventListener('DOMContentLoaded', async () => {
-  const result = await chrome.storage.local.get(['apiKey']);
+  const result = await chrome.storage.local.get(['apiKey', 'currentPosition']);
   if (result.apiKey) $('api-key').value = result.apiKey;
+  if (result.currentPosition) $('position-select').value = result.currentPosition;
+
+  // ポジション変更時にstorageへ保存（content.jsのスカウト記録で使用）
+  $('position-select').addEventListener('change', () => {
+    chrome.storage.local.set({ currentPosition: $('position-select').value });
+  });
 
   // タブ切り替え
   document.querySelectorAll('.tab-btn').forEach(btn => {

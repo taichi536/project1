@@ -271,8 +271,8 @@ async function recordScoutSent(candidateId, info) {
   await chrome.storage.local.set({ [SCOUT_KEY]: history });
 
   // Googleスプレッドシートへ自動記録
-  const r = await chrome.storage.local.get(['gasSettings']);
-  const gas = r.gasSettings || {};
+  const r2 = await chrome.storage.local.get(['gasSettings', 'currentPosition']);
+  const gas = r2.gasSettings || {};
   if (gas.url && gas.recruiter) {
     const ageNum = (info.age || '').replace(/[歳才]/, '');
     fetch(gas.url, {
@@ -282,12 +282,12 @@ async function recordScoutSent(candidateId, info) {
         recruiter: gas.recruiter,
         company: info.company || '',
         age: ageNum,
+        univ: info.univ || '',
         media: platform,
-        position: '',
-        industry: '',
+        position: r2.currentPosition || '',
         ts: now,
       }),
-    }).catch(() => {}); // バックグラウンド送信、失敗しても無視
+    }).catch(() => {});
   }
 }
 
@@ -316,11 +316,20 @@ function getCandidateId(cardEl) {
 // カードから基本情報を抽出（履歴保存用）
 function extractBasicInfo(cardEl) {
   const text = (cardEl.innerText || '');
-  const ageMatch = text.match(/(\d{2})歳/);
+  const ageMatch = text.match(/(\d{2,3})歳/);
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+  // 大学名を抽出（「〇〇大学」「〇〇大学院」「〇〇高専」のパターン）
+  let univ = '';
+  const univMatch = text.match(/([^\s\n　]{1,20}(?:大学院|大学|高専|専門学校)(?:大学院?)?(?:[-－][^\s\n　]{1,10})?)/);
+  if (univMatch) {
+    univ = univMatch[1].replace(/[（(（].*/, '').replace(/[学部研究科].*$/, '大学').trim();
+  }
+
   return {
     age: ageMatch ? `${ageMatch[1]}歳` : '',
     company: lines[0] || '',
+    univ,
     name: '',
   };
 }
