@@ -469,20 +469,22 @@ async function triggerAutoAdd() {
     return;
   }
 
-  let addedCount = 0, ngCount = 0;
+  // ページをまたいで処理するため、進捗をストレージで管理
+  const progress = await loadAutoAddProgress();
+  let addedCount = progress.added || 0;
+  let totalProcessed = progress.processed || 0;
 
   for (let i = 0; i < cards.length; i++) {
     const { el, text: cardText } = cards[i];
-    setPanelBtnState('snow-we-btn-auto', 'loading', `🤖 ${i + 1}/${cards.length}人 ✅${addedCount}追加`);
+    setPanelBtnState('snow-we-btn-auto', 'loading',
+      `🤖 ${i + 1}/${cards.length}人 ✅${addedCount}追加`);
 
-    // カードを画面中央にスクロール
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     await sleep(500);
 
-    // 判定中バッジ
     setBatchBadge(el, 'checking', '🔍 判定中...');
 
-    // プロフィールテキスト取得（RDSは右パネルを優先）
+    // プロフィールテキスト取得（RDSは右パネル全文を優先）
     let profileText = cardText.substring(0, 900);
     if (getPlatform() === 'rds') {
       el.click();
@@ -496,24 +498,37 @@ async function triggerAutoAdd() {
 
     try {
       const overall = await judgeSingleCandidate(apiKey, profileText, criteria);
-      setBatchBadge(el, overall === 'OK' ? 'ok' : overall === 'NG' ? 'ng' : 'warn',
+      setBatchBadge(el,
+        overall === 'OK' ? 'ok' : overall === 'NG' ? 'ng' : 'warn',
         overall === 'OK' ? '✅ スカウト候補' : overall === 'NG' ? '❌ 見送り' : '⚠️ 要確認');
 
       if (overall === 'OK' || overall === '要確認') {
         const added = await clickAddButton(el);
         if (added) addedCount++;
-      } else {
-        ngCount++;
       }
     } catch (_) {
       setBatchBadge(el, 'warn', '⚠️ 判定失敗');
     }
 
+    totalProcessed++;
+    await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true });
     await sleep(700);
   }
 
-  setPanelBtnState('snow-we-btn-auto', 'done',
-    `🤖 完了 ✅${addedCount}人追加 ❌${ngCount}人見送り | 再実行`);
+  // 次のページがあれば自動で移動して処理を続ける
+  const nextPage = findNextPageButton();
+  if (nextPage) {
+    setPanelBtnState('snow-we-btn-auto', 'loading',
+      `🤖 次ページへ... (累計✅${addedCount}追加)`);
+    await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true });
+    await sleep(1000);
+    nextPage.click(); // ページ遷移 → 次ページで自動再開
+  } else {
+    // 全ページ完了
+    await saveAutoAddProgress({ running: false });
+    setPanelBtnState('snow-we-btn-auto', 'done',
+      `🤖 完了 ✅${addedCount}人追加 (全${totalProcessed}人) | 再実行`);
+  }
 }
 
 // 候補者カードの追加ボタンを探してクリックする
@@ -609,6 +624,39 @@ function setBatchBadge(el, cls, text) {
   badge.className = `snow-we-badge batch ${cls}`;
   badge.textContent = text;
   el.appendChild(badge);
+}
+
+// 次ページボタンを探す
+function findNextPageButton() {
+  const nextTexts = ['次へ', '次のページ', '>', '›', 'Next'];
+  // ページネーションエリアを優先して探す
+  const paginationArea = document.querySelector(
+    '[class*="pagination"],[class*="pager"],[class*="page-nav"],[aria-label*="ページ"]'
+  ) || document.body;
+
+  for (const el of paginationArea.querySelectorAll('a,button,[role="button"]')) {
+    const t = (el.innerText || el.getAttribute('aria-label') || '').trim();
+    if (nextTexts.some(kw => t === kw || t.includes(kw))) {
+      // 無効化・現在ページでないことを確認
+      if (!el.disabled && !el.classList.contains('disabled') &&
+          !el.getAttribute('aria-disabled') &&
+          !el.classList.contains('active') && !el.classList.contains('current')) {
+        return el;
+      }
+    }
+  }
+  return null;
+}
+
+// 自動追加の進捗をストレージに保存
+async function saveAutoAddProgress(data) {
+  await chrome.storage.local.set({ autoAddProgress: data });
+}
+
+// 自動追加の進捗をストレージから読み込む
+async function loadAutoAddProgress() {
+  const r = await chrome.storage.local.get(['autoAddProgress']);
+  return r.autoAddProgress || {};
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -763,11 +811,19 @@ async function triggerScreening() {
   }
 }
 
-// ページロード後にボタンを表示（分析は自動では走らない）
+// ページロード後にボタンを表示し、自動追加が継続中なら再開
 window.addEventListener('load', () => {
-  setTimeout(() => {
+  setTimeout(async () => {
     injectStyles();
     injectFloatingButton();
+
+    // 自動追加モードが継続中かチェック
+    const progress = await loadAutoAddProgress();
+    if (progress.running) {
+      // 少し待ってから自動再開（ページが完全に安定するまで）
+      await sleep(1500);
+      triggerAutoAdd();
+    }
   }, 1000);
 });
 
