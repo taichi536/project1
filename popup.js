@@ -370,27 +370,24 @@ async function runSuggestPosition() {
 
 async function suggestPosition(apiKey, profileText) {
   apiKey = sanitizeApiKey(apiKey);
+  const positionList = Array.from(document.querySelectorAll('#position-select option'))
+    .map(o => o.value).filter(Boolean).join('\n');
   const prompt = `あなたはアクセンチュアへの転職支援を専門とするハイクラスエージェントのアシスタントです。
 
-以下の候補者プロフィールを読み、アクセンチュアで募集されている（または募集される可能性が高い）ポジションの中から最も適したものを3つ提案してください。
+以下の候補者プロフィールを読み、【募集ポジション一覧】の中から候補者に最も適したポジションを3つ選んでください。
 
 【重要な指示】
-- 候補者の経歴に最も親和性の高いポジション名を、アクセンチュアの命名規則に合わせて自由に提案してください
-- ポジション名は日本語で、具体的かつ正式な表現にしてください
+- 必ず【募集ポジション一覧】に記載されたポジション名をそのまま使用すること
+- 一覧にないポジション名は絶対に使用しないこと
+
+【募集ポジション一覧】
+${positionList}
 
 【候補者プロフィール】
 ${profileText}
 
-以下のJSON形式のみで出力してください（説明・前置き不要）:
-{
-  "suggestions": [
-    {
-      "position": "ポジション名",
-      "match_score": 90,
-      "reason": "このポジションを推奨する理由を2〜3文で。"
-    }
-  ]
-}`;
+以下のJSON形式のみで出力してください（コードブロック・説明不要）:
+{"suggestions":[{"position":"ポジション名（一覧から選択）","match_score":90,"reason":"推奨理由を2文で"}]}`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -402,7 +399,7 @@ ${profileText}
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 600,
+      max_tokens: 800,
       messages: [{ role: 'user', content: prompt }]
     })
   });
@@ -413,8 +410,9 @@ ${profileText}
   }
   const data = await response.json();
   const text = (data.content?.[0]?.text || '').trim();
-  const clean = text.replace(/```json|```/g, '').trim();
-  return JSON.parse(clean);
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('AIの応答からJSONを抽出できませんでした');
+  return JSON.parse(jsonMatch[0]);
 }
 
 function renderSuggestion(result) {
