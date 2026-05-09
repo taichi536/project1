@@ -451,6 +451,7 @@ function renderSuggestion(result) {
 // タブ3: 一次選定（一括）
 // ============================================================
 $('batch-screening-btn').addEventListener('click', () => runBatchScreening());
+$('auto-add-btn').addEventListener('click', () => runAutoAdd());
 $('screening-btn').addEventListener('click', () => runScreening());
 
 async function runBatchScreening() {
@@ -576,6 +577,26 @@ function buildCriteriaLines(criteria) {
   if (criteria.requiredKeywords) lines.push(`- 必須経験: ${criteria.requiredKeywords}`);
   if (criteria.excludeKeywords) lines.push(`- 除外: ${criteria.excludeKeywords}`);
   return lines.length > 0 ? lines.join('\n') : '- 条件未設定';
+}
+
+async function runAutoAdd() {
+  const apiKey = $('api-key').value.trim();
+  if (!apiKey) {
+    setStatus('screening', 'error', 'APIキーを入力して保存してください');
+    return;
+  }
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab) return;
+  $('auto-add-btn').disabled = true;
+  setStatus('screening', 'loading', '🤖 自動リスト追加を開始します...');
+  try {
+    await chrome.tabs.sendMessage(tab.id, { action: 'triggerAutoAdd' });
+    setStatus('screening', 'loading', '🤖 実行中です。ページ上で進捗を確認してください');
+    setTimeout(() => { $('auto-add-btn').disabled = false; }, 3000);
+  } catch (e) {
+    setStatus('screening', 'error', '❌ エラー：一覧ページで実行してください');
+    $('auto-add-btn').disabled = false;
+  }
 }
 
 async function runScreening() {

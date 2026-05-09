@@ -552,24 +552,21 @@ async function triggerAutoAdd() {
   const apiKey = (stored.apiKey || '').replace(/[^\x21-\x7E]/g, '').trim();
 
   if (!apiKey || apiKey.length < 20) {
-    setPanelBtnState('snow-we-btn-auto', 'error', '❌ APIキー未設定');
     showAutoStatus('⚙️設定タブでAPIキーを保存してください', 4000);
-    setTimeout(() => setPanelBtnState('snow-we-btn-auto', 'ready', '🤖 自動リスト追加'), 3000);
     return;
   }
 
   const criteria = stored.screeningCriteria || {};
   injectStyles();
 
-  setPanelBtnState('snow-we-btn-auto', 'loading', '📥 読み込み中...');
+  showAutoStatus('📥 読み込み中...');
   document.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
 
   await loadAllCandidatesIntoDOM();
 
   const cards = extractAllCandidateCards();
   if (cards.length === 0) {
-    setPanelBtnState('snow-we-btn-auto', 'error', '❌ 候補者なし');
-    setTimeout(() => setPanelBtnState('snow-we-btn-auto', 'ready', '🤖 自動リスト追加'), 3000);
+    showAutoStatus('❌ 候補者が見つかりません。一覧ページで実行してください。', 4000);
     return;
   }
 
@@ -583,8 +580,7 @@ async function triggerAutoAdd() {
 
   for (let i = 0; i < cards.length; i++) {
     const { el, text: cardText } = cards[i];
-    setPanelBtnState('snow-we-btn-auto', 'loading',
-      `🤖 ${i + 1}/${cards.length}人 ✅${addedCount}追加`);
+    showAutoStatus(`🤖 ${i + 1}/${cards.length}人処理中 ✅${addedCount}人追加`);
 
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     await sleep(500);
@@ -636,16 +632,14 @@ async function triggerAutoAdd() {
   // 次のページがあれば自動で移動して処理を続ける
   const nextPage = findNextPageButton();
   if (nextPage) {
-    setPanelBtnState('snow-we-btn-auto', 'loading',
-      `🤖 次ページへ... (累計✅${addedCount}追加)`);
+    showAutoStatus(`🤖 次ページへ移動中... (累計✅${addedCount}人追加)`);
     await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true });
     await sleep(1000);
     nextPage.click(); // ページ遷移 → 次ページで自動再開
   } else {
     // 全ページ完了
     await saveAutoAddProgress({ running: false });
-    setPanelBtnState('snow-we-btn-auto', 'done',
-      `🤖 完了 ✅${addedCount}人追加 (全${totalProcessed}人) | 再実行`);
+    showAutoStatus(`🤖 完了！ ✅${addedCount}人を検討リストに追加 (全${totalProcessed}人中)`, 8000);
   }
 }
 
@@ -907,166 +901,17 @@ function buildCriteriaText(criteria) {
   return lines.length > 0 ? lines.join('\n') : '- 条件未設定';
 }
 
-// -------------------------------------------------------
-// 浮かぶ操作パネル（2ボタン）
-// -------------------------------------------------------
-function injectFloatingButton() {
-  if (document.getElementById('snow-we-panel')) return;
-
-  const panel = document.createElement('div');
-  panel.id = 'snow-we-panel';
-  panel.style.cssText = `
-    position: fixed; bottom: 20px; right: 20px; z-index: 2147483647;
-    display: flex; flex-direction: column; gap: 8px; align-items: stretch;
-    font-family: -apple-system, sans-serif;
-  `;
-
-  const makeBtn = (id, text, bg) => {
-    const btn = document.createElement('button');
-    btn.id = id;
-    btn.textContent = text;
-    btn.dataset.bg = bg;
-    btn.style.cssText = `
-      background: ${bg}; color: #fff; font-size: 13px; font-weight: 700;
-      padding: 11px 20px; border-radius: 24px; border: none; cursor: pointer;
-      box-shadow: 0 4px 14px rgba(0,0,0,0.25); white-space: nowrap;
-      transition: filter 0.15s, transform 0.1s;
-    `;
-    btn.onmouseenter = () => { btn.style.filter = 'brightness(1.1)'; btn.style.transform = 'scale(1.03)'; };
-    btn.onmouseleave = () => { btn.style.filter = ''; btn.style.transform = ''; };
-    return btn;
-  };
-
-  const screenBtn = makeBtn('snow-we-btn-screen', '⚡ 一括判定', '#4f46e5');
-  const autoBtn   = makeBtn('snow-we-btn-auto',   '🤖 自動リスト追加', '#0369a1');
-
-  screenBtn.onclick = () => triggerScreening();
-  autoBtn.onclick   = () => triggerAutoAdd();
-
-  panel.appendChild(screenBtn);
-  panel.appendChild(autoBtn);
-  document.body.appendChild(panel);
-}
-
-function setPanelBtnState(btnId, state, text) {
-  const btn = document.getElementById(btnId);
-  if (!btn) return;
-  const bgMap = {
-    ready:   btn.dataset.bg,
-    loading: '#7c3aed',
-    done:    '#059669',
-    error:   '#dc2626',
-  };
-  btn.style.background = bgMap[state] || btn.dataset.bg;
-  btn.style.cursor = state === 'loading' ? 'not-allowed' : 'pointer';
-  btn.disabled = state === 'loading';
-  btn.textContent = text;
-}
-
-// 後方互換のためsetFabStateも残す
-function setFabState(state, text) { setPanelBtnState('snow-we-btn-screen', state, text); }
-
-async function triggerScreening() {
-  const stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria']);
-  const apiKey = (stored.apiKey || '').replace(/[^\x21-\x7E]/g, '').trim();
-
-  if (!apiKey || apiKey.length < 20) {
-    setFabState('error', '❌ APIキー未設定');
-    showAutoStatus('拡張機能の⚙️設定タブでAPIキーを保存してください', 5000);
-    setTimeout(() => setFabState('ready', '⚡ 一括判定'), 3000);
-    return;
-  }
-
-  const criteria = stored.screeningCriteria || {};
-  injectStyles();
-
-  setFabState('loading', '📥 読み込み中...');
-
-  // 既存バッジをクリア
-  document.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
-
-  // 「さらに読み込む」を押して全員をDOMに展開
-  await loadAllCandidatesIntoDOM();
-
-  const cards = extractAllCandidateCards();
-  if (cards.length === 0) {
-    setFabState('error', '❌ 候補者なし');
-    setTimeout(() => setFabState('ready', '⚡ 一括判定'), 3000);
-    return;
-  }
-
-  // 判定中バッジ表示
-  cards.forEach(c => {
-    if (getComputedStyle(c.el).position === 'static') c.el.style.position = 'relative';
-    const badge = document.createElement('div');
-    badge.className = 'snow-we-badge batch checking';
-    badge.textContent = '🔍 判定中...';
-    c.el.appendChild(badge);
-  });
-
-  setFabState('loading', `🔍 ${cards.length}人を判定中...`);
-
-  try {
-    const results = await callBatchScreeningAPI(apiKey, cards, criteria);
-
-    results.forEach((r, i) => {
-      if (!cards[i]) return;
-      const el = cards[i].el;
-      el.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
-
-      const map = {
-        'OK':    ['ok',   '✅ スカウト候補'],
-        'NG':    ['ng',   '❌ 見送り'],
-        '要確認': ['warn', '⚠️ 要確認'],
-      };
-      const [cls, text] = map[r.overall] || ['warn', '⚠️ 要確認'];
-      const badge = document.createElement('div');
-      badge.className = `snow-we-badge batch ${cls}`;
-      badge.textContent = text;
-      el.appendChild(badge);
-
-      if (r.overall === 'OK') highlightAddButton(el);
-    });
-
-    const okCount   = results.filter(r => r.overall === 'OK').length;
-    const ngCount   = results.filter(r => r.overall === 'NG').length;
-    const warnCount = results.filter(r => r.overall === '要確認').length;
-    setFabState('done', `✅ ${okCount}人 ⚠️${warnCount} ❌${ngCount} | 🔄 再判定`);
-
-  } catch (e) {
-    setFabState('error', `❌ エラー`);
-    setTimeout(() => setFabState('ready', '⚡ 一括判定'), 4000);
-  }
-}
-
-// ページロード後にボタンを表示し、自動追加が継続中なら再開
+// ページロード後に自動追加が継続中なら再開
 window.addEventListener('load', () => {
   setTimeout(async () => {
     injectStyles();
-    injectFloatingButton();
-
-    // 自動追加モードが継続中かチェック
     const progress = await loadAutoAddProgress();
     if (progress.running) {
-      // 少し待ってから自動再開（ページが完全に安定するまで）
       await sleep(1500);
       triggerAutoAdd();
     }
   }, 1000);
 });
-
-// SPA のルート変化でボタンを再表示・状態リセット
-let _lastUrl = location.href;
-new MutationObserver(() => {
-  if (location.href !== _lastUrl) {
-    _lastUrl = location.href;
-    setTimeout(() => {
-      injectStyles();
-      injectFloatingButton();
-      setFabState('ready', '⚡ 一括判定');
-    }, 1200);
-  }
-}).observe(document.body, { childList: true, subtree: true });
 
 // -------------------------------------------------------
 // 一括判定：プラットフォーム別カード検出で全候補者を取得
@@ -1527,6 +1372,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         error: e.message
       });
     }
+  }
+
+  if (request.action === 'triggerAutoAdd') {
+    triggerAutoAdd();
+    sendResponse({ success: true });
   }
 
   if (request.action === 'debugDOM') {
