@@ -749,6 +749,53 @@ function renderScreeningResult(result) {
 }
 
 // ============================================================
+// APIキー接続テスト
+// ============================================================
+$('api-test-btn').addEventListener('click', async () => {
+  const apiKey = $('api-key').value.trim();
+  const resultEl = $('api-test-result');
+  resultEl.style.display = 'block';
+  resultEl.style.color = '#2c2c2a';
+  resultEl.textContent = '接続中...';
+
+  if (!apiKey) {
+    resultEl.textContent = '❌ APIキーが入力されていません';
+    return;
+  }
+
+  resultEl.textContent = `送信キー: "${apiKey.substring(0, 12)}..." (${apiKey.length}文字)`;
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 10,
+        messages: [{ role: 'user', content: 'hi' }]
+      })
+    });
+
+    const data = await response.json();
+    if (response.ok) {
+      resultEl.textContent = `✅ 接続成功！`;
+      resultEl.style.color = '#085041';
+    } else {
+      resultEl.textContent = `❌ ${response.status}: ${JSON.stringify(data.error || data)}`;
+      resultEl.style.color = '#b91c1c';
+    }
+  } catch (e) {
+    resultEl.textContent = `❌ 通信エラー: ${e.message}`;
+    resultEl.style.color = '#b91c1c';
+  }
+});
+
+// ============================================================
 // デバッグ
 // ============================================================
 $('debug-btn').addEventListener('click', async () => {
