@@ -241,6 +241,50 @@ function showBadge(cls, text) {
 setupClickTracking();
 
 // -------------------------------------------------------
+// 「さらに読み込む」ボタンを押して全候補者をDOMに展開
+// -------------------------------------------------------
+async function loadAllCandidatesIntoDOM() {
+  const platform = getPlatform();
+  const LOAD_MORE_TEXTS = ['さらに読み込む', 'もっと見る', 'Load more', '次の候補者'];
+  const MAX_LOADS = 15;
+
+  function findLoadMoreBtn() {
+    for (const el of document.querySelectorAll('button, a, div[role="button"], span')) {
+      const t = (el.innerText || '').trim();
+      if (LOAD_MORE_TEXTS.some(kw => t.includes(kw))) return el;
+    }
+    return null;
+  }
+
+  // ページ最下部までスクロールして遅延ロードを誘発
+  async function scrollToBottom() {
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    await new Promise(r => setTimeout(r, 800));
+  }
+
+  let loaded = 0;
+
+  for (let i = 0; i < MAX_LOADS; i++) {
+    await scrollToBottom();
+    const btn = findLoadMoreBtn();
+    if (!btn) break;
+
+    const countBefore = findCandidateCardsByPlatform().length;
+    showAutoStatus(`📥 さらに読み込み中... (${loaded + 1}回目)`);
+    btn.click();
+    await new Promise(r => setTimeout(r, 2000));
+    const countAfter = findCandidateCardsByPlatform().length;
+
+    loaded++;
+    if (countAfter <= countBefore) break; // 増えなければ終了
+  }
+
+  // 判定後バッジが見えるよう先頭に戻る
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  await new Promise(r => setTimeout(r, 600));
+}
+
+// -------------------------------------------------------
 // 自動判定：ページロード時に全候補者を自動スクリーニング
 // -------------------------------------------------------
 async function autoScreenCandidates() {
@@ -251,12 +295,22 @@ async function autoScreenCandidates() {
 
   const criteria = stored.screeningCriteria || {};
 
-  // カード検出（少し待ってからDOMが安定した後に実行）
+  // カード検出（DOMが安定するまで待つ）
   await new Promise(r => setTimeout(r, 400));
-  const cards = extractAllCandidateCards();
-  if (cards.length === 0) return; // 候補者カードがなければ終了
+
+  // 初回カードチェック：候補者一覧ページでなければ終了
+  const initialCards = extractAllCandidateCards();
+  if (initialCards.length === 0) return;
 
   injectStyles();
+  showAutoStatus('📥 候補者を全件読み込み中...');
+
+  // 「さらに読み込む」を自動クリックして全候補者をDOMに展開
+  await loadAllCandidatesIntoDOM();
+
+  // 全件読み込み後に再取得
+  const cards = extractAllCandidateCards();
+  if (cards.length === 0) return;
 
   // 判定中バッジを全カードに表示
   cards.forEach(c => {
@@ -422,7 +476,7 @@ new MutationObserver(() => {
 function extractAllCandidateCards() {
   const cards = findCandidateCardsByPlatform();
 
-  return cards.slice(0, 20).map(el => {
+  return cards.slice(0, 50).map(el => {
     const text = (el.innerText || '').trim();
     const ageMatch = text.match(/(\d{2})歳/);
     const incomeMatch = text.match(/(\d{3,4})[〜~～](\d{3,4})万円/) ||
@@ -782,25 +836,29 @@ function extractProfile() {
 // メッセージリスナー
 // -------------------------------------------------------
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // async処理を含むハンドラはIIFEでラップ
   if (request.action === 'getBatchCandidates') {
-    try {
-      injectStyles();
-      const cards = extractAllCandidateCards();
-      // 判定中バッジを全カードに表示
-      cards.forEach(c => {
-        if (getComputedStyle(c.el).position === 'static') c.el.style.position = 'relative';
-        c.el.classList.add('snow-we-selected');
-        const badge = document.createElement('div');
-        badge.className = 'snow-we-badge checking';
-        badge.textContent = '🔍 判定中...';
-        c.el.appendChild(badge);
-      });
-      sendResponse({ success: true, cards: cards.map(c => ({ summary: c.summary, age: c.age, incomeText: c.incomeText, text: c.text.substring(0, 900) })) });
-    } catch (e) {
-      sendResponse({ success: false, error: e.message });
-    }
+    (async () => {
+      try {
+        injectStyles();
+        showAutoStatus('📥 候補者を全件読み込み中...');
+        await loadAllCandidatesIntoDOM();
+        const cards = extractAllCandidateCards();
+        cards.forEach(c => {
+          if (getComputedStyle(c.el).position === 'static') c.el.style.position = 'relative';
+          c.el.classList.add('snow-we-selected');
+          const badge = document.createElement('div');
+          badge.className = 'snow-we-badge checking';
+          badge.textContent = '🔍 判定中...';
+          c.el.appendChild(badge);
+        });
+        sendResponse({ success: true, cards: cards.map(c => ({ summary: c.summary, age: c.age, incomeText: c.incomeText, text: c.text.substring(0, 900) })) });
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
+    return true;
   }
-
   if (request.action === 'setBatchResults') {
     try {
       const cards = extractAllCandidateCards();
