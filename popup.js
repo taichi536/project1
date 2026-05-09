@@ -34,13 +34,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ============================================================
 // APIキー保存
 // ============================================================
+// APIキーからASCII範囲外の文字を除去する
+function sanitizeApiKey(raw) {
+  return (raw || '').replace(/[^\x21-\x7E]/g, '').trim();
+}
+
 $('save-btn').addEventListener('click', () => {
-  const key = $('api-key').value.trim();
+  const raw = $('api-key').value;
+  const key = sanitizeApiKey(raw);
   if (!key) return;
-  chrome.storage.local.set({ apiKey: key }, () => {
+
+  // 除去された文字があれば入力欄を更新して通知
+  if (key !== raw.trim()) {
+    $('api-key').value = key;
+    $('save-btn').textContent = '⚠️ 不正文字を除去して保存';
+    setTimeout(() => { $('save-btn').textContent = '保存'; }, 3000);
+  } else {
     $('save-btn').textContent = '保存済';
     setTimeout(() => { $('save-btn').textContent = '保存'; }, 2000);
-  });
+  }
+
+  chrome.storage.local.set({ apiKey: key });
 });
 
 // ============================================================
@@ -141,7 +155,7 @@ ${personalizedLine}
 }
 
 async function runGenerate() {
-  const apiKey = $('api-key').value.trim();
+  const apiKey = sanitizeApiKey($('api-key').value);
   if (!apiKey) {
     setStatus('generate', 'error', 'APIキーを入力して保存してください');
     return;
@@ -186,7 +200,7 @@ async function runGenerate() {
 }
 
 async function generatePersonalizedLine(apiKey, profileText) {
-  apiKey = apiKey.trim();
+  apiKey = sanitizeApiKey(apiKey);
   const prompt = `あなたはハイクラスコンサル転職エージェントのアシスタントです。
 
 以下の候補者プロフィールを読んで、スカウトメールに挿入するパーソナライズ文を1文で作成してください。
@@ -290,7 +304,7 @@ async function runSuggestPosition() {
 }
 
 async function suggestPosition(apiKey, profileText) {
-  apiKey = apiKey.trim();
+  apiKey = sanitizeApiKey(apiKey);
   const prompt = `あなたはアクセンチュアへの転職支援を専門とするハイクラスエージェントのアシスタントです。
 
 以下の候補者プロフィールを読み、アクセンチュアで募集されている（または募集される可能性が高い）ポジションの中から最も適したものを3つ提案してください。
@@ -435,7 +449,7 @@ async function runBatchScreening() {
 }
 
 async function runBatchScreeningAI(apiKey, cards, criteria) {
-  apiKey = apiKey.trim();
+  apiKey = sanitizeApiKey(apiKey);
   const criteriaLines = buildCriteriaLines(criteria);
 
   const candidateList = cards.map((c, i) =>
@@ -578,7 +592,7 @@ async function runScreening() {
 }
 
 async function runScreeningAI(apiKey, profileText, criteria) {
-  apiKey = apiKey.trim();
+  apiKey = sanitizeApiKey(apiKey);
   const criteriaLines = [];
 
   if (criteria.ageMin || criteria.ageMax) {

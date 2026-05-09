@@ -500,7 +500,7 @@ function setFabState(state, text) {
 
 async function triggerScreening() {
   const stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria']);
-  const apiKey = (stored.apiKey || '').trim();
+  const apiKey = (stored.apiKey || '').replace(/[^\x21-\x7E]/g, '').trim();
 
   // デバッグ：取得したキーの先頭10文字と長さを表示
   showAutoStatus(`🔑 キー確認: "${apiKey.substring(0, 12)}..." (${apiKey.length}文字)`, 6000);
