@@ -484,17 +484,8 @@ async function triggerAutoAdd() {
 
     setBatchBadge(el, 'checking', '🔍 判定中...');
 
-    // プロフィールテキスト取得（RDSは右パネル全文を優先）
-    let profileText = cardText.substring(0, 900);
-    if (getPlatform() === 'rds') {
-      el.click();
-      await sleep(1500);
-      const panel = findRDSDetailPanel();
-      if (panel) {
-        const full = extractMainText(panel, 2500);
-        if (full.length > profileText.length) profileText = full;
-      }
-    }
+    // プロフィール全文取得（プラットフォーム別）
+    let profileText = await getFullProfile(el, cardText);
 
     try {
       const overall = await judgeSingleCandidate(apiKey, profileText, criteria);
@@ -528,6 +519,95 @@ async function triggerAutoAdd() {
     await saveAutoAddProgress({ running: false });
     setPanelBtnState('snow-we-btn-auto', 'done',
       `🤖 完了 ✅${addedCount}人追加 (全${totalProcessed}人) | 再実行`);
+  }
+}
+
+// -------------------------------------------------------
+// プロフィール全文取得（プラットフォーム別）
+// -------------------------------------------------------
+async function getFullProfile(cardEl, fallbackText) {
+  const platform = getPlatform();
+
+  // RDS：カードクリック → 右パネルで全文取得
+  if (platform === 'rds') {
+    cardEl.click();
+    await sleep(1500);
+    const panel = findRDSDetailPanel();
+    if (panel) {
+      const full = extractMainText(panel, 3000);
+      if (full.length > 200) return full;
+    }
+    return fallbackText.substring(0, 900);
+  }
+
+  // その他：プロフィールURLをフェッチして全文取得
+  const profileUrl = findProfileUrl(cardEl);
+  if (profileUrl) {
+    const fetched = await fetchProfilePage(profileUrl);
+    if (fetched && fetched.length > 300) return fetched;
+  }
+
+  // フォールバック：一覧カードのテキスト
+  return fallbackText.substring(0, 900);
+}
+
+// カード内のプロフィールページURLを探す
+function findProfileUrl(cardEl) {
+  const platform = getPlatform();
+  const patterns = {
+    dodax:    [/member_search\/detail/, /member_detail/, /\/profile\//],
+    ambi:     [/\/scout\/member\//, /\/member\/\d+/, /company\/scout/],
+    green:    [/green-japan\.com\/user\//, /\/members\//],
+    mynavi:   [/\/candidate\//, /\/resume\//],
+    bizreach: [/\/resume\//, /\/candidate\//],
+  };
+
+  const platformPatterns = patterns[platform] || [];
+
+  for (const link of cardEl.querySelectorAll('a[href]')) {
+    const href = link.href || '';
+    if (!href || href === '#' || href.startsWith('javascript')) continue;
+    if (platformPatterns.some(p => p.test(href))) return href;
+  }
+
+  // フォールバック：カード内の最初の内部リンク
+  for (const link of cardEl.querySelectorAll('a[href]')) {
+    const href = link.href || '';
+    if (href.startsWith(location.origin) && !href.includes('#')) return href;
+  }
+
+  return null;
+}
+
+// プロフィールページをフェッチしてテキストを返す
+async function fetchProfilePage(url) {
+  try {
+    const res = await fetch(url, {
+      credentials: 'include',
+      headers: { 'Accept': 'text/html,application/xhtml+xml' }
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+
+    // 不要要素を除去
+    doc.querySelectorAll('script,style,noscript,nav,header,footer,aside,[class*="banner"],[class*="ad"]').forEach(e => e.remove());
+
+    // プロフィールキーワードを含む最大ブロックを探す
+    const keywords = ['職務経歴', '職歴', '業務内容', 'スキル', '学歴', '自己PR', '転職理由', '経験'];
+    let best = '';
+    doc.querySelectorAll('main,[role="main"],#main,.profile,.resume,section,article').forEach(el => {
+      const t = (el.innerText || el.textContent || '').trim();
+      if (t.length > best.length && keywords.some(kw => t.includes(kw))) best = t;
+    });
+
+    if (best.length < 200) {
+      best = (doc.body?.innerText || doc.body?.textContent || '').trim();
+    }
+
+    return best.replace(/\s+/g, ' ').trim().substring(0, 3000);
+  } catch {
+    return null;
   }
 }
 
