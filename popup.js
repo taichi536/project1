@@ -390,8 +390,9 @@ ${positionList}
 【候補者プロフィール】
 ${profileText}
 
-以下のJSON形式のみで出力してください（コードブロック・説明不要）:
-{"suggestions":[{"position":"ポジション名（一覧から選択）","match_score":90,"reason":"推奨理由を2文で"}]}`;
+以下のJSON形式のみで出力してください（コードブロック・前置き・説明は一切不要）:
+{"suggestions":[{"position":"ポジション名","match_score":90,"reason":"推奨理由を2文で記述"}]}
+※reasonにダブルクォートを含めないこと。改行しないこと。`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -416,7 +417,14 @@ ${profileText}
   const text = (data.content?.[0]?.text || '').trim();
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('AIの応答からJSONを抽出できませんでした');
-  return JSON.parse(jsonMatch[0]);
+  const cleaned = jsonMatch[0]
+    .replace(/,(\s*[}\]])/g, '$1')   // 末尾カンマを除去
+    .replace(/[\x00-\x1F\x7F]/g, ' '); // 制御文字を除去
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    throw new Error(`JSON解析エラー（AIの応答形式が不正）: ${e.message}`);
+  }
 }
 
 function renderSuggestion(result) {
