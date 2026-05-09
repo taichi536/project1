@@ -10,6 +10,7 @@
     "clipboardWrite"
   ],
   "host_permissions": [
+    "https://api.anthropic.com/*",
     "https://bizreach.biz/*",
     "https://www.bizreach.biz/*",
     "https://*.bizreach.biz/*",

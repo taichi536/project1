@@ -332,7 +332,8 @@ function showAutoStatus(message, autoDismissMs) {
 }
 
 // Claude APIを呼び出す（content.js内から直接）
-async function callBatchScreeningAPI(apiKey, cards, criteria) {
+async function callBatchScreeningAPI(apiKeyRaw, cards, criteria) {
+  const apiKey = apiKeyRaw.replace(/[^\x20-\x7E]/g, '').trim();
   const criteriaLines = buildCriteriaText(criteria);
   const candidateList = cards.map((c, i) =>
     `候補者${i + 1}: ${c.summary}`
