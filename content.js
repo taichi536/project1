@@ -205,11 +205,14 @@ function highlightAddButton(cardEl) {
   tip.textContent = '👆 ここをクリック';
   btn.appendChild(tip);
 
-  // 10秒後に自動解除
-  setTimeout(() => {
+  // 5分後に自動解除（追加ボタンをクリックしたら即解除）
+  const dismissHighlight = () => {
     btn.classList.remove('snow-we-btn-highlight');
     tip.remove();
-  }, 10000);
+    btn.removeEventListener('click', dismissHighlight);
+  };
+  btn.addEventListener('click', dismissHighlight);
+  setTimeout(dismissHighlight, 5 * 60 * 1000);
 }
 
 function setupClickTracking() {
@@ -219,8 +222,10 @@ function setupClickTracking() {
     const clicked = cards.find(c => c.contains(e.target) || c === e.target);
     if (!clicked) return;
 
-    document.querySelectorAll('.snow-we-badge').forEach(b => b.remove());
+    // 以前の選択ハイライトだけ外す（バッジは消さない）
     document.querySelectorAll('.snow-we-selected').forEach(el => el.classList.remove('snow-we-selected'));
+    // 単体判定バッジ（batch以外）だけ消す
+    document.querySelectorAll('.snow-we-badge:not(.batch)').forEach(b => b.remove());
 
     _selectedCard = clicked;
     if (getComputedStyle(clicked).position === 'static') clicked.style.position = 'relative';
@@ -316,7 +321,7 @@ async function autoScreenCandidates() {
   cards.forEach(c => {
     if (getComputedStyle(c.el).position === 'static') c.el.style.position = 'relative';
     const badge = document.createElement('div');
-    badge.className = 'snow-we-badge checking';
+    badge.className = 'snow-we-badge batch checking';
     badge.textContent = '🔍 判定中...';
     c.el.appendChild(badge);
   });
@@ -339,7 +344,7 @@ async function autoScreenCandidates() {
       };
       const [cls, text] = map[r.overall] || ['warn', '⚠️ 要確認'];
       const badge = document.createElement('div');
-      badge.className = `snow-we-badge ${cls}`;
+      badge.className = `snow-we-badge batch ${cls}`; // batch クラスでクリック時消去を防ぐ
       badge.textContent = text;
       el.appendChild(badge);
 
@@ -870,7 +875,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const map = { OK: ['ok', '✅ スカウト推奨'], NG: ['ng', '❌ 見送り'], '要確認': ['warn', '⚠️ 要確認'] };
         const [cls, text] = map[r.overall] || ['warn', '⚠️ 要確認'];
         const badge = document.createElement('div');
-        badge.className = `snow-we-badge ${cls}`;
+        badge.className = `snow-we-badge batch ${cls}`;
         badge.textContent = text;
         el.appendChild(badge);
       });
