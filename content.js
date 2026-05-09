@@ -391,8 +391,7 @@ function showAutoStatus(message, autoDismissMs) {
 }
 
 // Claude APIを呼び出す（content.js内から直接）
-async function callBatchScreeningAPI(apiKeyRaw, cards, criteria) {
-  const apiKey = apiKeyRaw.replace(/[^\x20-\x7E]/g, '').trim();
+async function callBatchScreeningAPI(apiKey, cards, criteria) {
   const criteriaLines = buildCriteriaText(criteria);
   const candidateList = cards.map((c, i) =>
     `候補者${i + 1}: ${c.summary}`
@@ -501,9 +500,11 @@ function setFabState(state, text) {
 
 async function triggerScreening() {
   const stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria']);
-  const apiKey = stored.apiKey;
-  if (!apiKey) {
+  const apiKey = (stored.apiKey || '').replace(/[^\x20-\x7E]/g, '').trim();
+
+  if (!apiKey || !apiKey.startsWith('sk-')) {
     setFabState('error', '❌ APIキー未設定');
+    showAutoStatus('拡張機能の⚙️設定タブでAPIキーを保存してください', 5000);
     setTimeout(() => setFabState('ready', '⚡ 一括判定'), 3000);
     return;
   }
