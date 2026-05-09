@@ -241,6 +241,181 @@ function showBadge(cls, text) {
 setupClickTracking();
 
 // -------------------------------------------------------
+// 自動判定：ページロード時に全候補者を自動スクリーニング
+// -------------------------------------------------------
+async function autoScreenCandidates() {
+  // APIキーと設定を取得
+  const stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria']);
+  const apiKey = stored.apiKey;
+  if (!apiKey) return; // APIキー未設定なら何もしない
+
+  const criteria = stored.screeningCriteria || {};
+
+  // カード検出（少し待ってからDOMが安定した後に実行）
+  await new Promise(r => setTimeout(r, 400));
+  const cards = extractAllCandidateCards();
+  if (cards.length === 0) return; // 候補者カードがなければ終了
+
+  injectStyles();
+
+  // 判定中バッジを全カードに表示
+  cards.forEach(c => {
+    if (getComputedStyle(c.el).position === 'static') c.el.style.position = 'relative';
+    const badge = document.createElement('div');
+    badge.className = 'snow-we-badge checking';
+    badge.textContent = '🔍 判定中...';
+    c.el.appendChild(badge);
+  });
+
+  showAutoStatus(`🔍 ${cards.length}人を判定中...`);
+
+  try {
+    const results = await callBatchScreeningAPI(apiKey, cards, criteria);
+
+    // 結果をカードに反映
+    results.forEach((r, i) => {
+      if (!cards[i]) return;
+      const el = cards[i].el;
+      el.querySelectorAll('.snow-we-badge').forEach(b => b.remove());
+
+      const map = {
+        'OK':   ['ok',   '✅ スカウト候補'],
+        'NG':   ['ng',   '❌ 見送り'],
+        '要確認': ['warn', '⚠️ 要確認'],
+      };
+      const [cls, text] = map[r.overall] || ['warn', '⚠️ 要確認'];
+      const badge = document.createElement('div');
+      badge.className = `snow-we-badge ${cls}`;
+      badge.textContent = text;
+      el.appendChild(badge);
+
+      // OK候補者の追加ボタンを光らせる
+      if (r.overall === 'OK') {
+        highlightAddButton(el);
+      }
+    });
+
+    const okCount   = results.filter(r => r.overall === 'OK').length;
+    const ngCount   = results.filter(r => r.overall === 'NG').length;
+    const warnCount = results.filter(r => r.overall === '要確認').length;
+    showAutoStatus(`✅ 判定完了 — ✅${okCount}人 ⚠️${warnCount}人 ❌${ngCount}人`, 6000);
+
+  } catch (e) {
+    cards.forEach(c => c.el.querySelectorAll('.snow-we-badge').forEach(b => b.remove()));
+    showAutoStatus(`❌ 判定エラー: ${e.message}`, 5000);
+  }
+}
+
+// 画面右下にステータス表示
+function showAutoStatus(message, autoDismissMs) {
+  let el = document.getElementById('snow-we-auto-status');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'snow-we-auto-status';
+    el.style.cssText = `
+      position: fixed; bottom: 20px; right: 20px; z-index: 2147483647;
+      background: #1e1b4b; color: #fff; font-size: 13px; font-weight: 600;
+      padding: 10px 18px; border-radius: 24px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+      font-family: -apple-system, sans-serif;
+      pointer-events: none;
+      transition: opacity 0.3s;
+    `;
+    document.body.appendChild(el);
+  }
+  el.textContent = message;
+  el.style.opacity = '1';
+  if (autoDismissMs) {
+    clearTimeout(el._timer);
+    el._timer = setTimeout(() => { el.style.opacity = '0'; }, autoDismissMs);
+  }
+}
+
+// Claude APIを呼び出す（content.js内から直接）
+async function callBatchScreeningAPI(apiKey, cards, criteria) {
+  const criteriaLines = buildCriteriaText(criteria);
+  const candidateList = cards.map((c, i) =>
+    `候補者${i + 1}: ${c.summary}`
+  ).join('\n');
+
+  const prompt = `あなたは転職エージェントの一次選定アシスタントです。
+
+以下の【選定基準】に照らして、各候補者を判定してください。
+カード情報は概要のみのため、読み取れない項目は「情報なし」として扱ってください。
+
+【選定基準】
+${criteriaLines}
+
+【候補者一覧】
+${candidateList}
+
+以下のJSON形式のみで出力してください（説明不要）:
+{
+  "results": [
+    { "index": 1, "overall": "OK", "reason": "判定理由を1文で" },
+    { "index": 2, "overall": "NG", "reason": "判定理由を1文で" }
+  ]
+}`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1200,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || `APIエラー (${response.status})`);
+  }
+  const data = await response.json();
+  const text = (data.content?.[0]?.text || '').trim();
+  const clean = text.replace(/```json|```/g, '').trim();
+  return JSON.parse(clean).results || [];
+}
+
+function buildCriteriaText(criteria) {
+  const lines = [];
+  if (criteria.ageMin || criteria.ageMax) {
+    const parts = [];
+    if (criteria.ageMin) parts.push(`${criteria.ageMin}歳以上`);
+    if (criteria.ageMax) parts.push(`${criteria.ageMax}歳以下`);
+    lines.push(`- 年齢: ${parts.join('かつ')}`);
+  }
+  if (criteria.incomeMin) lines.push(`- 年収: ${criteria.incomeMin}万円以上`);
+  if (criteria.companyTiers?.length > 0 && !criteria.companyTiers.includes('不問'))
+    lines.push(`- 社格: ${criteria.companyTiers.join('または')}`);
+  if (criteria.educationReq && criteria.educationReq !== '不問')
+    lines.push(`- 学歴: ${criteria.educationReq}`);
+  if (criteria.requiredKeywords) lines.push(`- 必須経験: ${criteria.requiredKeywords}`);
+  if (criteria.excludeKeywords)  lines.push(`- 除外: ${criteria.excludeKeywords}`);
+  return lines.length > 0 ? lines.join('\n') : '- 条件未設定';
+}
+
+// ページロード完了後に自動実行
+window.addEventListener('load', () => {
+  // SPAのルート変化にも対応するため少し遅延
+  setTimeout(autoScreenCandidates, 1800);
+});
+
+// SPA（Next.js等）のページ遷移を検知して再実行
+let _lastUrl = location.href;
+new MutationObserver(() => {
+  if (location.href !== _lastUrl) {
+    _lastUrl = location.href;
+    setTimeout(autoScreenCandidates, 1800);
+  }
+}).observe(document.body, { childList: true, subtree: true });
+
+// -------------------------------------------------------
 // 一括判定：プラットフォーム別カード検出で全候補者を取得
 // -------------------------------------------------------
 function extractAllCandidateCards() {
