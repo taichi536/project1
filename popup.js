@@ -325,7 +325,8 @@ async function generatePersonalizedLine(apiKey, profileText) {
 
 【ルール】
 - 1文のみ（前置き・説明不要）
-- 全体で120文字以内に収めること
+- 全体で150文字以内に収めること
+- プロフィールに記載されている実際の会社名・具体的な実績・数字を使うこと（「大手企業」「スタートアップ」などの一般表現に置き換えない）
 - 名前（〇〇様）から始めず、職歴・実績の描写から直接入る
 - 丁寧だが重くなりすぎないトーン
 
@@ -342,7 +343,7 @@ ${profileText}`;
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 250,
+      max_tokens: 300,
       messages: [{ role: 'user', content: prompt }]
     })
   });
