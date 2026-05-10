@@ -74,7 +74,13 @@ async function loadSettings() {
 
   if (c.ageMin) $('age-min').value = c.ageMin;
   if (c.ageMax) $('age-max').value = c.ageMax;
-  if (c.incomeMin) $('income-min').value = c.incomeMin;
+  const ai = c.ageIncome || {};
+  if (ai.age20s)    $('income-20s').value    = ai.age20s;
+  if (ai.age30to35) $('income-30to35').value = ai.age30to35;
+  if (ai.age36to39) $('income-36to39').value = ai.age36to39;
+  if (ai.age40to42) $('income-40to42').value = ai.age40to42;
+  if (ai.age43to45) $('income-43to45').value = ai.age43to45;
+  if (ai.age46to47) $('income-46to47').value = ai.age46to47;
   if (c.educationReq) $('education-req').value = c.educationReq;
   if (c.minTenure) $('min-tenure').value = c.minTenure;
   if (c.requiredKeywords) $('required-keywords').value = c.requiredKeywords;
@@ -109,10 +115,18 @@ $('settings-save-btn').addEventListener('click', async () => {
     companyTiers.push(cb.value);
   });
 
+  const parseIncome = id => { const v = $(id).value; return v ? parseInt(v) : null; };
   const criteria = {
     ageMin: $('age-min').value ? parseInt($('age-min').value) : null,
     ageMax: $('age-max').value ? parseInt($('age-max').value) : null,
-    incomeMin: $('income-min').value ? parseInt($('income-min').value) : null,
+    ageIncome: {
+      age20s:    parseIncome('income-20s'),
+      age30to35: parseIncome('income-30to35'),
+      age36to39: parseIncome('income-36to39'),
+      age40to42: parseIncome('income-40to42'),
+      age43to45: parseIncome('income-43to45'),
+      age46to47: parseIncome('income-46to47'),
+    },
     companyTiers,
     educationReq: $('education-req').value,
     minTenure: $('min-tenure').value ? parseFloat($('min-tenure').value) : null,
@@ -568,18 +582,21 @@ async function runBatchScreening() {
   $('batch-screening-btn').disabled = false;
 }
 
-const STANDARD_CRITERIA = `【絶対NG（以下は即NG）】
+function buildStandardCriteria(ageIncome) {
+  const ai = ageIncome || {};
+  const v = (key, def) => ai[key] || def;
+  return `【絶対NG（以下は即NG）】
 - 職歴にアクセンチュアが含まれる場合は過去・現職問わず即NG
-- 職歴にベイカレントが含まれる場合は原則即NG。ただしおおむね45歳前後以上（43歳〜）かつ財務・経理・FP&A等の職歴がある場合は「要確認（財務ポジション限定で検討余地あり）」とする
+- 職歴にベイカレントが含まれる場合は原則即NG。ただし43歳以上かつ財務・経理・FP&A等の職歴がある場合は「要確認（財務ポジション限定）」とする
 
-【年齢別年収の目安】※一次選考のため目安を大きく下回る場合のみNG。多少低くても「要確認」でOK
-  ・43〜45歳: 1000万円を大きく下回る場合NG（目安1250万円以上）
-  ・46〜47歳: 1000万円を大きく下回る場合NG（目安1250万円以上）
-  ・48歳以上: 原則NG。ただし財務・経理・FP&A等の職歴がある場合は「要確認（財務ポジション限定）」とする
-  ・40〜42歳: 800万円を大きく下回る場合NG（目安1000万円以上）
-  ・36〜39歳: 650万円を大きく下回る場合NG（目安800万円以上）
-  ・30〜35歳: 550万円を大きく下回る場合NG（目安700万円以上）
-  ・20代: 400万円以上（ポテンシャル採用のため職種は問わない）
+【年齢別年収の目安】※情報不明はOK扱い。目安を大きく下回る場合のみNG。多少低くても「要確認」でOK
+  ・20代: ${v('age20s', 400)}万円以上（ポテンシャル採用のため職種は問わない）
+  ・30〜35歳: ${v('age30to35', 550)}万円を大きく下回る場合NG
+  ・36〜39歳: ${v('age36to39', 650)}万円を大きく下回る場合NG
+  ・40〜42歳: ${v('age40to42', 800)}万円を大きく下回る場合NG
+  ・43〜45歳: ${v('age43to45', 1000)}万円を大きく下回る場合NG
+  ・46〜47歳: ${v('age46to47', 1000)}万円を大きく下回る場合NG
+  ・48歳以上: 原則NG。財務・経理・FP&A職歴があれば「要確認」
 【社格】名前の通った企業・上場企業・大手グループ会社であればOK。無名の零細企業のみはNG
 【学歴】国立大学（旧帝大・横国・筑波・神戸・広島・岡山・千葉・首都大など）はすべてOK。早慶上智◎、MARCH・私立大学もOK。それ以外は社格・年収・実績でカバーされればOK
 【経験社数】転職回数は少ない方がBetter
@@ -587,6 +604,7 @@ const STANDARD_CRITERIA = `【絶対NG（以下は即NG）】
   ・30代: 最大3社（転職2回）/ 3社の場合は同業種同年代より年収が高ければOK
   ・40代: 最大4社（転職3回）/ 3〜4社の場合は同業種同年代より年収が高ければOK
 【判定方針】一次選考のため「NG」は明確な基準違反のみ。迷う場合は積極的に「要確認」とする`;
+}
 
 async function runBatchScreeningAI(apiKey, cards, criteria) {
   apiKey = sanitizeApiKey(apiKey);
@@ -602,7 +620,7 @@ async function runBatchScreeningAI(apiKey, cards, criteria) {
 カード情報は概要のみです。年収・学歴など情報が読み取れない項目は「問題なし」として扱い、明確にNGと確認できる場合のみNGとしてください。迷う場合は必ずOKとしてください。
 
 【選定基準】
-${STANDARD_CRITERIA}
+${buildStandardCriteria(criteria.ageIncome)}
 ${criteriaLines !== '- 条件未設定' ? '\n【追加条件】\n' + criteriaLines : ''}
 
 【候補者一覧】
@@ -790,7 +808,7 @@ async function runScreeningAI(apiKey, profileText, criteria) {
 プロフィールに情報が記載されていない項目は「情報なし」として扱ってください。
 
 【選定基準】
-${STANDARD_CRITERIA}
+${buildStandardCriteria(criteria.ageIncome)}
 ${criteriaLines.length > 0 ? '\n【追加条件】\n' + criteriaLines.join('\n') : ''}
 
 【候補者プロフィール】
