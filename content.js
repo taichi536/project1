@@ -339,10 +339,16 @@ document.addEventListener('click', async e => {
   const btn = e.target.closest('button, a');
   if (!btn) return;
   const text = (btn.innerText || '').trim();
-  if (text !== 'スカウト' && !text.includes('スカウトを送る')) return;
+  if (text !== 'スカウト' && !text.includes('スカウトを送る') && !text.includes('スカウトする')) return;
 
   const cards = findCandidateCardsByPlatform();
-  const card = cards.find(c => c.contains(btn) || c === btn.closest('[class*="card"],[class*="row"],li,article'));
+
+  // まずボタンがカード内にあるか確認
+  let card = cards.find(c => c.contains(btn) || c === btn.closest('[class*="card"],[class*="row"],li,article'));
+
+  // RDS等で右パネルにボタンがある場合は選択中のカードを使う
+  if (!card && _selectedCard) card = _selectedCard;
+
   if (!card) return;
 
   const id = getCandidateId(card);
