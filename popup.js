@@ -78,6 +78,11 @@ async function loadSettings() {
   if (c.educationReq) $('education-req').value = c.educationReq;
   if (c.minTenure) $('min-tenure').value = c.minTenure;
   if (c.requiredKeywords) $('required-keywords').value = c.requiredKeywords;
+  if (c.excludeCompanies !== undefined) {
+    $('exclude-companies').value = c.excludeCompanies;
+  } else {
+    $('exclude-companies').value = 'アクセンチュア, ベイカレント';
+  }
   if (c.excludeKeywords) $('exclude-keywords').value = c.excludeKeywords;
   if (c.autoTagName) $('auto-tag-name').value = c.autoTagName;
 
@@ -111,6 +116,7 @@ $('settings-save-btn').addEventListener('click', async () => {
     educationReq: $('education-req').value,
     minTenure: $('min-tenure').value ? parseFloat($('min-tenure').value) : null,
     requiredKeywords: $('required-keywords').value.trim(),
+    excludeCompanies: $('exclude-companies').value.trim(),
     excludeKeywords: $('exclude-keywords').value.trim(),
     autoTagName: $('auto-tag-name').value.trim(),
   };
@@ -590,6 +596,7 @@ function buildCriteriaLines(criteria) {
     lines.push(`- 学歴: ${criteria.educationReq}`);
   if (criteria.minTenure) lines.push(`- 在籍期間: 過去の全職歴を含め、${criteria.minTenure}年未満の在籍が明確に確認できる場合のみNG。在籍期間が不明・記載なしの場合はOKとして扱う`);
   if (criteria.requiredKeywords) lines.push(`- 必須経験: ${criteria.requiredKeywords}`);
+  if (criteria.excludeCompanies) lines.push(`- 除外企業: 職歴に${criteria.excludeCompanies}のいずれかが含まれる場合は過去・現職問わず即NG`);
   if (criteria.excludeKeywords) lines.push(`- 除外: ${criteria.excludeKeywords}`);
   return lines.length > 0 ? lines.join('\n') : '- 条件未設定';
 }
@@ -711,6 +718,10 @@ async function runScreeningAI(apiKey, profileText, criteria) {
 
   if (criteria.requiredKeywords) {
     criteriaLines.push(`- 必須経験: ${criteria.requiredKeywords}（いずれかを含む）`);
+  }
+
+  if (criteria.excludeCompanies) {
+    criteriaLines.push(`- 除外企業: 職歴に${criteria.excludeCompanies}のいずれかが含まれる場合は過去・現職問わず即NG`);
   }
 
   if (criteria.excludeKeywords) {
