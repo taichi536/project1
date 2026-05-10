@@ -564,6 +564,7 @@ async function triggerAutoAdd() {
 
   if (!apiKey || apiKey.length < 20) {
     showAutoStatus('⚙️設定タブでAPIキーを保存してください', 4000);
+    await saveAutoAddProgress({ running: false });
     return;
   }
 
@@ -637,7 +638,7 @@ async function triggerAutoAdd() {
     }
 
     totalProcessed++;
-    await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true });
+    await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
     await sleep(700);
   }
 
@@ -645,7 +646,7 @@ async function triggerAutoAdd() {
   const nextPage = findNextPageButton();
   if (nextPage) {
     showAutoStatus(`🤖 次ページへ移動中... (累計✅${addedCount}人追加)`);
-    await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true });
+    await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
     await sleep(1000);
     nextPage.click(); // ページ遷移 → 次ページで自動再開
   } else {
@@ -914,14 +915,18 @@ function buildCriteriaText(criteria) {
   return lines.length > 0 ? lines.join('\n') : '- 条件未設定';
 }
 
-// ページロード後に自動追加が継続中なら再開
+// ページロード後に自動追加が継続中なら再開（5分以内のフラグのみ有効）
 window.addEventListener('load', () => {
   setTimeout(async () => {
     injectStyles();
     const progress = await loadAutoAddProgress();
-    if (progress.running) {
+    const isRecent = progress.ts && (Date.now() - progress.ts) < 5 * 60 * 1000;
+    if (progress.running && isRecent) {
       await sleep(1500);
       triggerAutoAdd();
+    } else if (progress.running && !isRecent) {
+      // 古いフラグが残っていたらリセット
+      await saveAutoAddProgress({ running: false });
     }
   }, 1000);
 });
