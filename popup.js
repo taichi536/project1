@@ -341,7 +341,7 @@ ${profileText}`;
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 350,
+      max_tokens: 250,
       messages: [{ role: 'user', content: prompt }]
     })
   });
@@ -432,8 +432,8 @@ ${positionList}
 ${profileText}
 
 以下のJSON形式のみで出力してください（コードブロック・前置き・説明は一切不要）:
-{"suggestions":[{"position":"ポジション名","match_score":90,"reason":"職歴と希望の観点から推奨理由を2文で記述"}]}
-※reasonにダブルクォートを含めないこと。改行しないこと。`;
+{"suggestions":[{"position":"ポジション名","match_score":90,"reason":"推奨理由を1文で記述"}]}
+※必ず守ること: reasonは1文で簡潔に。ダブルクォート・改行・バックスラッシュを含めないこと。`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -445,7 +445,7 @@ ${profileText}
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 800,
+      max_tokens: 1200,
       messages: [{ role: 'user', content: prompt }]
     })
   });
@@ -459,8 +459,10 @@ ${profileText}
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('AIの応答からJSONを抽出できませんでした');
   const cleaned = jsonMatch[0]
-    .replace(/,(\s*[}\]])/g, '$1')   // 末尾カンマを除去
-    .replace(/[\x00-\x1F\x7F]/g, ' '); // 制御文字を除去
+    .replace(/[\r\n]+/g, ' ')          // 文字列内の改行をスペースに
+    .replace(/,(\s*[}\]])/g, '$1')     // 末尾カンマを除去
+    .replace(/[\x00-\x1F\x7F]/g, ' ') // 残った制御文字を除去
+    .replace(/\s+/g, ' ');             // 連続スペースを正規化
   try {
     return JSON.parse(cleaned);
   } catch (e) {
