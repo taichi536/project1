@@ -341,7 +341,7 @@ ${profileText}`;
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 150,
+      max_tokens: 350,
       messages: [{ role: 'user', content: prompt }]
     })
   });
