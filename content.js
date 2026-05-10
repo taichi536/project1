@@ -993,6 +993,17 @@ function extractByKeywords(keywords, root, minLen, maxLen) {
 // -------------------------------------------------------
 // ユーティリティ：メインエリアのテキストをクリーンに取得
 // -------------------------------------------------------
+// スカウト履歴・評価・メモなど採用管理UIセクションを除去
+function removeNonProfileSections(text) {
+  const stopMarkers = ['スカウト履歴', 'メモ・備考', '候補者評価', 'スカウト送信履歴'];
+  let cutIdx = text.length;
+  for (const marker of stopMarkers) {
+    const idx = text.indexOf(marker);
+    if (idx > 50 && idx < cutIdx) cutIdx = idx;
+  }
+  return text.substring(0, cutIdx).trim();
+}
+
 function extractMainText(root, limit) {
   limit = limit || 2500;
   const excludeTags = ['script','style','noscript','nav','footer','header',
@@ -1163,9 +1174,10 @@ function extractProfile() {
       ], detailPanel);
 
       text = byKeyword.length >= bySelector.length ? byKeyword : bySelector;
+      text = removeNonProfileSections(text);
 
       if (text.length < 100) {
-        text = extractMainText(detailPanel, 2500);
+        text = removeNonProfileSections(extractMainText(detailPanel, 2500));
       }
     } else {
       text = extractByKeywords([
