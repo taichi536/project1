@@ -227,19 +227,27 @@ ${personalizedLine}
 ポジション詳細のご紹介の前に少しだけ、弊社と当方のご紹介をさせてください。`;
 }
 
-// sendMessageが失敗した場合にコンテンツスクリプトを再注入してリトライ
+// content.jsが動いているか確認し、必要なら再注入してからプロフィール取得
 async function getProfileSafe(tab) {
-  try {
-    return await chrome.tabs.sendMessage(tab.id, { action: 'getProfile' });
-  } catch (_) {}
+  // pingでcontent.js動作確認
+  const isAlive = await chrome.tabs.sendMessage(tab.id, { action: 'ping' })
+    .then(() => true).catch(() => false);
 
-  // content.jsを再注入して再試行
+  if (!isAlive) {
+    // 動いていない → 再注入
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+      await new Promise(r => setTimeout(r, 1000));
+    } catch (e) {
+      throw new Error('このページでは動作できません。対応している媒体の候補者ページを開いてください。');
+    }
+  }
+
+  // プロフィール取得
   try {
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
-    await new Promise(r => setTimeout(r, 800));
     return await chrome.tabs.sendMessage(tab.id, { action: 'getProfile' });
   } catch (e) {
-    throw new Error('コンテンツスクリプトの注入に失敗しました: ' + e.message);
+    throw new Error('プロフィールの取得に失敗しました。ページを再読み込みしてください。');
   }
 }
 

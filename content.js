@@ -646,14 +646,18 @@ async function triggerAutoAdd() {
   const nextPage = findNextPageButton();
   if (nextPage) {
     showAutoStatus(`🤖 次ページへ移動中... (累計✅${addedCount}人追加)`);
-    await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+    // sessionStorageに再開フラグを設定（タブを閉じると自動消去されるため幽霊起動しない）
+    try {
+      sessionStorage.setItem('snowWeAutoAdd', JSON.stringify({ resume: true, added: addedCount, processed: totalProcessed }));
+    } catch (_) {}
     await sleep(1000);
-    nextPage.click(); // ページ遷移 → 次ページで自動再開
+    nextPage.click();
   } else {
     // 全ページ完了
-    await saveAutoAddProgress({ running: false });
     showAutoStatus(`🤖 完了！ ✅${addedCount}人を検討リストに追加 (全${totalProcessed}人中)`, 8000);
   }
+  // chrome.storage.localのrunningフラグは使わない
+  await saveAutoAddProgress({ running: false });
 }
 
 // -------------------------------------------------------
@@ -915,19 +919,23 @@ function buildCriteriaText(criteria) {
   return lines.length > 0 ? lines.join('\n') : '- 条件未設定';
 }
 
-// ページロード後に自動追加が継続中なら再開（5分以内のフラグのみ有効）
+// ページロード後に自動追加の再開チェック（sessionStorageのみ使用）
 window.addEventListener('load', () => {
   setTimeout(async () => {
     injectStyles();
-    const progress = await loadAutoAddProgress();
-    const isRecent = progress.ts && (Date.now() - progress.ts) < 5 * 60 * 1000;
-    if (progress.running && isRecent) {
-      await sleep(1500);
-      triggerAutoAdd();
-    } else if (progress.running && !isRecent) {
-      // 古いフラグが残っていたらリセット
-      await saveAutoAddProgress({ running: false });
-    }
+    // chrome.storage.localの古いrunningフラグを常にリセット
+    await saveAutoAddProgress({ running: false });
+    // sessionStorageの再開フラグのみ信頼する
+    try {
+      const raw = sessionStorage.getItem('snowWeAutoAdd');
+      if (!raw) return;
+      const resume = JSON.parse(raw);
+      sessionStorage.removeItem('snowWeAutoAdd'); // 即座に削除して二重起動防止
+      if (resume.resume) {
+        await sleep(1500);
+        triggerAutoAdd();
+      }
+    } catch (_) {}
   }, 1000);
 });
 
@@ -1404,6 +1412,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         error: e.message
       });
     }
+  }
+
+  if (request.action === 'ping') {
+    sendResponse({ ok: true });
   }
 
   if (request.action === 'triggerAutoAdd') {
