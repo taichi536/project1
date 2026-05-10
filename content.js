@@ -672,7 +672,7 @@ async function getFullProfile(cardEl, fallbackText) {
     await sleep(1500);
     const panel = findRDSDetailPanel();
     if (panel) {
-      const full = extractMainText(panel, 3000);
+      const full = removeNonProfileSections(extractMainText(panel, 3000));
       if (full.length > 200) return full;
     }
     return fallbackText.substring(0, 900);
@@ -1036,7 +1036,12 @@ function extractByKeywords(keywords, root, minLen, maxLen) {
 // -------------------------------------------------------
 // スカウト履歴・評価・メモなど採用管理UIセクションを除去
 function removeNonProfileSections(text) {
-  const stopMarkers = ['スカウト履歴', 'メモ・備考', '候補者評価', 'スカウト送信履歴'];
+  const stopMarkers = [
+    'スカウト履歴', 'メモ・備考', '候補者評価', 'スカウト送信履歴',
+    'スカウトメール', '送信したメール', 'スカウト文面', 'スカウト送信文',
+    'エージェントからのメッセージ', 'この度はご連絡', '貴方様のご経歴を拝見',
+    'ご経歴を拝見し', '採用担当者からのメッセージ', 'メッセージ履歴'
+  ];
   let cutIdx = text.length;
   for (const marker of stopMarkers) {
     const idx = text.indexOf(marker);
