@@ -325,6 +325,7 @@ async function generatePersonalizedLine(apiKey, profileText) {
 
 【ルール】
 - 1文のみ（前置き・説明不要）
+- 全体で120文字以内に収めること
 - 名前（〇〇様）から始めず、職歴・実績の描写から直接入る
 - 丁寧だが重くなりすぎないトーン
 
