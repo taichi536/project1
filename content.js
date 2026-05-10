@@ -902,21 +902,36 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function buildCriteriaText(criteria) {
   const lines = [];
+
+  // 常時適用される標準基準
+  lines.push(`【絶対NG】`);
+  lines.push(`- 職歴にアクセンチュアが含まれる場合は即NG`);
+  lines.push(`- 職歴にベイカレントが含まれる場合は原則即NG。ただし43歳以上かつ財務・経理・FP&A等の職歴がある場合は「要確認」`);
+  lines.push(`【年齢別年収の目安】情報が不明な場合はOK扱い。目安を大きく下回る場合のみNG`);
+  lines.push(`- 46〜47歳: 1000万円を大きく下回る場合NG`);
+  lines.push(`- 43〜45歳: 1000万円を大きく下回る場合NG`);
+  lines.push(`- 48歳以上: 原則NG。財務・経理・FP&A職歴があれば「要確認」`);
+  lines.push(`- 40〜42歳: 800万円を大きく下回る場合NG`);
+  lines.push(`- 36〜39歳: 650万円を大きく下回る場合NG`);
+  lines.push(`- 30〜35歳: 550万円を大きく下回る場合NG`);
+  lines.push(`- 20代: 400万円以上`);
+  lines.push(`【社格】上場企業・大手グループ・知名度ある企業はOK。無名の零細企業のみNG`);
+  lines.push(`【学歴】国立大学（横浜国立・筑波・神戸・広島・岡山・千葉など含む）・早慶上智・MARCHはOK。それ以外は社格・年収でカバーされればOK`);
+  lines.push(`【転職回数】20代最大2社、30代最大3社（3社目は年収高ければOK）、40代最大4社（3〜4社目は年収高ければOK）`);
+  lines.push(`【判定方針】一次選考のため迷う場合は必ずOK。明確な基準違反のみNG`);
+
+  // 追加条件（設定タブで入力された場合）
   if (criteria.ageMin || criteria.ageMax) {
     const parts = [];
     if (criteria.ageMin) parts.push(`${criteria.ageMin}歳以上`);
     if (criteria.ageMax) parts.push(`${criteria.ageMax}歳以下`);
-    lines.push(`- 年齢: ${parts.join('かつ')}`);
+    lines.push(`- 年齢追加条件: ${parts.join('かつ')}`);
   }
-  if (criteria.incomeMin) lines.push(`- 年収: ${criteria.incomeMin}万円以上`);
-  if (criteria.companyTiers?.length > 0 && !criteria.companyTiers.includes('不問'))
-    lines.push(`- 社格: ${criteria.companyTiers.join('または')}`);
-  if (criteria.educationReq && criteria.educationReq !== '不問')
-    lines.push(`- 学歴: ${criteria.educationReq}`);
-  if (criteria.minTenure) lines.push(`- 在籍期間: 過去の全職歴を含め、${criteria.minTenure}年未満の在籍が明確に確認できる場合のみNG。在籍期間が不明・記載なしの場合はOKとして扱う`);
+  if (criteria.minTenure) lines.push(`- 在籍期間: 過去の全職歴を含め、${criteria.minTenure}年未満の在籍が明確に確認できる場合のみNG。不明・記載なしはOK`);
   if (criteria.requiredKeywords) lines.push(`- 必須経験: ${criteria.requiredKeywords}`);
+  if (criteria.excludeCompanies) lines.push(`- 除外企業（追加）: 職歴に${criteria.excludeCompanies}が含まれる場合は即NG`);
   if (criteria.excludeKeywords)  lines.push(`- 除外: ${criteria.excludeKeywords}`);
-  return lines.length > 0 ? lines.join('\n') : '- 条件未設定';
+  return lines.join('\n');
 }
 
 // ページロード後に自動追加の再開チェック（sessionStorageのみ使用）
