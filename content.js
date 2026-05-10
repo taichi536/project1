@@ -1372,7 +1372,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     try {
       const profileText = extractProfile();
       const isRDS = location.hostname.includes('rikunabi') || location.hostname.includes('hrtech');
-      const looksEmpty = !hasProfileContent(profileText);
+
+      // RDSで候補者が未選択（テキストが極端に短い）場合のみ選択を促す
+      const looksEmpty = profileText.trim().length < 50;
 
       if (isRDS && looksEmpty) {
         sendResponse({

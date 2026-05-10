@@ -227,6 +227,22 @@ ${personalizedLine}
 ポジション詳細のご紹介の前に少しだけ、弊社と当方のご紹介をさせてください。`;
 }
 
+// sendMessageが失敗した場合にコンテンツスクリプトを再注入してリトライ
+async function getProfileSafe(tab) {
+  try {
+    return await chrome.tabs.sendMessage(tab.id, { action: 'getProfile' });
+  } catch (_) {}
+
+  // content.jsを再注入して再試行
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+    await new Promise(r => setTimeout(r, 800));
+    return await chrome.tabs.sendMessage(tab.id, { action: 'getProfile' });
+  } catch (e) {
+    throw new Error('コンテンツスクリプトの注入に失敗しました: ' + e.message);
+  }
+}
+
 async function runGenerate() {
   const apiKey = sanitizeApiKey($('api-key').value);
   if (!apiKey) {
@@ -241,9 +257,9 @@ async function runGenerate() {
   let profileData;
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    profileData = await chrome.tabs.sendMessage(tab.id, { action: 'getProfile' });
+    profileData = await getProfileSafe(tab);
   } catch (e) {
-    setStatus('generate', 'error', 'プロフィールを取得できませんでした。候補者ページを開いているか確認してください。');
+    setStatus('generate', 'error', 'プロフィールを取得できませんでした。ページを再読み込みして再度お試しください。');
     $('generate-btn').disabled = false;
     return;
   }
@@ -351,9 +367,9 @@ async function runSuggestPosition() {
   let profileData;
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    profileData = await chrome.tabs.sendMessage(tab.id, { action: 'getProfile' });
+    profileData = await getProfileSafe(tab);
   } catch (e) {
-    setStatus('suggest', 'error', 'プロフィールを取得できませんでした。候補者ページを開いているか確認してください。');
+    setStatus('suggest', 'error', 'プロフィールを取得できませんでした。ページを再読み込みして再度お試しください。');
     $('suggest-btn').disabled = false;
     return;
   }
@@ -657,10 +673,9 @@ async function runScreening() {
 
   let profileData;
   try {
-    profileData = await chrome.tabs.sendMessage(tab.id, { action: 'getProfile' });
+    profileData = await getProfileSafe(tab);
   } catch (e) {
-    setStatus('screening', 'error', 'プロフィールを取得できませんでした。候補者ページを開いているか確認してください。');
-    chrome.tabs.sendMessage(tab.id, { action: 'clearBadge' }).catch(() => {});
+    setStatus('screening', 'error', 'プロフィールを取得できませんでした。ページを再読み込みして再度お試しください。');
     $('screening-btn').disabled = false;
     return;
   }
