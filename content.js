@@ -275,19 +275,24 @@ async function recordScoutSent(candidateId, info) {
   const gas = r2.gasSettings || {};
   if (gas.url && gas.recruiter) {
     const ageNum = (info.age || '').replace(/[歳才]/, '');
-    fetch(gas.url, {
-      method: 'POST',
-      body: JSON.stringify({
-        secret: gas.secret || 'snowwe2024',
-        recruiter: gas.recruiter,
-        company: info.company || '',
-        age: ageNum,
-        univ: info.univ || '',
-        media: platform,
-        position: r2.currentPosition || '',
-        ts: now,
-      }),
-    }).catch(() => {});
+    const payload = {
+      secret: gas.secret || 'snowwe2024',
+      recruiter: gas.recruiter,
+      company: info.company || '',
+      age: ageNum,
+      univ: info.univ || '',
+      media: platform,
+      position: r2.currentPosition || '',
+      ts: now,
+    };
+
+    // 既存GAS（日付別シート）へ送信
+    fetch(gas.url, { method: 'POST', body: JSON.stringify(payload) }).catch(() => {});
+
+    // 新GAS（スカウト管理DB）へ送信
+    if (gas.dbUrl) {
+      fetch(gas.dbUrl, { method: 'POST', body: JSON.stringify(payload) }).catch(() => {});
+    }
   }
 }
 

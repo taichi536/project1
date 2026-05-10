@@ -601,10 +601,11 @@
         <option value="たいち">たいち</option>
         <option value="れいしろう">れいしろう</option>
       </select>
-      <input type="text" id="gas-url" placeholder="GASウェブアプリURL（https://script.google.com/...）" style="width:100%; margin-bottom:5px;">
+      <input type="text" id="gas-url" placeholder="既存GAS URL（日付別シート用）" style="width:100%; margin-bottom:5px;">
+      <input type="text" id="gas-db-url" placeholder="新GAS URL（スカウト管理DB用）" style="width:100%; margin-bottom:5px;">
       <input type="text" id="gas-secret" placeholder="シークレットキー（デフォルト: snowwe2024）" style="width:100%;">
     </div>
-    <div style="font-size:10px; color:#888; line-height:1.6;">スカウト送信ボタンをクリックした際にスプレッドシートへ自動記録します</div>
+    <div style="font-size:10px; color:#888; line-height:1.6;">スカウト送信時に両方のスプレッドシートへ自動記録します</div>
     <button class="save-btn" id="gas-test-btn" style="margin-top:6px; width:100%; font-size:11px;">🔗 スプレッドシート接続テスト</button>
     <div id="gas-test-result" style="font-size:11px; margin-top:5px; padding:6px; background:#f5f4f0; border-radius:6px; display:none; word-break:break-all;"></div>
   </div>

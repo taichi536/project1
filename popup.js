@@ -88,6 +88,7 @@ async function loadSettings() {
 
   if (gas.recruiter) $('gas-recruiter').value = gas.recruiter;
   if (gas.url) $('gas-url').value = gas.url;
+  if (gas.dbUrl) $('gas-db-url').value = gas.dbUrl;
   if (gas.secret) $('gas-secret').value = gas.secret;
 
   if (c.companyTiers && c.companyTiers.length > 0) {
@@ -124,6 +125,7 @@ $('settings-save-btn').addEventListener('click', async () => {
   const gasSettings = {
     recruiter: $('gas-recruiter').value,
     url: $('gas-url').value.trim(),
+    dbUrl: $('gas-db-url').value.trim(),
     secret: $('gas-secret').value.trim() || 'snowwe2024',
   };
 
