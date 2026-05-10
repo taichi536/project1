@@ -568,6 +568,19 @@ async function runBatchScreening() {
   $('batch-screening-btn').disabled = false;
 }
 
+const STANDARD_CRITERIA = `- 年齢別年収の目安（目安より少し低い場合は「要確認」、著しく低い場合はNG）:
+  ・43〜45歳: 最低1250万円以上（できれば1500万円以上）
+  ・40〜42歳: 最低1000万円以上（できれば1250万円以上）
+  ・36〜39歳: 最低800万円以上（できれば1000万円以上）
+  ・30〜35歳: 最低700万円以上（できれば800万円以上）
+  ・20代: 500万円以上（ポテンシャル採用のため職種は問わない）
+- 社格: 最低でも大手・知名度ある企業（国内TOP20相当以上）。できればTOP5相当が望ましい
+- 学歴: 早慶上智・旧帝大は問題なし。MARCH・地方国立もOK。それ以外は社格・年収・実績で補完されればOK
+- 経験社数（転職回数の目安・少ない方がBetter）:
+  ・20代: 最大2社（転職1回）
+  ・30代: 最大3社（転職2回）/ 3社の場合は同業種同年代より年収が高いことが条件
+  ・40代: 最大4社（転職3回）/ 3〜4社の場合は同業種同年代より年収が高いことが条件`;
+
 async function runBatchScreeningAI(apiKey, cards, criteria) {
   apiKey = sanitizeApiKey(apiKey);
   const criteriaLines = buildCriteriaLines(criteria);
@@ -582,7 +595,8 @@ async function runBatchScreeningAI(apiKey, cards, criteria) {
 カード情報は概要のみのため、読み取れない項目は「情報なし」として扱ってください。
 
 【選定基準】
-${criteriaLines}
+${STANDARD_CRITERIA}
+${criteriaLines !== '- 条件未設定' ? '\n【追加条件】\n' + criteriaLines : ''}
 
 【候補者一覧】
 ${candidateList}
@@ -763,17 +777,14 @@ async function runScreeningAI(apiKey, profileText, criteria) {
     criteriaLines.push(`- 除外条件: ${criteria.excludeKeywords}（含む場合はNG）`);
   }
 
-  if (criteriaLines.length === 0) {
-    criteriaLines.push('- 条件未設定（⚙️設定タブで選定基準を設定してください）');
-  }
-
   const prompt = `あなたは転職エージェントの一次選定アシスタントです。
 
 以下の【選定基準】と【候補者プロフィール】を照合し、各基準について候補者がクリアしているかを判定してください。
 プロフィールに情報が記載されていない項目は「情報なし」として扱ってください。
 
 【選定基準】
-${criteriaLines.join('\n')}
+${STANDARD_CRITERIA}
+${criteriaLines.length > 0 ? '\n【追加条件】\n' + criteriaLines.join('\n') : ''}
 
 【候補者プロフィール】
 ${profileText}
