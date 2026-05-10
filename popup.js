@@ -3,6 +3,41 @@
 const $ = id => document.getElementById(id);
 
 // ============================================================
+// ポジション要件定義（プロンプトに渡す照合用）
+// ============================================================
+const POSITION_REQUIREMENTS = [
+  { name: '戦略コンサルタント（ストラテジー）',           req: '経営戦略・事業戦略の立案経験、MBA、MBBなど戦略ファーム経験、M&A・PMI・事業企画' },
+  { name: 'ビジネスコンサルタント（業務変革）',           req: '業務改革・BPR・業務プロセス改善、ERP（SAP/Oracle）導入・業務コンサルタント経験' },
+  { name: '営業戦略コンサルタント（セールス＆コマース）', req: '営業戦略・CRM・SFA・Salesforce、営業組織改革・営業改善の経験' },
+  { name: 'CFO・ファイナンスコンサルタント',             req: '経理・財務・CFO・FP&A・管理会計・IFRS・予算管理・ERP（SAP/Oracle）' },
+  { name: '組織・人事コンサルタント（タレント＆オーガニゼーション）', req: '人事制度設計・タレントマネジメント・組織変革・HRBP・人材開発・採用戦略' },
+  { name: 'サプライチェーン＆オペレーションズコンサルタント（SC&O）', req: 'SCM・調達・購買・物流・生産管理・在庫管理・ロジスティクス・メーカー経験' },
+  { name: 'サステナビリティ・ESGコンサルタント',         req: 'ESG・SDGs・カーボンニュートラル・GX・脱炭素・CSR・グリーン戦略' },
+  { name: 'チェンジマネジメント・コンサルタント',         req: '組織変革・PMO・変革推進・コーチング・ファシリテーション・研修設計' },
+  { name: 'ITコンサルタント・システムコンサルタント',     req: 'IT戦略・要件定義・システム導入・SE経験・アーキテクチャ設計・ERP導入' },
+  { name: 'DX・デジタル変革コンサルタント',             req: 'DX推進・デジタル化・RPA・AI活用・クラウド・デジタルトランスフォーメーション' },
+  { name: 'クラウドコンサルタント・クラウドエンジニア',   req: 'AWS/Azure/GCP・クラウド移行・インフラ設計・DevOps・SRE・マイクロサービス' },
+  { name: 'データ＆AIコンサルタント・データサイエンティスト', req: 'データ分析・機械学習・AI・BI・Python・SQL・LLM・生成AI・統計' },
+  { name: 'サイバーセキュリティコンサルタント',           req: 'セキュリティ設計・SOC・ゼロトラスト・脆弱性診断・リスク管理・CSIRT・ペネトレーション' },
+  { name: 'プロジェクトマネージャー・PMOコンサルタント', req: 'PM・PMO・大規模プロジェクト管理・WBS・ステークホルダー調整' },
+  { name: 'インテリジェントオートメーション・RPAコンサルタント', req: 'RPA・自動化・Power Automate・UiPath・BPO・プロセス自動化' },
+  { name: '金融インダストリーコンサルタント（銀行・証券・保険）', req: '銀行・保険・証券・フィンテック・勘定系・リスク管理・Basel・IFRS' },
+  { name: '公共・官公庁コンサルタント',                  req: '官公庁・行政・省庁・自治体・公共政策・デジタル庁・公共機関での業務経験' },
+  { name: 'ヘルスケア・ライフサイエンスコンサルタント',   req: 'ヘルスケア・製薬・医療機器・ライフサイエンス・MR・バイオ・臨床' },
+  { name: 'コンシューマー（消費財・流通・小売）コンサルタント', req: '消費財・流通・小売・EC・D2C・FMCG・食品・飲料メーカー' },
+  { name: '通信・メディア・ハイテクコンサルタント',       req: '通信・メディア・SaaS・テクノロジー企業・ソフトウェア開発・ITサービス' },
+  { name: 'エネルギー・資源・公共事業コンサルタント',     req: 'エネルギー・電力・ガス・石油・再生可能エネルギー・資源・電気事業' },
+  { name: 'インダストリーX（製造・エンジニアリング）コンサルタント', req: '製造業・工場・IoT・スマートファクトリー・PLM・自動車・航空・プラント' },
+  { name: 'マーケティングコンサルタント（アクセンチュア ソング）', req: 'マーケティング・デジタルマーケティング・CX・SNS・Web広告・MA・Marketo・HubSpot' },
+  { name: 'CX（顧客体験）・UXデザイナー・コンサルタント', req: 'UX/UIデザイン・顧客体験・CX・サービスデザイン・デザイン思考' },
+  { name: 'コンテンツ・クリエイティブディレクター',       req: 'コンテンツ制作・クリエイティブ・動画・コピーライター・ブランディング・PR' },
+  { name: 'オペレーションズコンサルタント（BPO・業務アウトソーシング）', req: 'BPO・アウトソーシング・経理BPO・人事BPO・シェアードサービス・業務受託' },
+  { name: '中途採用リクルーター',                        req: '採用・リクルーター・タレントアクイジション・中途採用・エージェント経験' },
+  { name: '購買・調達スペシャリスト（コーポレート）',     req: '購買・調達・間接材・ベンダー管理・カテゴリマネジメント・下請法' },
+  { name: 'リスク・コンプライアンスコンサルタント',       req: 'リスク管理・コンプライアンス・内部統制・法務・ガバナンス・AML・規制対応' },
+];
+
+// ============================================================
 // 初期化
 // ============================================================
 document.addEventListener('DOMContentLoaded', async () => {
@@ -382,24 +417,29 @@ async function runSuggestPosition() {
 
 async function suggestPosition(apiKey, profileText) {
   apiKey = sanitizeApiKey(apiKey);
-  const positionList = Array.from(document.querySelectorAll('#position-select option'))
-    .map(o => o.value).filter(Boolean).join('\n');
-  const prompt = `あなたはアクセンチュアへの転職支援を専門とするハイクラスエージェントのアシスタントです。
+  const positionDefs = POSITION_REQUIREMENTS.map(p => `・${p.name}｜必要経験: ${p.req}`).join('\n');
+  const prompt = `あなたはアクセンチュアへの転職支援を専門とするハイクラス転職エージェントです。
 
-以下の候補者プロフィールを読み、【募集ポジション一覧】の中から候補者に最も適したポジションを3つ選んでください。
+候補者にスカウトを送る際、どのポジションで打てば「刺さるか」を判断してください。
 
-【重要な指示】
-- 必ず【募集ポジション一覧】に記載されたポジション名をそのまま使用すること
+【判断の視点】
+1. 候補者の職歴・実績から見て、アクセンチュアのどのポジションで即戦力として活かせるか
+2. 候補者の希望職種・転職軸（プロフィールに記載あれば）と合致しているか
+3. 上記2つが重なるポジションが最優先。希望職種の記載がない場合は職歴から推測する
+
+【重要ルール】
+- 必ず【ポジション一覧と必要経験】に記載されたポジション名をそのまま使用すること
 - 一覧にないポジション名は絶対に使用しないこと
+- スコアは「候補者がそのスカウトに反応する確度」として1〜100で評価すること
 
-【募集ポジション一覧】
-${positionList}
+【ポジション一覧と必要経験】
+${positionDefs}
 
 【候補者プロフィール】
 ${profileText}
 
 以下のJSON形式のみで出力してください（コードブロック・前置き・説明は一切不要）:
-{"suggestions":[{"position":"ポジション名","match_score":90,"reason":"推奨理由を2文で記述"}]}
+{"suggestions":[{"position":"ポジション名","match_score":90,"reason":"職歴と希望の観点から推奨理由を2文で記述"}]}
 ※reasonにダブルクォートを含めないこと。改行しないこと。`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -443,10 +483,12 @@ function renderSuggestion(result) {
     const score = s.match_score || 0;
     const card = document.createElement('div');
     card.className = 'suggest-card' + (i === 0 ? ' best' : '');
+    const scoreLabel = score >= 80 ? '刺さる可能性 高' : score >= 60 ? '刺さる可能性 中' : '参考程度';
+    const scoreColor = score >= 80 ? '#059669' : score >= 60 ? '#D97706' : '#6B7280';
     card.innerHTML = `
       <div class="suggest-card-header">
         <span class="suggest-rank">${i === 0 ? '🥇 最推奨' : i === 1 ? '🥈 次点' : '🥉 候補'}</span>
-        <span class="suggest-score">${score}点</span>
+        <span class="suggest-score" style="color:${scoreColor}">${score}点 <span style="font-size:10px;font-weight:normal">(${scoreLabel})</span></span>
       </div>
       <div class="suggest-position">${s.position}</div>
       <div class="suggest-reason">${s.reason}</div>
