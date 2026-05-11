@@ -607,18 +607,7 @@ async function triggerAutoAdd() {
 
     const candidateId = getCandidateId(el);
 
-    if (isRDS) {
-      // RDS: カード上の「送済（X日前）」バッジを直接読む（最も信頼性が高い）
-      const cardDays = getRikunabiScoutDays(el);
-      if (cardDays !== null && cardDays < RESCOUNT_DAYS) {
-        setBatchBadge(el, 'warn', `⏸ 送信済（${cardDays}日前）`);
-        totalProcessed++;
-        await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
-        await sleep(200);
-        continue;
-      }
-      setBatchBadge(el, 'checking', '🔍 判定中...');
-    } else {
+    if (!isRDS) {
       // 他媒体: ストレージの記録でチェック
       const status = scoutStatus(scoutHistory, candidateId);
       if (status.scouted && !status.reScoutable) {
@@ -628,11 +617,26 @@ async function triggerAutoAdd() {
         continue;
       }
       setBatchBadge(el, 'checking', status.scouted ? `🔄 再追加可（${status.daysAgo}日前）` : '🔍 判定中...');
+    } else {
+      setBatchBadge(el, 'checking', '🔍 判定中...');
     }
 
-    // プロフィール全文取得（プラットフォーム別）
+    // プロフィール全文取得（RDSはここでカードをクリックしモーダルを開く）
     let profileText = cardText;
     try { profileText = await getFullProfile(el, cardText); } catch (_) {}
+
+    // RDS: モーダルを下までスクロールして「スカウト送信」履歴を確認
+    if (isRDS) {
+      await scrollModalToBottom();
+      const daysAgo = checkScoutSentInBody();
+      if (daysAgo !== null && daysAgo < RESCOUNT_DAYS) {
+        setBatchBadge(el, 'warn', `⏸ 送信済（${daysAgo}日前）`);
+        totalProcessed++;
+        await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+        await sleep(200);
+        continue;
+      }
+    }
 
     try {
       const overall = await judgeSingleCandidate(apiKey, profileText, criteria);
@@ -953,6 +957,60 @@ function getRikunabiScoutDays(cardEl) {
   }
   console.log('[SnowWe] getRikunabiScoutDays: not found. card text preview:', (cardEl.innerText || '').slice(0, 100));
   return null;
+}
+
+// モーダル（候補者詳細ポップアップ）またはパネルを下までスクロール
+async function scrollModalToBottom() {
+  // role="dialog" やクラス名でモーダルを優先して探す
+  const modalRoot =
+    document.querySelector('[role="dialog"]') ||
+    document.querySelector('[class*="modal" i]') ||
+    document.querySelector('[class*="dialog" i]') ||
+    document.querySelector('[class*="overlay" i]');
+
+  const searchRoot = modalRoot || document.body;
+  // スクロール可能な子要素を探す
+  let best = null;
+  let bestH = 0;
+  searchRoot.querySelectorAll('*').forEach(el => {
+    const style = window.getComputedStyle(el);
+    if (style.overflowY !== 'scroll' && style.overflowY !== 'auto') return;
+    const rect = el.getBoundingClientRect();
+    if (rect.height > bestH) { best = el; bestH = rect.height; }
+  });
+  if (best) {
+    best.scrollTop = best.scrollHeight;
+  } else if (modalRoot) {
+    modalRoot.scrollTop = modalRoot.scrollHeight;
+  } else {
+    window.scrollTo(0, document.body.scrollHeight);
+  }
+  await sleep(1200);
+}
+
+// ページ内の「スカウト送信」テキスト直後の日付から最近の送信日数を返す
+function checkScoutSentInBody() {
+  const bodyText = document.body.innerText || '';
+  let minDays = Infinity;
+  const now = Date.now();
+  let searchFrom = 0;
+  while (true) {
+    const idx = bodyText.indexOf('スカウト送信', searchFrom);
+    if (idx === -1) break;
+    const section = bodyText.slice(idx, idx + 500);
+    const dates = section.match(/\d{4}\/\d{2}\/\d{2}/g) || [];
+    console.log('[SnowWe] checkScoutSent: found at', idx, '→ dates:', dates);
+    for (const ds of dates) {
+      const d = new Date(`${ds.replace(/\//g, '-')}T00:00:00+09:00`);
+      if (isNaN(d.getTime())) continue;
+      const daysAgo = Math.floor((now - d.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysAgo >= 0 && daysAgo < minDays) minDays = daysAgo;
+    }
+    searchFrom = idx + 7;
+  }
+  const result = minDays === Infinity ? null : minDays;
+  console.log('[SnowWe] checkScoutSent: result =', result);
+  return result;
 }
 
 // 右パネルのスクロール可能要素を下までスクロールして返す
