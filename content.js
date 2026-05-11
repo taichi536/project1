@@ -938,7 +938,6 @@ function getRikunabiScoutDays(cardEl) {
     const text = el.innerText || '';
     const m = text.match(/送(?:信)?済[（(]\s*(\d+)\s*日前\s*[）)]/);
     if (m) {
-      console.log('[SnowWe] getRikunabiScoutDays: found at depth', depth, '→', m[0]);
       return parseInt(m[1], 10);
     }
   }
@@ -951,11 +950,9 @@ function getRikunabiScoutDays(cardEl) {
     if (!m) continue;
     const r = el.getBoundingClientRect();
     if (r.top >= rect.top - 10 && r.bottom <= rect.bottom + 10) {
-      console.log('[SnowWe] getRikunabiScoutDays: found by position →', t);
       return parseInt(m[1], 10);
     }
   }
-  console.log('[SnowWe] getRikunabiScoutDays: not found. card text preview:', (cardEl.innerText || '').slice(0, 100));
   return null;
 }
 
@@ -1009,7 +1006,6 @@ function checkScoutSentInBody() {
     if (bodyText[idx + 6] === '済') { searchFrom = idx + 7; continue; }
     const section = bodyText.slice(idx, idx + 500);
     const dates = section.match(/\d{4}\/\d{2}\/\d{2}/g) || [];
-    console.log('[SnowWe] checkScoutSent: modal=', !!modal, 'found at', idx, '→ dates:', dates);
     for (const ds of dates) {
       const d = new Date(`${ds.replace(/\//g, '-')}T00:00:00+09:00`);
       if (isNaN(d.getTime())) continue;
@@ -1019,7 +1015,6 @@ function checkScoutSentInBody() {
     searchFrom = idx + 7;
   }
   const result = minDays === Infinity ? null : minDays;
-  console.log('[SnowWe] checkScoutSent: result =', result);
   return result;
 }
 
@@ -1055,13 +1050,10 @@ function checkScoutHistoryInElement(root) {
   const text = searchRoot.innerText || '';
   const idx = text.indexOf('スカウト履歴');
 
-  console.log('[SnowWe] checkScoutHistory: root =', searchRoot.tagName, searchRoot.className?.slice?.(0,60));
-  console.log('[SnowWe] checkScoutHistory: textLength =', text.length, '/ スカウト履歴 found =', idx !== -1);
 
   if (idx === -1) return null;
   const section = text.slice(idx, idx + 2000);
   const dates = section.match(/\d{4}\/\d{2}\/\d{2}/g) || [];
-  console.log('[SnowWe] checkScoutHistory: dates found in section =', dates);
 
   let minDays = Infinity;
   const now = Date.now();
@@ -1069,11 +1061,9 @@ function checkScoutHistoryInElement(root) {
     const d = new Date(`${ds.replace(/\//g, '-')}T00:00:00+09:00`);
     if (isNaN(d.getTime())) continue;
     const daysAgo = Math.floor((now - d.getTime()) / (1000 * 60 * 60 * 24));
-    console.log('[SnowWe] checkScoutHistory:', ds, '→', daysAgo, '日前');
     if (daysAgo >= 0 && daysAgo < minDays) minDays = daysAgo;
   }
   const result = minDays === Infinity ? null : minDays;
-  console.log('[SnowWe] checkScoutHistory: result =', result, '日前 (閾値', RESCOUNT_DAYS, '日)');
   return result;
 }
 
