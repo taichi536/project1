@@ -990,16 +990,26 @@ async function scrollModalToBottom() {
 
 // ページ内の「スカウト送信」テキスト直後の日付から最近の送信日数を返す
 function checkScoutSentInBody() {
-  const bodyText = document.body.innerText || '';
+  // モーダル（候補者詳細）内だけを検索する（ページ全体だと誤検出する）
+  const modal = findRDSDetailPanel() ||
+    document.querySelector('[role="dialog"]') ||
+    document.querySelector('[class*="modal" i]') ||
+    document.querySelector('[class*="dialog" i]');
+
+  const searchRoot = modal || document.body;
+  const bodyText = searchRoot.innerText || '';
+
   let minDays = Infinity;
   const now = Date.now();
   let searchFrom = 0;
   while (true) {
     const idx = bodyText.indexOf('スカウト送信', searchFrom);
     if (idx === -1) break;
+    // 「スカウト送信済み」のタブ名はスキップ（「済」が直後に続く）
+    if (bodyText[idx + 6] === '済') { searchFrom = idx + 7; continue; }
     const section = bodyText.slice(idx, idx + 500);
     const dates = section.match(/\d{4}\/\d{2}\/\d{2}/g) || [];
-    console.log('[SnowWe] checkScoutSent: found at', idx, '→ dates:', dates);
+    console.log('[SnowWe] checkScoutSent: modal=', !!modal, 'found at', idx, '→ dates:', dates);
     for (const ds of dates) {
       const d = new Date(`${ds.replace(/\//g, '-')}T00:00:00+09:00`);
       if (isNaN(d.getTime())) continue;
