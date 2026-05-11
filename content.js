@@ -624,6 +624,19 @@ async function triggerAutoAdd() {
     let profileText = cardText;
     try { profileText = await getFullProfile(el, cardText); } catch (_) {}
 
+    // 右パネルのスカウト履歴を直接確認（手動送信・他担当者分も含め検知）
+    if (getPlatform() === 'rds') {
+      const panel = findRDSDetailPanel();
+      const daysAgo = panel ? checkPanelScoutHistory(panel) : null;
+      if (daysAgo !== null && daysAgo < RESCOUNT_DAYS) {
+        setBatchBadge(el, 'warn', `⏸ 送信済（${daysAgo}日前）`);
+        totalProcessed++;
+        await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+        await sleep(200);
+        continue;
+      }
+    }
+
     try {
       const overall = await judgeSingleCandidate(apiKey, profileText, criteria);
       setBatchBadge(el,
@@ -916,6 +929,25 @@ async function loadAutoAddProgress() {
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// 右パネルのスカウト履歴セクションから最近のスカウト日数を返す（なければnull）
+function checkPanelScoutHistory(panel) {
+  const text = panel.innerText || '';
+  const idx = text.indexOf('スカウト履歴');
+  if (idx === -1) return null;
+  const historyText = text.slice(idx, idx + 3000);
+  const dateMatches = historyText.match(/\d{4}\/\d{2}\/\d{2}/g);
+  if (!dateMatches) return null;
+  let minDays = Infinity;
+  const now = Date.now();
+  for (const ds of dateMatches) {
+    const d = new Date(ds.replace(/\//g, '-'));
+    if (isNaN(d.getTime())) continue;
+    const daysAgo = Math.floor((now - d.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysAgo >= 0 && daysAgo < minDays) minDays = daysAgo;
+  }
+  return minDays === Infinity ? null : minDays;
+}
 
 function buildCriteriaText(criteria) {
   const lines = [];
