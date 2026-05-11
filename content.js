@@ -594,8 +594,9 @@ async function triggerAutoAdd() {
   let addedCount = progress.added || 0;
   let totalProcessed = progress.processed || 0;
 
-  // スカウト履歴をまとめて取得（ループ内で何度も呼ばないよう）
-  const scoutHistory = await getScoutHistory();
+  const isRDS = getPlatform() === 'rds';
+  // RDSはパネルを信頼するためストレージ不要。他媒体のみ取得
+  const scoutHistory = isRDS ? {} : await getScoutHistory();
 
   for (let i = 0; i < cards.length; i++) {
     const { el, text: cardText } = cards[i];
@@ -604,28 +605,30 @@ async function triggerAutoAdd() {
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     await sleep(500);
 
-    // 3ヶ月チェック：最近スカウト済みならスキップ
     const candidateId = getCandidateId(el);
-    const status = scoutStatus(scoutHistory, candidateId);
-    if (status.scouted && !status.reScoutable) {
-      setBatchBadge(el, 'warn', `⏸ 送信済（${status.daysAgo}日前）`);
-      totalProcessed++;
-      await sleep(200);
-      continue;
-    }
-    if (status.scouted && status.reScoutable) {
-      // 3ヶ月以上経過 → 通常通り処理（バッジに表示）
-      setBatchBadge(el, 'checking', `🔄 再追加可（${status.daysAgo}日前）`);
-    } else {
+
+    if (isRDS) {
+      // RDS(リクナビHRTech): ストレージは使わずパネルのスカウト履歴だけを信頼
       setBatchBadge(el, 'checking', '🔍 判定中...');
+    } else {
+      // 他媒体: ストレージの記録でチェック
+      const status = scoutStatus(scoutHistory, candidateId);
+      if (status.scouted && !status.reScoutable) {
+        setBatchBadge(el, 'warn', `⏸ 送信済（${status.daysAgo}日前）`);
+        totalProcessed++;
+        await sleep(200);
+        continue;
+      }
+      setBatchBadge(el, 'checking', status.scouted ? `🔄 再追加可（${status.daysAgo}日前）` : '🔍 判定中...');
     }
 
     // プロフィール全文取得（プラットフォーム別）
     let profileText = cardText;
     try { profileText = await getFullProfile(el, cardText); } catch (_) {}
 
-    // 右パネルのスカウト履歴を直接確認（手動送信・他担当者分も含め検知）
-    if (getPlatform() === 'rds') {
+    // RDS: パネルが確実に読み込まれてからスカウト履歴を確認
+    if (isRDS) {
+      await sleep(300); // パネル描画の追加待機
       const panel = findRDSDetailPanel();
       const daysAgo = panel ? checkPanelScoutHistory(panel) : null;
       if (daysAgo !== null && daysAgo < RESCOUNT_DAYS) {
