@@ -961,21 +961,30 @@ async function scrollRightPanelToBottom() {
 
 // 指定要素（右パネル）内のスカウト履歴セクションから最近の送信日数を返す（なければnull）
 function checkScoutHistoryInElement(root) {
-  const text = (root || document.body).innerText || '';
+  const searchRoot = root || document.body;
+  const text = searchRoot.innerText || '';
   const idx = text.indexOf('スカウト履歴');
+
+  console.log('[SnowWe] checkScoutHistory: root =', searchRoot.tagName, searchRoot.className?.slice?.(0,60));
+  console.log('[SnowWe] checkScoutHistory: textLength =', text.length, '/ スカウト履歴 found =', idx !== -1);
+
   if (idx === -1) return null;
   const section = text.slice(idx, idx + 2000);
   const dates = section.match(/\d{4}\/\d{2}\/\d{2}/g) || [];
+  console.log('[SnowWe] checkScoutHistory: dates found in section =', dates);
+
   let minDays = Infinity;
   const now = Date.now();
   for (const ds of dates) {
-    // JSTで解釈されるよう時刻を付加（date-onlyはUTC扱いになるため）
     const d = new Date(`${ds.replace(/\//g, '-')}T00:00:00+09:00`);
     if (isNaN(d.getTime())) continue;
     const daysAgo = Math.floor((now - d.getTime()) / (1000 * 60 * 60 * 24));
+    console.log('[SnowWe] checkScoutHistory:', ds, '→', daysAgo, '日前');
     if (daysAgo >= 0 && daysAgo < minDays) minDays = daysAgo;
   }
-  return minDays === Infinity ? null : minDays;
+  const result = minDays === Infinity ? null : minDays;
+  console.log('[SnowWe] checkScoutHistory: result =', result, '日前 (閾値', RESCOUNT_DAYS, '日)');
+  return result;
 }
 
 function buildCriteriaText(criteria) {
