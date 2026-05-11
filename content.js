@@ -626,10 +626,17 @@ async function triggerAutoAdd() {
     let profileText = cardText;
     try { profileText = await getFullProfile(el, cardText); } catch (_) {}
 
-    // RDS: パネルが確実に読み込まれてからスカウト履歴を確認
+    // RDS: パネルが読み込まれるまで最大3回リトライしてからスカウト履歴を確認
     if (isRDS) {
-      await sleep(300); // パネル描画の追加待機
-      const panel = findRDSDetailPanel();
+      let panel = null;
+      for (let retry = 0; retry < 4; retry++) {
+        await sleep(400);
+        panel = findRDSDetailPanel();
+        const panelText = panel ? (panel.innerText || '') : '';
+        // パネルにコンテンツがある（=読み込み完了）ならリトライ不要
+        if (panelText.length > 300) break;
+        panel = null;
+      }
       const daysAgo = panel ? checkPanelScoutHistory(panel) : null;
       if (daysAgo !== null && daysAgo < RESCOUNT_DAYS) {
         setBatchBadge(el, 'warn', `⏸ 送信済（${daysAgo}日前）`);
