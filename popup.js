@@ -622,7 +622,7 @@ async function runBatchScreeningAI(apiKey, cards, criteria) {
 
 【選定基準】
 ${buildStandardCriteria(criteria.ageIncome)}
-${criteriaLines !== '- 条件未設定' ? '\n【追加条件】\n' + criteriaLines : ''}
+${criteriaLines ? '\n【追加条件】\n' + criteriaLines : ''}
 
 【候補者一覧】
 ${candidateList}
@@ -665,16 +665,11 @@ function buildCriteriaLines(criteria) {
     const max = criteria.ageMax ? `${criteria.ageMax}歳以下` : '';
     lines.push(`- 年齢: ${[min, max].filter(Boolean).join('かつ')}`);
   }
-  if (criteria.incomeMin) lines.push(`- 年収: ${criteria.incomeMin}万円以上`);
-  if (criteria.companyTiers?.length > 0 && !criteria.companyTiers.includes('不問'))
-    lines.push(`- 社格: ${criteria.companyTiers.join('または')}`);
-  if (criteria.educationReq && criteria.educationReq !== '不問')
-    lines.push(`- 学歴: ${criteria.educationReq}`);
   if (criteria.minTenure) lines.push(`- 在籍期間: 過去の全職歴を含め、${criteria.minTenure}年未満の在籍が明確に確認できる場合のみNG。在籍期間が不明・記載なしの場合はOKとして扱う`);
   if (criteria.requiredKeywords) lines.push(`- 必須経験: ${criteria.requiredKeywords}`);
   if (criteria.excludeCompanies) lines.push(`- 除外企業: 職歴に${criteria.excludeCompanies}のいずれかが含まれる場合は過去・現職問わず即NG`);
   if (criteria.excludeKeywords) lines.push(`- 除外: ${criteria.excludeKeywords}`);
-  return lines.length > 0 ? lines.join('\n') : '- 条件未設定';
+  return lines.join('\n');
 }
 
 async function runAutoAdd() {
@@ -778,27 +773,15 @@ async function runScreeningAI(apiKey, profileText, criteria) {
     const max = criteria.ageMax ? `${criteria.ageMax}歳以下` : '';
     criteriaLines.push(`- 年齢: ${[min, max].filter(Boolean).join('かつ')}`);
   }
-
-  if (criteria.incomeMin) {
-    criteriaLines.push(`- 年収: ${criteria.incomeMin}万円以上`);
+  if (criteria.minTenure) {
+    criteriaLines.push(`- 在籍期間: 過去の全職歴を含め、${criteria.minTenure}年未満の在籍が明確に確認できる場合のみNG。不明・記載なしはOK`);
   }
-
-  if (criteria.companyTiers && criteria.companyTiers.length > 0 && !criteria.companyTiers.includes('不問')) {
-    criteriaLines.push(`- 社格: ${criteria.companyTiers.join('または')}`);
-  }
-
-  if (criteria.educationReq && criteria.educationReq !== '不問') {
-    criteriaLines.push(`- 学歴: ${criteria.educationReq}`);
-  }
-
   if (criteria.requiredKeywords) {
     criteriaLines.push(`- 必須経験: ${criteria.requiredKeywords}（いずれかを含む）`);
   }
-
   if (criteria.excludeCompanies) {
     criteriaLines.push(`- 除外企業: 職歴に${criteria.excludeCompanies}のいずれかが含まれる場合は過去・現職問わず即NG`);
   }
-
   if (criteria.excludeKeywords) {
     criteriaLines.push(`- 除外条件: ${criteria.excludeKeywords}（含む場合はNG）`);
   }
