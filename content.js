@@ -628,8 +628,8 @@ async function triggerAutoAdd() {
 
     // RDS: 右パネルを下までスクロールして遅延ロードのスカウト履歴を表示させてから確認
     if (isRDS) {
-      await scrollRightPanelToBottom();
-      const daysAgo = checkPageScoutHistory();
+      const rightPanel = await scrollRightPanelToBottom();
+      const daysAgo = checkScoutHistoryInElement(rightPanel);
       if (daysAgo !== null && daysAgo < RESCOUNT_DAYS) {
         setBatchBadge(el, 'warn', `⏸ 送信済（${daysAgo}日前）`);
         totalProcessed++;
@@ -933,6 +933,7 @@ async function loadAutoAddProgress() {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // 右パネルのスクロール可能要素を見つけて一番下までスクロールする
+// 右パネルのスクロール可能要素を下までスクロールして返す
 async function scrollRightPanelToBottom() {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
@@ -949,32 +950,30 @@ async function scrollRightPanelToBottom() {
   });
   if (best) {
     best.scrollTop = best.scrollHeight;
+    await sleep(1000);
+    return best; // スクロールした要素を返す（スカウト履歴の検索範囲として使う）
   } else {
     window.scrollTo(0, document.body.scrollHeight);
+    await sleep(1000);
+    return null;
   }
-  await sleep(1000); // 遅延ロードのコンテンツが描画されるまで待つ
 }
 
-// ページ上のスカウト履歴セクションから最近のスカウト日数を返す（なければnull）
-// findRDSDetailPanel()に依存せずdocument.body全体を検索する
-function checkPageScoutHistory() {
-  const allText = document.body.innerText || '';
+// 指定要素（右パネル）内のスカウト履歴セクションから最近の送信日数を返す（なければnull）
+function checkScoutHistoryInElement(root) {
+  const text = (root || document.body).innerText || '';
+  const idx = text.indexOf('スカウト履歴');
+  if (idx === -1) return null;
+  const section = text.slice(idx, idx + 2000);
+  const dates = section.match(/\d{4}\/\d{2}\/\d{2}/g) || [];
   let minDays = Infinity;
   const now = Date.now();
-  let searchFrom = 0;
-
-  while (true) {
-    const idx = allText.indexOf('スカウト履歴', searchFrom);
-    if (idx === -1) break;
-    const section = allText.slice(idx, idx + 2000);
-    const dates = section.match(/\d{4}\/\d{2}\/\d{2}/g) || [];
-    for (const ds of dates) {
-      const d = new Date(ds.replace(/\//g, '-'));
-      if (isNaN(d.getTime())) continue;
-      const daysAgo = Math.floor((now - d.getTime()) / (1000 * 60 * 60 * 24));
-      if (daysAgo >= 0 && daysAgo < minDays) minDays = daysAgo;
-    }
-    searchFrom = idx + 6;
+  for (const ds of dates) {
+    // JSTで解釈されるよう時刻を付加（date-onlyはUTC扱いになるため）
+    const d = new Date(`${ds.replace(/\//g, '-')}T00:00:00+09:00`);
+    if (isNaN(d.getTime())) continue;
+    const daysAgo = Math.floor((now - d.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysAgo >= 0 && daysAgo < minDays) minDays = daysAgo;
   }
   return minDays === Infinity ? null : minDays;
 }
