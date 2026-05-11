@@ -615,9 +615,12 @@ async function runBatchScreeningAI(apiKey, cards, criteria) {
   apiKey = sanitizeApiKey(apiKey);
   const criteriaLines = buildCriteriaLines(criteria);
 
-  const candidateList = cards.map((c, i) =>
-    `候補者${i + 1}: ${c.summary}`
-  ).join('\n');
+  const candidateList = cards.map((c, i) => {
+    const age = c.age ? `${c.age}歳` : '';
+    const income = c.incomeText ? `年収${c.incomeText}` : '';
+    const meta = [age, income].filter(Boolean).join(' / ');
+    return `候補者${i + 1}: ${c.summary}${meta ? ` [${meta}]` : ''}`;
+  }).join('\n');
 
   const prompt = `あなたは転職エージェントの一次選定アシスタントです。
 
@@ -656,7 +659,11 @@ ${candidateList}
   const data = await response.json();
   const text = (data.content?.[0]?.text || '').trim();
   const clean = text.replace(/```json|```/g, '').trim();
-  const parsed = JSON.parse(clean);
+  let parsed;
+  try { parsed = JSON.parse(clean); } catch {
+    const fallback = clean.match(/"o"\s*:\s*"([^"]+)"/g) || [];
+    return fallback.map((_, i) => ({ overall: '要確認' }));
+  }
   return (parsed.results || []).map(r => ({
     overall: r.overall || r.o || '要確認'
   }));
@@ -844,7 +851,9 @@ ${profileText}
   const data = await response.json();
   const text = (data.content?.[0]?.text || '').trim();
   const clean = text.replace(/```json|```/g, '').trim();
-  return JSON.parse(clean);
+  try { return JSON.parse(clean); } catch {
+    throw new Error('JSON解析エラー（AIの応答形式が不正）: ' + clean.substring(0, 100));
+  }
 }
 
 function renderScreeningResult(result) {

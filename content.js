@@ -417,8 +417,8 @@ async function loadAllCandidatesIntoDOM() {
 async function autoScreenCandidates() {
   // APIキーと設定を取得
   const stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria']);
-  const apiKey = stored.apiKey;
-  if (!apiKey) return; // APIキー未設定なら何もしない
+  const apiKey = (stored.apiKey || '').replace(/[^\x21-\x7E]/g, '').trim();
+  if (!apiKey || apiKey.length < 20) return; // APIキー未設定なら何もしない
 
   const criteria = stored.screeningCriteria || {};
 
