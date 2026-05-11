@@ -929,9 +929,29 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // リクナビHRTechのカード上の「送済（X日前）」バッジからスカウト送信日数を取得
 function getRikunabiScoutDays(cardEl) {
-  const text = cardEl.innerText || '';
-  const m = text.match(/送(?:信)?済[（(]\s*(\d+)\s*日前\s*[）)]/);
-  if (m) return parseInt(m[1], 10);
+  // カード自身 → 親 → 祖父母 と広げて探す（バッジがDOM外にある場合の対策）
+  for (let el = cardEl, depth = 0; el && depth < 4; el = el.parentElement, depth++) {
+    const text = el.innerText || '';
+    const m = text.match(/送(?:信)?済[（(]\s*(\d+)\s*日前\s*[）)]/);
+    if (m) {
+      console.log('[SnowWe] getRikunabiScoutDays: found at depth', depth, '→', m[0]);
+      return parseInt(m[1], 10);
+    }
+  }
+  // 座標でバッジ要素を探す（絶対配置で親外に出ている場合）
+  const rect = cardEl.getBoundingClientRect();
+  const allEls = document.querySelectorAll('span, div, p');
+  for (const el of allEls) {
+    const t = (el.innerText || '').trim();
+    const m = t.match(/^送(?:信)?済[（(]\s*(\d+)\s*日前\s*[）)]$/);
+    if (!m) continue;
+    const r = el.getBoundingClientRect();
+    if (r.top >= rect.top - 10 && r.bottom <= rect.bottom + 10) {
+      console.log('[SnowWe] getRikunabiScoutDays: found by position →', t);
+      return parseInt(m[1], 10);
+    }
+  }
+  console.log('[SnowWe] getRikunabiScoutDays: not found. card text preview:', (cardEl.innerText || '').slice(0, 100));
   return null;
 }
 
