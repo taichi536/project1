@@ -626,18 +626,10 @@ async function triggerAutoAdd() {
     let profileText = cardText;
     try { profileText = await getFullProfile(el, cardText); } catch (_) {}
 
-    // RDS: パネルが読み込まれるまで最大3回リトライしてからスカウト履歴を確認
+    // RDS: ページ全体からスカウト履歴を検索（パネル検出に依存しない）
     if (isRDS) {
-      let panel = null;
-      for (let retry = 0; retry < 4; retry++) {
-        await sleep(400);
-        panel = findRDSDetailPanel();
-        const panelText = panel ? (panel.innerText || '') : '';
-        // パネルにコンテンツがある（=読み込み完了）ならリトライ不要
-        if (panelText.length > 300) break;
-        panel = null;
-      }
-      const daysAgo = panel ? checkPanelScoutHistory(panel) : null;
+      await sleep(500); // カードクリック後のページ描画待ち
+      const daysAgo = checkPageScoutHistory();
       if (daysAgo !== null && daysAgo < RESCOUNT_DAYS) {
         setBatchBadge(el, 'warn', `⏸ 送信済（${daysAgo}日前）`);
         totalProcessed++;
@@ -940,21 +932,26 @@ async function loadAutoAddProgress() {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// 右パネルのスカウト履歴セクションから最近のスカウト日数を返す（なければnull）
-function checkPanelScoutHistory(panel) {
-  const text = panel.innerText || '';
-  const idx = text.indexOf('スカウト履歴');
-  if (idx === -1) return null;
-  const historyText = text.slice(idx, idx + 3000);
-  const dateMatches = historyText.match(/\d{4}\/\d{2}\/\d{2}/g);
-  if (!dateMatches) return null;
+// ページ上のスカウト履歴セクションから最近のスカウト日数を返す（なければnull）
+// findRDSDetailPanel()に依存せずdocument.body全体を検索する
+function checkPageScoutHistory() {
+  const allText = document.body.innerText || '';
   let minDays = Infinity;
   const now = Date.now();
-  for (const ds of dateMatches) {
-    const d = new Date(ds.replace(/\//g, '-'));
-    if (isNaN(d.getTime())) continue;
-    const daysAgo = Math.floor((now - d.getTime()) / (1000 * 60 * 60 * 24));
-    if (daysAgo >= 0 && daysAgo < minDays) minDays = daysAgo;
+  let searchFrom = 0;
+
+  while (true) {
+    const idx = allText.indexOf('スカウト履歴', searchFrom);
+    if (idx === -1) break;
+    const section = allText.slice(idx, idx + 2000);
+    const dates = section.match(/\d{4}\/\d{2}\/\d{2}/g) || [];
+    for (const ds of dates) {
+      const d = new Date(ds.replace(/\//g, '-'));
+      if (isNaN(d.getTime())) continue;
+      const daysAgo = Math.floor((now - d.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysAgo >= 0 && daysAgo < minDays) minDays = daysAgo;
+    }
+    searchFrom = idx + 6;
   }
   return minDays === Infinity ? null : minDays;
 }
