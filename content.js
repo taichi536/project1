@@ -626,9 +626,9 @@ async function triggerAutoAdd() {
     let profileText = cardText;
     try { profileText = await getFullProfile(el, cardText); } catch (_) {}
 
-    // RDS: ページ全体からスカウト履歴を検索（パネル検出に依存しない）
+    // RDS: 右パネルを下までスクロールして遅延ロードのスカウト履歴を表示させてから確認
     if (isRDS) {
-      await sleep(500); // カードクリック後のページ描画待ち
+      await scrollRightPanelToBottom();
       const daysAgo = checkPageScoutHistory();
       if (daysAgo !== null && daysAgo < RESCOUNT_DAYS) {
         setBatchBadge(el, 'warn', `⏸ 送信済（${daysAgo}日前）`);
@@ -931,6 +931,29 @@ async function loadAutoAddProgress() {
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// 右パネルのスクロール可能要素を見つけて一番下までスクロールする
+async function scrollRightPanelToBottom() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  let best = null;
+  let bestArea = 0;
+  document.querySelectorAll('*').forEach(el => {
+    const rect = el.getBoundingClientRect();
+    if (rect.left < vw * 0.4) return; // 右半分のみ
+    if (rect.height < vh * 0.3) return;
+    const style = window.getComputedStyle(el);
+    if (style.overflowY !== 'scroll' && style.overflowY !== 'auto') return;
+    const area = rect.width * rect.height;
+    if (area > bestArea) { best = el; bestArea = area; }
+  });
+  if (best) {
+    best.scrollTop = best.scrollHeight;
+  } else {
+    window.scrollTo(0, document.body.scrollHeight);
+  }
+  await sleep(1000); // 遅延ロードのコンテンツが描画されるまで待つ
+}
 
 // ページ上のスカウト履歴セクションから最近のスカウト日数を返す（なければnull）
 // findRDSDetailPanel()に依存せずdocument.body全体を検索する
