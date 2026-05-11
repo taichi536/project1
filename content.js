@@ -310,11 +310,18 @@ function getCandidateId(cardEl) {
   const url = findProfileUrl(cardEl);
   if (url) return url.replace(/[?#].*$/, ''); // クエリ・ハッシュを除去
 
-  // フォールバック：カードテキストから候補者番号を抽出
   const text = (cardEl.innerText || '');
+
+  // フォールバック1：カードテキストから候補者番号を抽出
   const m = text.match(/No\.(\d{5,})|^(\d{6,})\s/m) ||
             text.match(/\b([0-9]{6,10})\b/);
   if (m) return `${getPlatform()}_${m[1] || m[2]}`;
+
+  // フォールバック2：年齢+会社名+経歴先頭のハッシュ（RDS等URL取得不可の場合）
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const fingerprint = lines.slice(0, 5).join('|');
+  if (fingerprint.length > 10) return `${getPlatform()}_h${simpleHash(fingerprint)}`;
+
   return null;
 }
 
@@ -693,6 +700,7 @@ async function getFullProfile(cardEl, fallbackText) {
 function findProfileUrl(cardEl) {
   const platform = getPlatform();
   const patterns = {
+    rds:      [/\/scout\//, /\/candidate\//, /\/member\//, /\/detail\//, /hrtech/, /rikunabi/],
     dodax:    [/member_search\/detail/, /member_detail/, /\/profile\//],
     ambi:     [/\/scout\/member\//, /\/member\/\d+/, /company\/scout/],
     green:    [/green-japan\.com\/user\//, /\/members\//],
@@ -715,6 +723,15 @@ function findProfileUrl(cardEl) {
   }
 
   return null;
+}
+
+// テキストから簡易ハッシュを生成（URLが取れない場合の候補者ID代替）
+function simpleHash(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h).toString(36);
 }
 
 // プロフィールページをフェッチしてテキストを返す
