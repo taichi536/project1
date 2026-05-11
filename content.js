@@ -608,7 +608,15 @@ async function triggerAutoAdd() {
     const candidateId = getCandidateId(el);
 
     if (isRDS) {
-      // RDS(リクナビHRTech): ストレージは使わずパネルのスカウト履歴だけを信頼
+      // RDS: カード上の「送済（X日前）」バッジを直接読む（最も信頼性が高い）
+      const cardDays = getRikunabiScoutDays(el);
+      if (cardDays !== null && cardDays < RESCOUNT_DAYS) {
+        setBatchBadge(el, 'warn', `⏸ 送信済（${cardDays}日前）`);
+        totalProcessed++;
+        await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+        await sleep(200);
+        continue;
+      }
       setBatchBadge(el, 'checking', '🔍 判定中...');
     } else {
       // 他媒体: ストレージの記録でチェック
@@ -625,19 +633,6 @@ async function triggerAutoAdd() {
     // プロフィール全文取得（プラットフォーム別）
     let profileText = cardText;
     try { profileText = await getFullProfile(el, cardText); } catch (_) {}
-
-    // RDS: 右パネルを下までスクロールして遅延ロードのスカウト履歴を表示させてから確認
-    if (isRDS) {
-      const rightPanel = await scrollRightPanelToBottom();
-      const daysAgo = checkScoutHistoryInElement(rightPanel);
-      if (daysAgo !== null && daysAgo < RESCOUNT_DAYS) {
-        setBatchBadge(el, 'warn', `⏸ 送信済（${daysAgo}日前）`);
-        totalProcessed++;
-        await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
-        await sleep(200);
-        continue;
-      }
-    }
 
     try {
       const overall = await judgeSingleCandidate(apiKey, profileText, criteria);
@@ -932,7 +927,14 @@ async function loadAutoAddProgress() {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// 右パネルのスクロール可能要素を見つけて一番下までスクロールする
+// リクナビHRTechのカード上の「送済（X日前）」バッジからスカウト送信日数を取得
+function getRikunabiScoutDays(cardEl) {
+  const text = cardEl.innerText || '';
+  const m = text.match(/送(?:信)?済[（(]\s*(\d+)\s*日前\s*[）)]/);
+  if (m) return parseInt(m[1], 10);
+  return null;
+}
+
 // 右パネルのスクロール可能要素を下までスクロールして返す
 async function scrollRightPanelToBottom() {
   const vw = window.innerWidth;
