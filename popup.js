@@ -80,7 +80,6 @@ async function loadSettings() {
   if (ai.age36to39) $('income-36to39').value = ai.age36to39;
   if (ai.age40to42) $('income-40to42').value = ai.age40to42;
   if (ai.age43to45) $('income-43to45').value = ai.age43to45;
-  if (ai.age46to47) $('income-46to47').value = ai.age46to47;
   if (c.educationReq) $('education-req').value = c.educationReq;
   if (c.minTenure) $('min-tenure').value = c.minTenure;
   if (c.requiredKeywords) $('required-keywords').value = c.requiredKeywords;
@@ -125,7 +124,6 @@ $('settings-save-btn').addEventListener('click', async () => {
       age36to39: parseIncome('income-36to39'),
       age40to42: parseIncome('income-40to42'),
       age43to45: parseIncome('income-43to45'),
-      age46to47: parseIncome('income-46to47'),
     },
     companyTiers,
     educationReq: $('education-req').value,
@@ -366,7 +364,7 @@ ${profileText}`;
   const data = await response.json();
   const text = data.content?.[0]?.text || '';
   if (!text) throw new Error('レスポンスが空でした');
-  return text.trim();
+  return text.trim().replace(/^「/, '').replace(/」$/, '');
 }
 
 // ============================================================
@@ -594,12 +592,10 @@ function buildStandardCriteria(ageIncome) {
   ・36〜39歳: ${v('age36to39', 650)}万円未満
   ・40〜42歳: ${v('age40to42', 800)}万円未満
   ・43〜45歳: ${v('age43to45', 1000)}万円未満
-  ・46〜47歳: ${v('age46to47', 1000)}万円未満
-  ・48歳以上: 財務・経理・FP&A職歴があれば「要確認」、それ以外はNG
+  ・46歳以上: 財務・経理・FP&A職歴があれば「要確認」、それ以外はNG
 
 【要確認（ボーダーライン）】年収が閾値の+150万円以内
   ・43〜45歳: ${v('age43to45', 1000)}〜${v('age43to45', 1000)+150}万円
-  ・46〜47歳: ${v('age46to47', 1000)}〜${v('age46to47', 1000)+150}万円
   ・40〜42歳: ${v('age40to42', 800)}〜${v('age40to42', 800)+100}万円
   ・36〜39歳: ${v('age36to39', 650)}〜${v('age36to39', 650)+100}万円
   ・30〜35歳: ${v('age30to35', 550)}〜${v('age30to35', 550)+100}万円

@@ -932,8 +932,7 @@ function buildCriteriaText(criteria) {
   lines.push(`- 36〜39歳: ${iv('age36to39', 650)}万円未満 → NG`);
   lines.push(`- 40〜42歳: ${iv('age40to42', 800)}万円未満 → NG`);
   lines.push(`- 43〜45歳: ${iv('age43to45', 1000)}万円未満 → NG`);
-  lines.push(`- 46〜47歳: ${iv('age46to47', 1000)}万円未満 → NG`);
-  lines.push(`- 48歳以上: 財務・経理・FP&A職歴あり → 要確認、それ以外 → NG`);
+  lines.push(`- 46歳以上: 財務・経理・FP&A職歴あり → 要確認、それ以外 → NG`);
   lines.push(`※年収が不明な場合はこの項目をスキップしてOK扱い`);
   lines.push(`【社格】上場企業・大手グループ・知名度ある企業はOK。無名の零細企業のみNG`);
   lines.push(`【学歴】国立大学（横浜国立・筑波・神戸・広島・岡山・千葉など含む）・早慶上智・MARCHはOK。それ以外は社格・年収でカバーされればOK`);
