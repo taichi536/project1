@@ -364,7 +364,12 @@ ${profileText}`;
   const data = await response.json();
   const text = data.content?.[0]?.text || '';
   if (!text) throw new Error('レスポンスが空でした');
-  return text.trim().replace(/^「/, '').replace(/」$/, '');
+  // Strip any appended footnotes (e.g. "---\n\n※プロフィールが..." added when profile data is thin)
+  const cleaned = text
+    .replace(/\s*---[\s\S]*$/, '')   // remove "---" separator and everything after
+    .replace(/\s*※[\s\S]*$/, '')    // remove "※" footnote and everything after
+    .trim();
+  return cleaned.replace(/^「/, '').replace(/」$/, '');
 }
 
 // ============================================================
