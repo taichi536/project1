@@ -1483,36 +1483,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'getProfile') {
-    try {
-      const profileText = extractProfile();
-      const isRDS = location.hostname.includes('rikunabi') || location.hostname.includes('hrtech');
+    (async () => {
+      try {
+        const isRDS = location.hostname.includes('rikunabi') || location.hostname.includes('hrtech');
+        // RDS: 右パネルを下までスクロールして遅延ロードのプロフィールを展開してから取得
+        if (isRDS) await scrollRightPanelToBottom();
+        const profileText = extractProfile();
 
-      // RDSで候補者が未選択（テキストが極端に短い）場合のみ選択を促す
-      const looksEmpty = profileText.trim().length < 50;
+        // RDSで候補者が未選択（テキストが極端に短い）場合のみ選択を促す
+        const looksEmpty = profileText.trim().length < 50;
 
-      if (isRDS && looksEmpty) {
+        if (isRDS && looksEmpty) {
+          sendResponse({
+            success: false,
+            needsCandidateSelection: true,
+            profileText: '',
+            error: '候補者が選択されていません'
+          });
+        } else {
+          sendResponse({
+            success: true,
+            profileText,
+            url: location.href,
+            hostname: location.hostname,
+            length: profileText.length
+          });
+        }
+      } catch (e) {
         sendResponse({
           success: false,
-          needsCandidateSelection: true,
           profileText: '',
-          error: '候補者が選択されていません'
-        });
-      } else {
-        sendResponse({
-          success: true,
-          profileText,
-          url: location.href,
-          hostname: location.hostname,
-          length: profileText.length
+          error: e.message
         });
       }
-    } catch (e) {
-      sendResponse({
-        success: false,
-        profileText: '',
-        error: e.message
-      });
-    }
+    })();
+    return true; // 非同期レスポンスのためtrueを返す
   }
 
   if (request.action === 'ping') {
