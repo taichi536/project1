@@ -338,8 +338,7 @@ async function generatePersonalizedLine(apiKey, profileText) {
 
 【ルール】
 - 1文のみ（前置き・説明不要）
-- 候補者の直近または最も印象的な勤務先の社名・役職・担当業務を具体的に盛り込む
-- 抽象的な表現（「高い専門性」「幅広い経験」など）は使わず、事実をそのまま描写する
+- 職歴・実績の描写から直接入る
 - 丁寧だが重くなりすぎないトーン
 
 【候補者プロフィール】
@@ -355,7 +354,7 @@ ${profileText}`;
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 250,
+      max_tokens: 200,
       messages: [{ role: 'user', content: prompt }]
     })
   });
