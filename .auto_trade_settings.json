@@ -1,0 +1,11 @@
+{
+  "enabled": true,
+  "risk_pct": 2.0,
+  "max_position_pct": 10.0,
+  "min_score": 4,
+  "sell_score": -4,
+  "use_limit_order": true,
+  "limit_offset_pct": 0.3,
+  "stop_loss_atr_mult": 2.0,
+  "broker": "paper"
+}
