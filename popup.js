@@ -426,19 +426,15 @@ async function runSuggestPosition() {
   $('suggest-btn').disabled = false;
 }
 
-async function fetchPositionsFromCsv(csvUrl) {
-  const res = await fetch(csvUrl);
-  if (!res.ok) throw new Error(`スプレッドシート取得エラー (${res.status})`);
-  const text = await res.text();
-  const lines = text.split('\n').slice(1); // 1行目ヘッダーをスキップ
-  return lines
-    .map(line => {
-      // CSVのカンマ分割（ダブルクォート対応）
-      const cols = line.match(/("(?:[^"]|"")*"|[^,]*)/g) || [];
-      const clean = s => s.replace(/^"|"$/g, '').replace(/""/g, '"').trim();
-      return { name: clean(cols[0] || ''), description: clean(cols[1] || '') };
-    })
-    .filter(p => p.name);
+async function fetchPositionsFromGas(positionUrl, secret) {
+  const res = await fetch(positionUrl, {
+    method: 'POST',
+    body: JSON.stringify({ secret, action: 'getPositions' }),
+  });
+  if (!res.ok) throw new Error(`GAS接続エラー (${res.status})`);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'ポジション取得失敗');
+  return data.positions || [];
 }
 
 async function suggestPosition(apiKey, profileText) {
@@ -452,8 +448,8 @@ async function suggestPosition(apiKey, profileText) {
 
   if (gas.positionUrl) {
     try {
-      setStatus('suggest', 'loading', 'スプレッドシートからポジション情報を取得中...');
-      const positions = await fetchPositionsFromCsv(gas.positionUrl);
+      setStatus('suggest', 'loading', 'GASからポジション情報を取得中...');
+      const positions = await fetchPositionsFromGas(gas.positionUrl, gas.secret || 'snowwe2024');
       if (positions.length > 0) {
         positionListText = positions
           .map(p => p.description ? `${p.name}: ${p.description}` : p.name)
