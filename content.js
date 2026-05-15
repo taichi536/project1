@@ -1574,8 +1574,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     (async () => {
       try {
         const isRDS = location.hostname.includes('rikunabi') || location.hostname.includes('hrtech');
-        // 全媒体: スクロールして遅延ロードのプロフィールを展開してから取得
-        await scrollRightPanelToBottom();
+        // RDSは中央モーダルのためscrollModalToBottom、それ以外は右パネルスクロール
+        if (isRDS) {
+          await scrollModalToBottom();
+        } else {
+          await scrollRightPanelToBottom();
+        }
         const profileText = extractProfile();
 
         // RDSで候補者が未選択（テキストが極端に短い）場合のみ選択を促す
