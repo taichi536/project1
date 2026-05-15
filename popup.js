@@ -443,19 +443,16 @@ async function suggestPosition(apiKey, profileText) {
   // GASからポジション取得を試みる
   const r = await chrome.storage.local.get(['gasSettings']);
   const gas = r.gasSettings || {};
-  let positionListText = '';
+  let positions = [];
   let usingGas = false;
 
   if (gas.positionUrl) {
     try {
       setStatus('suggest', 'loading', 'GASからポジション情報を取得中...');
-      const positions = await fetchPositionsFromGas(gas.positionUrl, gas.secret || 'snowwe2024');
-      if (positions.length > 0) {
-        positionListText = positions
-          .map(p => p.description ? `${p.name}: ${p.description}` : p.name)
-          .join('\n');
+      const fetched = await fetchPositionsFromGas(gas.positionUrl, gas.secret || 'snowwe2024');
+      if (fetched.length > 0) {
+        positions = fetched;
         usingGas = true;
-        setStatus('suggest', 'loading', `${positions.length}件のポジション情報でポジションを分析中...`);
       }
     } catch (e) {
       // GAS取得失敗時はデフォルト一覧にフォールバック
@@ -463,35 +460,27 @@ async function suggestPosition(apiKey, profileText) {
   }
 
   if (!usingGas) {
-    positionListText = Array.from(document.querySelectorAll('#position-select option'))
-      .map(o => o.value).filter(Boolean).join('\n');
-    setStatus('suggest', 'loading', 'ポジションを分析中...');
+    // デフォルト一覧（説明文なし）
+    positions = Array.from(document.querySelectorAll('#position-select option'))
+      .map(o => ({ name: o.value, description: '' })).filter(p => p.name);
   }
 
-  const prompt = `あなたはアクセンチュア日本法人への転職支援を専門とするハイクラス転職エージェントです。
-候補者にスカウトを送る際、どのポジションで打てば「刺さるか」を判断してください。
-
-【判断の視点】
-1. 候補者の職歴・実績から見て、アクセンチュアのどのポジションで即戦力として活かせるか
-2. 候補者の希望職種・転職軸（プロフィールに記載あれば）と合致しているか
-3. 上記2つが重なるポジションを最優先。希望職種の記載がない場合は職歴から転職軸を推測する
-
-【重要ルール】
-- 必ず【募集ポジション一覧】に記載されたポジション名をそのまま使用すること
-- 一覧にないポジション名は絶対に使用しないこと
-- スコアは「このポジションで打ったら候補者に刺さる確度」として1〜100で評価すること
+  // ── Step 1: Haikuで全ポジションから上位10件に絞り込み ──
+  setStatus('suggest', 'loading', `Step1: ${positions.length}件から候補を絞り込み中...`);
+  const nameOnlyList = positions.map(p => p.name).join('\n');
+  const step1Prompt = `あなたはアクセンチュア転職支援の専門エージェントです。
+以下の候補者プロフィールと募集ポジション一覧を照合し、最も合致しそうなポジション名を上位10件選んでください。
 
 【募集ポジション一覧】
-${positionListText}
+${nameOnlyList}
 
 【候補者プロフィール】
 ${profileText}
 
-以下のJSON形式のみで出力してください（コードブロック・前置き・説明は一切不要）:
-{"suggestions":[{"position":"ポジション名","match_score":90,"reason":"推奨理由を1文で記述"}]}
-※必ず守ること: reasonは1文で簡潔に。ダブルクォート・改行・バックスラッシュを含めないこと。`;
+JSON配列のみで出力してください（説明不要）:
+["ポジション名1","ポジション名2",...]`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const step1Res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -500,25 +489,82 @@ ${profileText}
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 800,
-      messages: [{ role: 'user', content: prompt }]
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 400,
+      messages: [{ role: 'user', content: step1Prompt }]
     })
   });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `APIエラー (${response.status})`);
+  if (!step1Res.ok) {
+    const err = await step1Res.json().catch(() => ({}));
+    throw new Error(err.error?.message || `APIエラー (${step1Res.status})`);
   }
-  const data = await response.json();
-  const text = (data.content?.[0]?.text || '').trim();
+  const step1Data = await step1Res.json();
+  const step1Text = (step1Data.content?.[0]?.text || '').trim();
+  const arrMatch = step1Text.match(/\[[\s\S]*\]/);
+  let top10Names = [];
+  if (arrMatch) {
+    try { top10Names = JSON.parse(arrMatch[0]); } catch (_) {}
+  }
+  // 絞り込み結果をpositionsから検索してマッチング（名前が一致するもの）
+  const top10 = top10Names.length > 0
+    ? top10Names.map(name => positions.find(p => p.name === name)).filter(Boolean)
+    : positions.slice(0, 10);
+
+  // ── Step 2: Sonnetで上位10件を詳細ランキング ──
+  setStatus('suggest', 'loading', `Step2: 上位${top10.length}件を詳細分析中...`);
+  const detailList = top10
+    .map(p => p.description ? `${p.name}: ${p.description}` : p.name)
+    .join('\n');
+
+  const step2Prompt = `あなたはアクセンチュア日本法人への転職支援を専門とするハイクラス転職エージェントです。
+候補者にスカウトを送る際、どのポジションで打てば「刺さるか」を判断してください。
+
+【判断の視点】
+1. 候補者の職歴・実績から見て、即戦力として活かせるか
+2. 候補者の希望職種・転職軸と合致しているか
+3. 上記2つが重なるポジションを最優先
+
+【重要ルール】
+- 必ず【候補ポジション一覧】に記載されたポジション名をそのまま使用すること
+- スコアは「このポジションで打ったら候補者に刺さる確度」として1〜100で評価すること
+
+【候補ポジション一覧】
+${detailList}
+
+【候補者プロフィール】
+${profileText}
+
+以下のJSON形式のみで出力してください（コードブロック・前置き・説明は一切不要）:
+{"suggestions":[{"position":"ポジション名","match_score":90,"reason":"推奨理由を1文で記述"}]}
+※必ず守ること: reasonは1文で簡潔に。ダブルクォート・改行・バックスラッシュを含めないこと。`;
+
+  const step2Res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 800,
+      messages: [{ role: 'user', content: step2Prompt }]
+    })
+  });
+  if (!step2Res.ok) {
+    const err = await step2Res.json().catch(() => ({}));
+    throw new Error(err.error?.message || `APIエラー (${step2Res.status})`);
+  }
+  const step2Data = await step2Res.json();
+  const text = (step2Data.content?.[0]?.text || '').trim();
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('AIの応答からJSONを抽出できませんでした');
   const cleaned = jsonMatch[0]
-    .replace(/[\r\n]+/g, ' ')          // 文字列内の改行をスペースに
-    .replace(/,(\s*[}\]])/g, '$1')     // 末尾カンマを除去
-    .replace(/[\x00-\x1F\x7F]/g, ' ') // 残った制御文字を除去
-    .replace(/\s+/g, ' ');             // 連続スペースを正規化
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/,(\s*[}\]])/g, '$1')
+    .replace(/[\x00-\x1F\x7F]/g, ' ')
+    .replace(/\s+/g, ' ');
   try {
     return JSON.parse(cleaned);
   } catch (e) {
