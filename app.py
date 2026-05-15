@@ -2477,7 +2477,7 @@ elif page == "🤖 自動売買":
     st.markdown("---")
 
     # ── タブ ──────────────────────────────────────────────────────────────────
-    tab_settings, tab_positions, tab_log, tab_perf = st.tabs(["⚙️ 設定", "📊 ポジション", "📋 取引ログ", "📈 成績分析"])
+    tab_settings, tab_positions, tab_log, tab_perf, tab_watchlist = st.tabs(["⚙️ 設定", "📊 ポジション", "📋 取引ログ", "📈 成績分析", "🔍 自動ウォッチリスト"])
 
     with tab_settings:
         broker_choice = "paper"
@@ -2751,6 +2751,99 @@ elif page == "🤖 自動売買":
                 )
                 closed_df = closed_df[["決済日時", "銘柄", "買値", "売値", "株数", "損益", "保有日数", "勝敗"]]
                 st.dataframe(closed_df[::-1], use_container_width=True, hide_index=True)
+
+    with tab_watchlist:
+        st.markdown("#### 🔍 自動ウォッチリスト管理")
+        st.markdown("ユニバースから強いシグナルが出た銘柄を自動でウォッチリストに追加・削除します。")
+
+        from modules.auto_watchlist import load_settings as aw_load, save_settings as aw_save, get_universe_tickers, run_auto_watchlist
+        from modules.universe import UNIVERSE
+        aw_settings = aw_load()
+
+        # ── ON/OFF ────────────────────────────────────────────────────────
+        aw_enabled = st.toggle("自動ウォッチリスト更新を有効にする",
+                               value=aw_settings["enabled"],
+                               help="毎週月曜朝9時にユニバースをスキャンしてウォッチリストを更新します")
+
+        st.markdown("---")
+
+        # ── スキャン対象カテゴリ ──────────────────────────────────────────
+        st.markdown("##### スキャン対象カテゴリ")
+        all_categories = list(UNIVERSE.keys())
+        selected_cats = st.multiselect(
+            "スキャンするカテゴリを選択",
+            options=all_categories,
+            default=aw_settings.get("categories", ["🇯🇵 日本株メジャー", "🇺🇸 米国大型株（S&P500）"]),
+            help="選択したカテゴリの銘柄をシグナルチェックの対象にします",
+        )
+        if selected_cats:
+            n_tickers = len(get_universe_tickers(selected_cats))
+            st.caption(f"対象銘柄数: {n_tickers}銘柄（重複除外）")
+
+        st.markdown("---")
+
+        # ── 追加・削除のルール ────────────────────────────────────────────
+        st.markdown("##### 追加・削除ルール")
+        col_aw1, col_aw2 = st.columns(2)
+        with col_aw1:
+            add_thresh = st.slider("追加スコア閾値", min_value=2, max_value=6, step=1,
+                                   value=aw_settings.get("add_score_threshold", 3),
+                                   help="このスコア以上の銘柄をウォッチリストに追加")
+            max_size = st.slider("ウォッチリスト最大件数", min_value=5, max_value=50, step=5,
+                                 value=aw_settings.get("max_watchlist_size", 20))
+        with col_aw2:
+            remove_thresh = st.slider("削除スコア閾値", min_value=-6, max_value=-1, step=1,
+                                      value=aw_settings.get("remove_score_threshold", -2),
+                                      help="このスコア以下が続いた銘柄をウォッチリストから削除")
+            remove_days = st.slider("削除までの連続回数", min_value=1, max_value=7, step=1,
+                                    value=aw_settings.get("remove_consecutive_days", 3),
+                                    help="N回連続で弱シグナルなら削除")
+
+        # ── 保護銘柄（削除しない） ────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("##### 自動削除しない銘柄（保護）")
+        current_watchlist = load_watchlist()
+        protected = st.multiselect(
+            "削除しない銘柄を選択",
+            options=current_watchlist,
+            default=aw_settings.get("protected_tickers", []),
+            help="手動で追加した銘柄など、自動削除されたくない銘柄を指定",
+        )
+
+        # ── 設定保存 ──────────────────────────────────────────────────────
+        if st.button("設定を保存", type="primary", key="aw_save"):
+            aw_save({
+                "enabled": aw_enabled,
+                "categories": selected_cats,
+                "add_score_threshold": add_thresh,
+                "remove_score_threshold": remove_thresh,
+                "remove_consecutive_days": remove_days,
+                "max_watchlist_size": max_size,
+                "protected_tickers": protected,
+            })
+            st.success("設定を保存しました。次の月曜朝9時から自動スキャンが始まります。")
+
+        st.markdown("---")
+
+        # ── 今すぐスキャン ────────────────────────────────────────────────
+        st.markdown("##### 今すぐスキャンを実行")
+        st.caption("設定を保存してから実行してください。銘柄数によっては数分かかります。")
+        if st.button("🔍 今すぐスキャン実行", type="secondary", key="aw_scan"):
+            with st.spinner(f"{len(get_universe_tickers(selected_cats))}銘柄をスキャン中..."):
+                # 一時的にenabledをTrueにしてスキャン実行
+                aw_save({"enabled": True})
+                result = run_auto_watchlist(verbose=False)
+                aw_save({"enabled": aw_enabled})
+            if result["added"] or result["removed"]:
+                if result["added"]:
+                    st.success(f"✅ 追加: {', '.join(result['added'])}（{len(result['added'])}銘柄）")
+                if result["removed"]:
+                    st.warning(f"❌ 削除: {', '.join(result['removed'])}（{len(result['removed'])}銘柄）")
+            else:
+                st.info("変更なし。ウォッチリストは現状維持です。")
+            if result["skipped"] > 0:
+                st.caption(f"上限のため{result['skipped']}銘柄をスキップしました")
+            st.rerun()
 
 
 # ─── トレードガイド ───────────────────────────────────────────────────────────

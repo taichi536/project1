@@ -32,6 +32,7 @@ from modules.screening import screen_single
 from modules.diary import get_trades, calc_pnl
 from modules.dashboard import load_watchlist
 from modules.auto_trade import AutoTrader
+from modules.auto_watchlist import run_auto_watchlist
 
 _trader = AutoTrader()
 
@@ -272,7 +273,7 @@ def run_screening_alerts(tickers: list[str] | None = None):
 
 def main():
     parser = argparse.ArgumentParser(description="株式アラートランナー")
-    parser.add_argument("--mode", choices=["all", "signal", "stoploss", "screening"],
+    parser.add_argument("--mode", choices=["all", "signal", "stoploss", "screening", "watchlist"],
                         default="all")
     parser.add_argument("--loop", type=int, default=0,
                         help="繰り返し間隔（分）。省略か0で1回のみ実行")
@@ -293,6 +294,13 @@ def main():
         if not tg and not sl:
             print("⚠️ 警告: TELEGRAM_BOT_TOKEN または SLACK_WEBHOOK_URL が設定されていません。")
             print("   通知は届きません。環境変数を設定してください。")
+
+        # 月曜の朝9時だけ自動ウォッチリスト更新（週1回）
+        if args.mode in ("all", "watchlist"):
+            now = datetime.now()
+            is_monday_morning = (now.weekday() == 0 and now.hour == 9)
+            if args.mode == "watchlist" or is_monday_morning:
+                run_auto_watchlist()
 
         if args.mode in ("all", "signal"):
             run_signal_alerts(tickers)
