@@ -13,6 +13,7 @@
     "https://api.anthropic.com/*",
     "https://script.google.com/*",
     "https://script.googleusercontent.com/*",
+    "https://docs.google.com/*",
     "https://bizreach.biz/*",
     "https://www.bizreach.biz/*",
     "https://*.bizreach.biz/*",
