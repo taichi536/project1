@@ -12,7 +12,7 @@ st.set_page_config(
 
 from modules.data_fetcher import fetch_ohlcv, fetch_info, fetch_earnings_date
 from modules.technical import compute_all
-from modules.signals import evaluate_signals, overall_signal, generate_action_plan, evaluate_hold_signal, evaluate_watch_signal, detect_breakout, calc_signal_accuracy, multi_timeframe_signal, calc_signal_confidence
+from modules.signals import evaluate_signals, overall_signal, generate_action_plan, evaluate_hold_signal, evaluate_watch_signal, detect_breakout, calc_signal_accuracy, multi_timeframe_signal, calc_signal_confidence, get_signal_detail
 from modules.charts import build_main_chart
 from modules.fundamental import get_fundamental_summary, get_risk_metrics
 from modules.screening import screen_single
@@ -612,9 +612,19 @@ elif page == "📊 テクニカル分析":
             for s in top2
         )
 
-        _confidence = calc_signal_confidence(signals, verdict)
-        _conf_color = "#26a69a" if _confidence >= 70 else ("#ffd54f" if _confidence >= 50 else "#ef5350")
-        _conf_label = "高" if _confidence >= 70 else ("中" if _confidence >= 50 else "低")
+        _detail = get_signal_detail(signals, verdict, df=df, sma_long=sma_long)
+        _grade = _detail["grade"]
+        _grade_color = _detail["grade_color"]
+        _conf = _detail["confidence"]
+        _wpct = _detail["weighted_pct"]
+        _conf_color = "#26a69a" if _conf >= 70 else ("#ffd54f" if _conf >= 50 else "#ef5350")
+
+        # 横ばい・下落フィルター発動時の警告メッセージ
+        _filter_msg = ""
+        if _detail.get("adx_down"):
+            _filter_msg = "<div style='color:#ef5350;font-size:0.85em;margin-top:6px'>⛔ ADXが強い下落トレンドを確認 → 買いシグナルは封鎖中</div>"
+        elif _detail.get("sideways"):
+            _filter_msg = "<div style='color:#ffd54f;font-size:0.85em;margin-top:6px'>⚠️ 横ばい相場（ADX低水準）→ シグナルの信頼性が低下中</div>"
 
         st.markdown(
             f"""<div style="background:{sig_color}22;border:2px solid {sig_color};
@@ -622,11 +632,16 @@ elif page == "📊 テクニカル分析":
                 <div style="font-size:3em">{sig_emoji}</div>
                 <div style="font-size:2em;font-weight:bold;color:{sig_color}">{verdict}</div>
                 <div style="font-size:1.1em;color:#ccc;margin-top:4px">{sig_msg}</div>
-                <div style="margin-top:8px">
+                <div style="margin-top:10px;display:flex;justify-content:center;gap:10px;flex-wrap:wrap">
+                  {"<span style='background:" + _grade_color + "33;border:1px solid " + _grade_color + ";padding:3px 12px;border-radius:20px;font-size:0.9em;color:" + _grade_color + "'>" + _grade + "</span>" if _grade else ""}
                   <span style="background:{_conf_color}33;border:1px solid {_conf_color};padding:3px 12px;border-radius:20px;font-size:0.9em;color:{_conf_color}">
-                    シグナル一致率 {_confidence}%（{_conf_label}）
+                    一致率 {_conf}%
+                  </span>
+                  <span style="background:#33333366;border:1px solid #555;padding:3px 12px;border-radius:20px;font-size:0.9em;color:#aaa">
+                    加重スコア {_wpct:+.0f}%
                   </span>
                 </div>
+                {_filter_msg}
                 <div style="margin-top:12px">{reasons_html}</div>
             </div>""",
             unsafe_allow_html=True,
@@ -1054,14 +1069,25 @@ elif page == "📊 テクニカル分析":
                 )
 
         # 初心者モードでは指標テーブルを折りたたみ
+        from modules.signals import INDICATOR_WEIGHTS
+        def _make_sig_df(sigs):
+            rows = []
+            for s in sigs:
+                w = INDICATOR_WEIGHTS.get(s["指標"], 1.0)
+                star = "★★★" if w >= 3 else ("★★☆" if w >= 2 else "★☆☆")
+                rows.append({
+                    "重要度": star,
+                    "指標": s["指標"],
+                    "値": s["値"],
+                    "判定": ("🟢 " if s["スコア"] > 0 else ("🔴 " if s["スコア"] < 0 else "🟡 ")) + s["判定"],
+                    "加重スコア": f"{s['スコア'] * w:+.0f}",
+                })
+            return pd.DataFrame(rows)
+
         if st.session_state.get("beginner_mode", True):
             with st.expander("📊 各指標の詳細データ（上級者向け）", expanded=False):
-                sig_df = pd.DataFrame(signals)
-                sig_df["判定"] = sig_df.apply(
-                    lambda r: ("🟢 " if r["スコア"] > 0 else ("🔴 " if r["スコア"] < 0 else "🟡 ")) + r["判定"],
-                    axis=1,
-                )
-                st.dataframe(sig_df[["指標", "値", "判定"]], use_container_width=True, hide_index=True)
+                st.dataframe(_make_sig_df(signals), use_container_width=True, hide_index=True)
+                st.caption("★★★=最重要(×3)　★★☆=重要(×2)　★☆☆=補助(×1)")
                 if atr_val:
                     st.markdown("**損切りラインの詳細（ATRベース）**")
                     risk = get_risk_metrics(ticker, df["Close"].iloc[-1], atr_val)
@@ -1074,6 +1100,8 @@ elif page == "📊 テクニカル分析":
                     r4.metric("ATR", f"{risk['ATR']:.2f}")
         else:
             st.markdown("### 指標別シグナル一覧")
+            st.dataframe(_make_sig_df(signals), use_container_width=True, hide_index=True)
+            st.caption("★★★=最重要(×3)　★★☆=重要(×2)　★☆☆=補助(×1)")
             sig_df = pd.DataFrame(signals)
             sig_df["判定"] = sig_df.apply(
                 lambda r: ("🟢 " if r["スコア"] > 0 else ("🔴 " if r["スコア"] < 0 else "🟡 ")) + r["判定"],

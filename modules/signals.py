@@ -189,21 +189,72 @@ def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) 
     return signals
 
 
+# ── 指標の重み定義 ──────────────────────────────────────────────────────────────
+# スイングトレードにおける各指標の重要度
+# ★★★ トレンド系（最重要）: 大局の方向が間違うと全て無駄になる
+# ★★☆ モメンタム系（重要）: エントリータイミングを絞り込む
+# ★☆☆ 補助系（参考）: 補強材料として使う
+INDICATOR_WEIGHTS: dict[str, float] = {
+    "移動平均線":              3.0,   # ★★★ トレンドの大局。最も重要
+    "ADX（トレンド強度）":     3.0,   # ★★★ 「動ける相場か」の判定。横ばいでは他全指標が無効化
+    "一目均衡表（雲）":        2.0,   # ★★☆ 複合トレンド指標。雲の上/下は強いサイン
+    "MACD（勢い）":            2.0,   # ★★☆ モメンタム転換の早期検知。タイミングに有効
+    "RSI（売買過熱感）":       1.0,   # ★☆☆ 過熱感の確認。単独では誤シグナルが多い
+    "出来高トレンド（OBV）":   1.0,   # ★☆☆ 大口の動き確認。遅れが出やすい
+    "ボリンジャーバンド":      1.0,   # ★☆☆ レンジ相場で有効。トレンド相場では弱い
+    "VWAP（機関投資家の基準価格）": 1.0,  # ★☆☆ 機関投資家の基準。参考程度
+}
+
+
 def calc_signal_confidence(signals: list[dict], verdict: str) -> int:
     """
-    シグナルの一致率を返す（0〜100%）。
-    verdict方向に何%の指標が同意しているかを示す。
+    重み付きシグナル一致率を返す（0〜100%）。
+    重要度の高い指標がverdictと一致しているほど高くなる。
     """
     if not signals:
         return 0
+    total_weight = sum(INDICATOR_WEIGHTS.get(s["指標"], 1.0) for s in signals)
+    if total_weight == 0:
+        return 0
     if verdict == "買い":
-        agree = sum(1 for s in signals if s["スコア"] > 0)
+        agree_weight = sum(
+            INDICATOR_WEIGHTS.get(s["指標"], 1.0) for s in signals if s["スコア"] > 0
+        )
     elif verdict == "売り":
-        agree = sum(1 for s in signals if s["スコア"] < 0)
+        agree_weight = sum(
+            INDICATOR_WEIGHTS.get(s["指標"], 1.0) for s in signals if s["スコア"] < 0
+        )
     else:
-        neutral = sum(1 for s in signals if s["スコア"] == 0)
-        agree = neutral
-    return round(agree / len(signals) * 100)
+        agree_weight = sum(
+            INDICATOR_WEIGHTS.get(s["指標"], 1.0) for s in signals if s["スコア"] == 0
+        )
+    return round(agree_weight / total_weight * 100)
+
+
+def signal_grade(weighted_pct: float, verdict: str, adx_confirmed_down: bool, sideways: bool) -> tuple[str, str]:
+    """
+    シグナルの質をグレード判定する。
+    Returns: (grade_label, grade_color)
+
+    S: 全条件が揃った最高シグナル → 通常サイズでエントリー
+    A: 主要指標が一致した強いシグナル → 通常エントリー
+    B: 条件が一部揃い始めた弱いシグナル → 小さめポジションで様子見
+    """
+    if verdict == "買い":
+        if weighted_pct >= 0.55 and not sideways:
+            return "S級シグナル", "#26a69a"
+        elif weighted_pct >= 0.40:
+            return "A級シグナル", "#4caf50"
+        else:
+            return "B級シグナル", "#ffd54f"
+    elif verdict == "売り":
+        if weighted_pct <= -0.55:
+            return "S級シグナル", "#ef5350"
+        elif weighted_pct <= -0.40:
+            return "A級シグナル", "#ff7043"
+        else:
+            return "B級シグナル", "#ffd54f"
+    return "", "#888"
 
 
 def overall_signal(
@@ -212,62 +263,124 @@ def overall_signal(
     sma_long: int = 75,
 ) -> tuple[str, int]:
     """
-    シグナルを総合判定する。
-    dfを渡すとトレンドフィルター（SMA + ADX）が有効になる。
+    重み付き総合判定。
 
-    精度向上のポイント:
-    1. SMAフィルター: 長期MAより大幅に下なら買いにペナルティ
-    2. ADXフィルター: ADX>25で下落トレンド確認時は買いを強制的に封鎖
-    3. 横ばいフィルター: ADX<20の横ばい相場ではスコア閾値を引き上げ
+    判定ロジック:
+    1. 重み付きスコア計算: 移動平均・ADXは3倍、MACD・一目は2倍、他は1倍
+    2. 必須条件ゲート:
+       - 買いの場合: 株価がSMA75より上であること（下ならペナルティ）
+       - ADXが強い下落トレンドを確認している場合: 買い禁止
+    3. 横ばい相場(ADX<20): 閾値を引き上げて誤シグナルを抑制
     """
-    total = sum(s["スコア"] for s in signals)
-    max_score = len(signals) * 2
-    if max_score == 0:
+    if not signals:
         return "様子見", 0
 
-    trend_adj = 0
+    raw_total = sum(s["スコア"] for s in signals)
+
+    weighted_total = sum(
+        s["スコア"] * INDICATOR_WEIGHTS.get(s["指標"], 1.0) for s in signals
+    )
+    max_weighted = sum(
+        INDICATOR_WEIGHTS.get(s["指標"], 1.0) * 2 for s in signals
+    )
+    if max_weighted == 0:
+        return "様子見", 0
+
     adx_confirmed_down = False
     sideways_market = False
 
     if df is not None:
-        # SMAトレンドフィルター
+        # 必須条件: 株価とSMA75の位置関係
         sma_col = f"SMA{sma_long}"
         _sma = df[sma_col].dropna() if sma_col in df.columns else pd.Series(dtype=float)
         if len(_sma) > 0:
             _gap = (df["Close"].iloc[-1] - _sma.iloc[-1]) / _sma.iloc[-1]
             if _gap < -0.07:
-                trend_adj = -2
+                weighted_total -= 3.0   # 長期MAより7%以上下 → 重いペナルティ
             elif _gap < -0.03:
-                trend_adj = -1
+                weighted_total -= 1.5
             elif _gap > 0.07:
-                trend_adj = 1
+                weighted_total += 1.5   # 上昇トレンド継続の追い風
 
-        # ADXフィルター: 強い下落トレンドでは買い禁止
+        # ADXによる方向性フィルター
         _adx = df["ADX"].dropna() if "ADX" in df.columns else pd.Series(dtype=float)
         _dip = df["DI_plus"].dropna() if "DI_plus" in df.columns else pd.Series(dtype=float)
         _dim = df["DI_minus"].dropna() if "DI_minus" in df.columns else pd.Series(dtype=float)
         if len(_adx) > 0 and len(_dip) > 0 and len(_dim) > 0:
             adx_val = _adx.iloc[-1]
-            dip_val = _dip.iloc[-1]
-            dim_val = _dim.iloc[-1]
-            if adx_val >= 25 and dim_val > dip_val:
-                adx_confirmed_down = True  # 強い下落トレンド確認 → 買い不可
-                trend_adj -= 2
+            if adx_val >= 25 and _dim.iloc[-1] > _dip.iloc[-1]:
+                adx_confirmed_down = True   # 強い下落トレンド → 買い完全封鎖
+                weighted_total -= 4.0
             elif adx_val < 20:
-                sideways_market = True  # 横ばい → シグナル信頼性低
+                sideways_market = True      # 横ばい → 閾値を引き上げ
 
-    adjusted = total + trend_adj
-    # 横ばい相場では閾値を厳しくする（より多くの指標が一致しないと動かない）
-    threshold = 0.40 if sideways_market else 0.30
+    # 横ばい相場は買いの閾値を上げる（誤シグナル抑制）
+    threshold = 0.42 if sideways_market else 0.32
 
-    pct = adjusted / max_score
+    pct = weighted_total / max_weighted
 
     if pct >= threshold and not adx_confirmed_down:
-        return "買い", total
+        return "買い", raw_total
     elif pct <= -threshold:
-        return "売り", total
+        return "売り", raw_total
     else:
-        return "様子見", total
+        return "様子見", raw_total
+
+
+def get_signal_detail(
+    signals: list[dict],
+    verdict: str,
+    df: pd.DataFrame = None,
+    sma_long: int = 75,
+) -> dict:
+    """
+    overall_signalの内部計算結果を詳細で返す（UI表示用）。
+    """
+    if not signals:
+        return {"grade": "", "grade_color": "#888", "weighted_pct": 0, "confidence": 0}
+
+    weighted_total = sum(
+        s["スコア"] * INDICATOR_WEIGHTS.get(s["指標"], 1.0) for s in signals
+    )
+    max_weighted = sum(
+        INDICATOR_WEIGHTS.get(s["指標"], 1.0) * 2 for s in signals
+    )
+    adx_confirmed_down = False
+    sideways_market = False
+
+    if df is not None:
+        sma_col = f"SMA{sma_long}"
+        _sma = df[sma_col].dropna() if sma_col in df.columns else pd.Series(dtype=float)
+        if len(_sma) > 0:
+            _gap = (df["Close"].iloc[-1] - _sma.iloc[-1]) / _sma.iloc[-1]
+            if _gap < -0.07:
+                weighted_total -= 3.0
+            elif _gap < -0.03:
+                weighted_total -= 1.5
+            elif _gap > 0.07:
+                weighted_total += 1.5
+        _adx = df["ADX"].dropna() if "ADX" in df.columns else pd.Series(dtype=float)
+        _dip = df["DI_plus"].dropna() if "DI_plus" in df.columns else pd.Series(dtype=float)
+        _dim = df["DI_minus"].dropna() if "DI_minus" in df.columns else pd.Series(dtype=float)
+        if len(_adx) > 0 and len(_dip) > 0 and len(_dim) > 0:
+            if _adx.iloc[-1] >= 25 and _dim.iloc[-1] > _dip.iloc[-1]:
+                adx_confirmed_down = True
+                weighted_total -= 4.0
+            elif _adx.iloc[-1] < 20:
+                sideways_market = True
+
+    pct = weighted_total / max_weighted if max_weighted > 0 else 0
+    grade_label, grade_color = signal_grade(pct, verdict, adx_confirmed_down, sideways_market)
+    confidence = calc_signal_confidence(signals, verdict)
+
+    return {
+        "grade": grade_label,
+        "grade_color": grade_color,
+        "weighted_pct": round(pct * 100, 1),
+        "confidence": confidence,
+        "sideways": sideways_market,
+        "adx_down": adx_confirmed_down,
+    }
 
 
 def generate_action_plan(
