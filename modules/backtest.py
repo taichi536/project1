@@ -87,6 +87,8 @@ def run_backtest(
     else:
         raw_signals = _combined_signals(df, sma_short, sma_long)
 
+    fee_rate = 0.001  # 片道0.1%の取引手数料
+
     cash = initial_cash
     shares = 0
     entry_price = 0.0
@@ -103,7 +105,7 @@ def run_backtest(
 
         # 損切りチェック
         if position == 1 and price <= stop_price:
-            proceeds = shares * price
+            proceeds = shares * price * (1 - fee_rate)
             pnl = proceeds - shares * entry_price
             trades.append({
                 "日付": date, "種別": "損切り売",
@@ -116,11 +118,12 @@ def run_backtest(
 
         # 買いシグナル
         if sig == 1 and position == 0 and cash > price:
-            shares = int(cash * 0.95 / price)
+            shares = int(cash * 0.95 / (price * (1 + fee_rate)))
             if shares > 0:
+                cost = shares * price * (1 + fee_rate)
                 entry_price = price
                 stop_price = price - stop_loss_atr * atr
-                cash -= shares * price
+                cash -= cost
                 trades.append({
                     "日付": date, "種別": "買い",
                     "価格": round(price, 2), "株数": shares,
@@ -130,7 +133,7 @@ def run_backtest(
 
         # 売りシグナル
         elif sig == -1 and position == 1:
-            proceeds = shares * price
+            proceeds = shares * price * (1 - fee_rate)
             pnl = proceeds - shares * entry_price
             trades.append({
                 "日付": date, "種別": "売り",

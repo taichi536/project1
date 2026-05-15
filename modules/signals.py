@@ -257,6 +257,53 @@ def signal_grade(weighted_pct: float, verdict: str, adx_confirmed_down: bool, si
     return "", "#888"
 
 
+def _calc_weighted_context(
+    signals: list[dict],
+    df: pd.DataFrame = None,
+    sma_long: int = 75,
+) -> tuple[float, bool, bool]:
+    """
+    重み付きスコアとADX/SMAコンテキストを計算する共通ヘルパー。
+    Returns: (weighted_pct, adx_confirmed_down, sideways_market)
+    """
+    weighted_total = sum(
+        s["スコア"] * INDICATOR_WEIGHTS.get(s["指標"], 1.0) for s in signals
+    )
+    max_weighted = sum(
+        INDICATOR_WEIGHTS.get(s["指標"], 1.0) * 2 for s in signals
+    )
+    if max_weighted == 0:
+        return 0.0, False, False
+
+    adx_confirmed_down = False
+    sideways_market = False
+
+    if df is not None:
+        sma_col = f"SMA{sma_long}"
+        _sma = df[sma_col].dropna() if sma_col in df.columns else pd.Series(dtype=float)
+        if len(_sma) > 0:
+            _gap = (df["Close"].iloc[-1] - _sma.iloc[-1]) / _sma.iloc[-1]
+            if _gap < -0.07:
+                weighted_total -= 3.0
+            elif _gap < -0.03:
+                weighted_total -= 1.5
+            elif _gap > 0.07:
+                weighted_total += 1.5
+
+        _adx = df["ADX"].dropna() if "ADX" in df.columns else pd.Series(dtype=float)
+        _dip = df["DI_plus"].dropna() if "DI_plus" in df.columns else pd.Series(dtype=float)
+        _dim = df["DI_minus"].dropna() if "DI_minus" in df.columns else pd.Series(dtype=float)
+        if len(_adx) > 0 and len(_dip) > 0 and len(_dim) > 0:
+            adx_val = _adx.iloc[-1]
+            if adx_val >= 25 and _dim.iloc[-1] > _dip.iloc[-1]:
+                adx_confirmed_down = True
+                weighted_total -= 4.0
+            elif adx_val < 20:
+                sideways_market = True
+
+    return weighted_total / max_weighted, adx_confirmed_down, sideways_market
+
+
 def overall_signal(
     signals: list[dict],
     df: pd.DataFrame = None,
@@ -276,48 +323,9 @@ def overall_signal(
         return "様子見", 0
 
     raw_total = sum(s["スコア"] for s in signals)
+    pct, adx_confirmed_down, sideways_market = _calc_weighted_context(signals, df, sma_long)
 
-    weighted_total = sum(
-        s["スコア"] * INDICATOR_WEIGHTS.get(s["指標"], 1.0) for s in signals
-    )
-    max_weighted = sum(
-        INDICATOR_WEIGHTS.get(s["指標"], 1.0) * 2 for s in signals
-    )
-    if max_weighted == 0:
-        return "様子見", 0
-
-    adx_confirmed_down = False
-    sideways_market = False
-
-    if df is not None:
-        # 必須条件: 株価とSMA75の位置関係
-        sma_col = f"SMA{sma_long}"
-        _sma = df[sma_col].dropna() if sma_col in df.columns else pd.Series(dtype=float)
-        if len(_sma) > 0:
-            _gap = (df["Close"].iloc[-1] - _sma.iloc[-1]) / _sma.iloc[-1]
-            if _gap < -0.07:
-                weighted_total -= 3.0   # 長期MAより7%以上下 → 重いペナルティ
-            elif _gap < -0.03:
-                weighted_total -= 1.5
-            elif _gap > 0.07:
-                weighted_total += 1.5   # 上昇トレンド継続の追い風
-
-        # ADXによる方向性フィルター
-        _adx = df["ADX"].dropna() if "ADX" in df.columns else pd.Series(dtype=float)
-        _dip = df["DI_plus"].dropna() if "DI_plus" in df.columns else pd.Series(dtype=float)
-        _dim = df["DI_minus"].dropna() if "DI_minus" in df.columns else pd.Series(dtype=float)
-        if len(_adx) > 0 and len(_dip) > 0 and len(_dim) > 0:
-            adx_val = _adx.iloc[-1]
-            if adx_val >= 25 and _dim.iloc[-1] > _dip.iloc[-1]:
-                adx_confirmed_down = True   # 強い下落トレンド → 買い完全封鎖
-                weighted_total -= 4.0
-            elif adx_val < 20:
-                sideways_market = True      # 横ばい → 閾値を引き上げ
-
-    # 横ばい相場は買いの閾値を上げる（誤シグナル抑制）
     threshold = 0.42 if sideways_market else 0.32
-
-    pct = weighted_total / max_weighted
 
     if pct >= threshold and not adx_confirmed_down:
         return "買い", raw_total
@@ -339,37 +347,7 @@ def get_signal_detail(
     if not signals:
         return {"grade": "", "grade_color": "#888", "weighted_pct": 0, "confidence": 0}
 
-    weighted_total = sum(
-        s["スコア"] * INDICATOR_WEIGHTS.get(s["指標"], 1.0) for s in signals
-    )
-    max_weighted = sum(
-        INDICATOR_WEIGHTS.get(s["指標"], 1.0) * 2 for s in signals
-    )
-    adx_confirmed_down = False
-    sideways_market = False
-
-    if df is not None:
-        sma_col = f"SMA{sma_long}"
-        _sma = df[sma_col].dropna() if sma_col in df.columns else pd.Series(dtype=float)
-        if len(_sma) > 0:
-            _gap = (df["Close"].iloc[-1] - _sma.iloc[-1]) / _sma.iloc[-1]
-            if _gap < -0.07:
-                weighted_total -= 3.0
-            elif _gap < -0.03:
-                weighted_total -= 1.5
-            elif _gap > 0.07:
-                weighted_total += 1.5
-        _adx = df["ADX"].dropna() if "ADX" in df.columns else pd.Series(dtype=float)
-        _dip = df["DI_plus"].dropna() if "DI_plus" in df.columns else pd.Series(dtype=float)
-        _dim = df["DI_minus"].dropna() if "DI_minus" in df.columns else pd.Series(dtype=float)
-        if len(_adx) > 0 and len(_dip) > 0 and len(_dim) > 0:
-            if _adx.iloc[-1] >= 25 and _dim.iloc[-1] > _dip.iloc[-1]:
-                adx_confirmed_down = True
-                weighted_total -= 4.0
-            elif _adx.iloc[-1] < 20:
-                sideways_market = True
-
-    pct = weighted_total / max_weighted if max_weighted > 0 else 0
+    pct, adx_confirmed_down, sideways_market = _calc_weighted_context(signals, df, sma_long)
     grade_label, grade_color = signal_grade(pct, verdict, adx_confirmed_down, sideways_market)
     confidence = calc_signal_confidence(signals, verdict)
 
@@ -383,6 +361,16 @@ def get_signal_detail(
     }
 
 
+def _atr_fallback(df: pd.DataFrame, close: float) -> float:
+    """ATRが計算できない場合の代替: 直近20日の価格変動標準偏差を使用"""
+    if "ATR" in df.columns:
+        atr_s = df["ATR"].dropna()
+        if len(atr_s) > 0:
+            return float(atr_s.iloc[-1])
+    std = df["Close"].pct_change().tail(20).std()
+    return std * close if not np.isnan(std) and std > 0 else close * 0.02
+
+
 def generate_action_plan(
     df: pd.DataFrame,
     signals: list[dict],
@@ -391,7 +379,7 @@ def generate_action_plan(
 ) -> dict:
     """初心者向けの具体的な投資プランを生成"""
     close = df["Close"].iloc[-1]
-    atr = df["ATR"].dropna().iloc[-1] if "ATR" in df.columns else close * 0.02
+    atr = _atr_fallback(df, close)
     rsi = df["RSI"].dropna().iloc[-1] if "RSI" in df.columns else 50
 
     recent = df.tail(20)
@@ -451,7 +439,7 @@ def evaluate_hold_signal(df: pd.DataFrame, signals: list[dict], verdict: str, sm
     - 利確ラインに近づいたら段階的な利確を促す
     """
     close = df["Close"].iloc[-1]
-    atr = df["ATR"].dropna().iloc[-1] if "ATR" in df.columns else close * 0.02
+    atr = _atr_fallback(df, close)
     rsi = df["RSI"].dropna().iloc[-1] if "RSI" in df.columns else 50
     macd_hist = _latest(df, "MACD_hist")
 
@@ -584,7 +572,7 @@ def evaluate_watch_signal(df: pd.DataFrame, sma_long: int = 75) -> dict:
     保有継続判定とは逆の視点（下から上を狙う）で評価する。
     """
     close = df["Close"].iloc[-1]
-    atr = df["ATR"].dropna().iloc[-1] if "ATR" in df.columns else close * 0.02
+    atr = _atr_fallback(df, close)
     rsi = df["RSI"].dropna().iloc[-1] if "RSI" in df.columns else 50
     macd_hist = _latest(df, "MACD_hist")
     bb_pct = _latest(df, "BB_pct")

@@ -1102,12 +1102,6 @@ elif page == "📊 テクニカル分析":
             st.markdown("### 指標別シグナル一覧")
             st.dataframe(_make_sig_df(signals), use_container_width=True, hide_index=True)
             st.caption("★★★=最重要(×3)　★★☆=重要(×2)　★☆☆=補助(×1)")
-            sig_df = pd.DataFrame(signals)
-            sig_df["判定"] = sig_df.apply(
-                lambda r: ("🟢 " if r["スコア"] > 0 else ("🔴 " if r["スコア"] < 0 else "🟡 ")) + r["判定"],
-                axis=1,
-            )
-            st.dataframe(sig_df[["指標", "値", "判定"]], use_container_width=True, hide_index=True)
             if atr_val:
                 st.markdown("### 損切りライン（ATRベース）")
                 risk = get_risk_metrics(ticker, df["Close"].iloc[-1], atr_val)

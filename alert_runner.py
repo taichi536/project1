@@ -25,7 +25,7 @@ from datetime import datetime
 from modules.data_fetcher import fetch_ohlcv, fetch_earnings_date
 from modules.technical import compute_all
 from modules.signals import evaluate_signals, overall_signal
-from modules.notifier import send_signal_alert, send_screening_alert, send_stop_loss_alert, send_strong_buy_alert
+from modules.notifier import send_signal_alert, send_screening_alert, send_stop_loss_alert, send_strong_buy_alert, send_strong_sell_alert
 from modules.screening import screen_single
 from modules.diary import get_trades, calc_pnl
 from modules.dashboard import load_watchlist
@@ -78,16 +78,22 @@ def run_signal_alerts(tickers: list[str] | None = None):
             print(f"  {ticker}: {verdict} (score={score:+d}, 前回={prev_verdict or '初回'})")
 
             should_notify = False
+            today = datetime.now().strftime("%Y-%m-%d")
             # 1) シグナルが変わって「買い」or「売り」になった
             if changed and verdict in ("買い", "売り"):
                 should_notify = True
-            # 2) 強い買いシグナル（スコア+4以上）は毎回通知（1日1回制限）
+            # 2) 強い買いシグナル（スコア+4以上）は1日1回制限で通知
             elif verdict == "買い" and score >= 4:
                 last_strong = signals_state.get(ticker, {}).get("last_strong_buy_date")
-                today = datetime.now().strftime("%Y-%m-%d")
                 if last_strong != today:
                     should_notify = True
                     signals_state.setdefault(ticker, {})["last_strong_buy_date"] = today
+            # 3) 強い売りシグナル（スコア-4以下）は1日1回制限で通知
+            elif verdict == "売り" and score <= -4:
+                last_strong_sell = signals_state.get(ticker, {}).get("last_strong_sell_date")
+                if last_strong_sell != today:
+                    should_notify = True
+                    signals_state.setdefault(ticker, {})["last_strong_sell_date"] = today
 
             if should_notify:
                 if verdict == "買い" and score >= 4:
@@ -121,6 +127,23 @@ def run_signal_alerts(tickers: list[str] | None = None):
                         rsi=rsi,
                         earnings_days=ed_days,
                         entry_limit=entry_limit,
+                    )
+                elif verdict == "売り" and score <= -4:
+                    reasons = [s["判定"] for s in sorted(sigs, key=lambda x: abs(x["スコア"]), reverse=True)[:3]]
+                    ed_days = None
+                    try:
+                        ed_days = fetch_earnings_date(ticker).get("days_until")
+                    except Exception:
+                        pass
+                    result = send_strong_sell_alert(
+                        ticker=ticker,
+                        price=price,
+                        score=score,
+                        reasons=reasons,
+                        stop_loss=price * 1.05,
+                        target=price * 0.90,
+                        rsi=rsi,
+                        earnings_days=ed_days,
                     )
                 else:
                     result = send_signal_alert(
