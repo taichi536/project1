@@ -218,6 +218,11 @@ function highlightAddButton(cardEl) {
 function setupClickTracking() {
   injectStyles();
   document.addEventListener('click', e => {
+    // アクションボタン（スカウト送信など）のクリックでは選択カードを上書きしない
+    const btn = e.target.closest('button, a');
+    const btnText = (btn?.innerText || '').trim();
+    if (btnText === 'スカウト' || btnText.includes('スカウトを送る') || btnText.includes('スカウトする')) return;
+
     const cards = findCandidateCardsByPlatform();
     const clicked = cards.find(c => c.contains(e.target) || c === e.target);
     if (!clicked) return;
