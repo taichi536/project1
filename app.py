@@ -25,7 +25,8 @@ from modules.portfolio import build_portfolio_summary
 from modules.charts import build_backtest_chart, build_correlation_heatmap, build_portfolio_pie
 from modules.notifier import send_signal_alert, send_screening_alert, send_stop_loss_alert, send_strong_buy_alert
 from modules.dashboard import load_watchlist, save_watchlist, scan_all
-from modules.ml_model import train_model, trend_regression, detect_candlestick_patterns
+from modules.ml_model import train_model, trend_regression, detect_candlestick_patterns, ml_score_signal
+from modules.risk_filter import assess_signal_risk
 from modules.market_utils import market_status
 
 init_db()
@@ -722,6 +723,92 @@ elif page == "📊 テクニカル分析":
         # ── 決算日（メトリクス近くにも表示） ──────────────────────
         if _earnings.get("date") and _earnings.get("days_until") is not None and _earnings["days_until"] > 14:
             st.caption(f"📅 次回決算発表予定: {_earnings['date']}（あと{_earnings['days_until']}日）")
+
+        # ── リスク評価 + ML統合スコア ───────────────────────────────
+        st.markdown("---")
+        st.markdown("### 🛡️ リスク評価 ＆ ML予測（自動）")
+        st.caption("エントリー前に必ず確認してください。リスクが高い場合は通知も自動でスキップされます。")
+
+        _risk = assess_signal_risk(
+            ticker, df,
+            earnings_days=_earnings.get("days_until"),
+        )
+        _ml_sig = ml_score_signal(df)
+
+        _rc1, _rc2, _rc3 = st.columns(3)
+
+        # リスクレベル
+        _rl_color = {"LOW": "#26a69a", "MEDIUM": "#ffd54f", "HIGH": "#ef5350"}.get(_risk["risk_level"], "#888")
+        _rl_label = {"LOW": "🟢 LOW（低リスク）", "MEDIUM": "🟡 MEDIUM（中リスク）", "HIGH": "🔴 HIGH（高リスク）"}.get(_risk["risk_level"], _risk["risk_level"])
+        with _rc1:
+            st.markdown(
+                f"""<div style='border:2px solid {_rl_color};border-radius:10px;padding:14px;text-align:center'>
+                <div style='font-size:12px;color:#aaa'>リスクレベル</div>
+                <div style='font-size:1.2em;font-weight:bold;color:{_rl_color}'>{_rl_label}</div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+
+        # エントリー上限
+        _el_pct = _risk.get("entry_limit_pct", 0)
+        _entry_limit = plan["entry_price"] * (1 + _el_pct / 100) if _el_pct > 0 else None
+        with _rc2:
+            if _risk["should_skip"]:
+                st.markdown(
+                    """<div style='border:2px solid #ef5350;border-radius:10px;padding:14px;text-align:center'>
+                    <div style='font-size:12px;color:#aaa'>エントリー判定</div>
+                    <div style='font-size:1.2em;font-weight:bold;color:#ef5350'>🚫 見送り推奨</div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+            elif _entry_limit:
+                st.markdown(
+                    f"""<div style='border:2px solid #26a69a;border-radius:10px;padding:14px;text-align:center'>
+                    <div style='font-size:12px;color:#aaa'>エントリー上限価格</div>
+                    <div style='font-size:1.2em;font-weight:bold;color:#26a69a'>{_entry_limit:,.1f}円以下</div>
+                    <div style='font-size:11px;color:#aaa'>現在値+{_el_pct:.0f}%以内なら買いOK</div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    """<div style='border:1px solid #555;border-radius:10px;padding:14px;text-align:center'>
+                    <div style='font-size:12px;color:#aaa'>エントリー上限価格</div>
+                    <div style='font-size:1.1em;color:#888'>設定なし</div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+
+        # ML予測
+        with _rc3:
+            if _ml_sig:
+                _mc = {"上昇": "#26a69a", "下落": "#ef5350"}.get(
+                    "上昇" if "上昇" in _ml_sig["judge"] else ("下落" if "下落" in _ml_sig["judge"] else "中"), "#ffd54f"
+                )
+                st.markdown(
+                    f"""<div style='border:2px solid {_mc};border-radius:10px;padding:14px;text-align:center'>
+                    <div style='font-size:12px;color:#aaa'>ML予測（10日後）</div>
+                    <div style='font-size:1.1em;font-weight:bold;color:{_mc}'>{_ml_sig['judge']}</div>
+                    <div style='font-size:11px;color:#aaa'>上昇確率 {_ml_sig['up_probability']:.0f}% / 信頼度 {_ml_sig['confidence']:.0f}%</div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    """<div style='border:1px solid #555;border-radius:10px;padding:14px;text-align:center'>
+                    <div style='font-size:12px;color:#aaa'>ML予測</div>
+                    <div style='font-size:1.1em;color:#888'>データ不足</div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+
+        # リスク要因の詳細
+        if _risk["reasons"]:
+            with st.expander(f"⚠️ リスク要因（{len(_risk['reasons'])}件）"):
+                for r in _risk["reasons"]:
+                    st.warning(r)
+        else:
+            st.caption("✅ 特段のリスク要因は検出されませんでした")
 
         # ── ポジションサイズ計算 ────────────────────────────────────
         st.markdown("---")

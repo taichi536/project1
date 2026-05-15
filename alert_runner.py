@@ -97,6 +97,20 @@ def run_signal_alerts(tickers: list[str] | None = None):
                         ed_days = fetch_earnings_date(ticker).get("days_until")
                     except Exception:
                         pass
+                    from modules.risk_filter import assess_signal_risk
+                    risk = assess_signal_risk(ticker, df, earnings_days=ed_days)
+                    print(f"    リスク: {risk['risk_level']} (score={risk['risk_score']}) {risk['reasons']}")
+                    if risk["should_skip"]:
+                        print(f"    → リスクフィルターによりスキップ: {ticker}")
+                        signals_state[ticker] = {
+                            **signals_state.get(ticker, {}),
+                            "verdict": verdict,
+                            "score": score,
+                            "updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        }
+                        continue
+                    entry_limit_pct = risk.get("entry_limit_pct", 0)
+                    entry_limit = price * (1 + entry_limit_pct / 100) if entry_limit_pct > 0 else None
                     result = send_strong_buy_alert(
                         ticker=ticker,
                         price=price,
@@ -106,6 +120,7 @@ def run_signal_alerts(tickers: list[str] | None = None):
                         target=price * 1.10,
                         rsi=rsi,
                         earnings_days=ed_days,
+                        entry_limit=entry_limit,
                     )
                 else:
                     result = send_signal_alert(

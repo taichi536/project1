@@ -120,6 +120,7 @@ def send_strong_buy_alert(
     target: float,
     rsi: float | None = None,
     earnings_days: int | None = None,
+    entry_limit: float | None = None,
     telegram_token: str | None = None,
     telegram_chat_id: str | None = None,
     slack_webhook: str | None = None,
@@ -132,11 +133,13 @@ def send_strong_buy_alert(
         earnings_warn = f"\n⚠️ 決算まであと{earnings_days}日 → ポジションは小さめに\n"
     rsi_str = f"{rsi:.0f}" if rsi is not None else "-"
     rr = (target - price) / (price - stop_loss) if price > stop_loss else 0
+    entry_limit_line = f"エントリー上限: {entry_limit:,.2f}円以下で買うこと\n" if entry_limit is not None else ""
     message = (
         f"🚀 <b>強い買い推奨シグナル</b>\n"
         f"─────────────────\n"
         f"銘柄: <b>{ticker}</b>\n"
         f"現在値: {price:,.2f}　RSI: {rsi_str}　スコア: {score:+d}\n"
+        f"{entry_limit_line}"
         f"─────────────────\n"
         f"根拠:\n{top_reasons}\n"
         f"{earnings_warn}"

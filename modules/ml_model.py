@@ -44,6 +44,10 @@ def _build_features(df: pd.DataFrame) -> pd.DataFrame:
     for d in [1, 3, 5]:
         feat[f"ret_{d}d"] = df["Close"].pct_change(d)
 
+    # 10日・20日モメンタム（スイングトレード向け）
+    feat["ret_10d"] = df["Close"].pct_change(10)
+    feat["ret_20d"] = df["Close"].pct_change(20)
+
     # 一目均衡表（雲との位置関係）
     if "Ichimoku_senkou_a" in df.columns and "Ichimoku_senkou_b" in df.columns:
         cloud_top = df[["Ichimoku_senkou_a", "Ichimoku_senkou_b"]].max(axis=1)
@@ -51,16 +55,48 @@ def _build_features(df: pd.DataFrame) -> pd.DataFrame:
         feat["above_cloud"] = (df["Close"] > cloud_top).astype(float)
         feat["cloud_dist"] = (df["Close"] - cloud_top) / df["Close"]
 
+    # OBVレシオ（OBV / 20日移動平均）
+    if "OBV" in df.columns:
+        obv_mean = df["OBV"].rolling(20).mean()
+        feat["obv_ratio"] = df["OBV"] / obv_mean.replace(0, np.nan)
+    elif "Volume" in df.columns:
+        # OBVが無い場合は出来高符号付き累積から近似計算
+        price_chg = df["Close"].diff()
+        signed_vol = df["Volume"] * np.sign(price_chg).fillna(0)
+        obv_approx = signed_vol.cumsum()
+        obv_mean = obv_approx.rolling(20).mean()
+        feat["obv_ratio"] = obv_approx / obv_mean.replace(0, np.nan)
+
+    # VWAP乖離率
+    if "VWAP" in df.columns:
+        feat["vwap_dev_pct"] = (df["Close"] - df["VWAP"]) / df["VWAP"] * 100
+    elif "Volume" in df.columns:
+        # VWAP近似（直近20日のVolume-weighted価格）
+        typical = (df["Close"] + df.get("High", df["Close"]) + df.get("Low", df["Close"])) / 3
+        vwap_approx = (typical * df["Volume"]).rolling(20).sum() / df["Volume"].rolling(20).sum()
+        feat["vwap_dev_pct"] = (df["Close"] - vwap_approx) / vwap_approx * 100
+
+    # RSI-価格ダイバージェンス（5日間のRSI方向 vs 価格方向）
+    if "RSI" in df.columns:
+        rsi_dir = df["RSI"].diff(5)
+        price_dir = df["Close"].diff(5)
+        # 同方向なら0、逆方向（ダイバージェンス）なら符号付きで表現
+        feat["rsi_price_div"] = np.where(
+            (rsi_dir * price_dir) < 0,
+            np.sign(rsi_dir) * -1,  # ダイバージェンス（RSIが先行して逆転の可能性）
+            np.sign(price_dir)       # 同方向（トレンド継続の可能性）
+        ).astype(float)
+
     return feat.ffill().bfill()
 
 
-def _build_target(df: pd.DataFrame, horizon: int = 5) -> pd.Series:
+def _build_target(df: pd.DataFrame, horizon: int = 10) -> pd.Series:
     """N日後のリターンが正なら1、負なら0"""
     future_ret = df["Close"].pct_change(horizon).shift(-horizon)
     return (future_ret > 0).astype(int)
 
 
-def train_model(df: pd.DataFrame, horizon: int = 5) -> dict:
+def train_model(df: pd.DataFrame, horizon: int = 10) -> dict:
     """
     RandomForest + GradientBoosting のアンサンブルを時系列交差検証で学習
     Returns: モデル情報・精度・特徴量重要度
@@ -131,6 +167,53 @@ def train_model(df: pd.DataFrame, horizon: int = 5) -> dict:
         "feature_importance": feat_importance.head(8),
         "error": None,
     }
+
+
+def ml_score_signal(df: pd.DataFrame, horizon: int = 10) -> dict | None:
+    """
+    ML確率に基づいたシグナルスコアを返す（-2〜+2）
+
+    Returns:
+        {
+            "score": int,           # -2〜+2
+            "judge": str,           # 判定ラベル（日本語）
+            "up_probability": float,  # 上昇確率（0.0〜1.0）
+            "confidence": float,    # 信頼度（0〜100%）
+        }
+        または None（エラー時）
+    """
+    try:
+        result = train_model(df, horizon=horizon)
+        if result.get("error"):
+            return None
+
+        prob = result["up_probability"] / 100.0
+        confidence = result["confidence"]
+
+        if prob >= 0.65:
+            score = 2
+            judge = "ML: 強い上昇予測"
+        elif prob >= 0.55:
+            score = 1
+            judge = "ML: 上昇予測"
+        elif prob <= 0.35:
+            score = -2
+            judge = "ML: 強い下落予測"
+        elif prob <= 0.45:
+            score = -1
+            judge = "ML: 下落予測"
+        else:
+            score = 0
+            judge = "ML: 方向感なし"
+
+        return {
+            "score": score,
+            "judge": judge,
+            "up_probability": prob,
+            "confidence": confidence,
+        }
+    except Exception:
+        return None
 
 
 def trend_regression(df: pd.DataFrame, window: int = 20) -> dict:
