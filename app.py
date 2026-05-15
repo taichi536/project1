@@ -2477,7 +2477,7 @@ elif page == "🤖 自動売買":
     st.markdown("---")
 
     # ── タブ ──────────────────────────────────────────────────────────────────
-    tab_settings, tab_positions, tab_log = st.tabs(["⚙️ 設定", "📊 ポジション", "📋 取引ログ"])
+    tab_settings, tab_positions, tab_log, tab_perf = st.tabs(["⚙️ 設定", "📊 ポジション", "📋 取引ログ", "📈 成績分析"])
 
     with tab_settings:
         broker_choice = "paper"
@@ -2580,6 +2580,177 @@ elif page == "🤖 自動売買":
                 st.info("まだ取引履歴がありません。")
         else:
             st.info("取引ログはペーパートレードモードでのみ表示されます。")
+
+    with tab_perf:
+        st.markdown("#### 📈 ペーパートレード成績分析")
+        from modules.broker import PaperBroker
+        import plotly.graph_objects as go
+        pb_perf = PaperBroker()
+        log_raw = pb_perf.get_trade_log()
+        INITIAL_CASH = 1_000_000.0
+
+        if not log_raw:
+            st.info("まだ取引履歴がありません。シグナルが出て自動売買が動くと成績が表示されます。")
+        else:
+            # ── 売買ペアを組み合わせてP&L計算 ──────────────────────────────
+            buys = {}   # ticker → [{"price", "qty", "timestamp"}]
+            trades_closed = []  # 決済済みトレード
+            cash_curve = [{"timestamp": log_raw[0]["timestamp"], "cash": INITIAL_CASH}]
+            running_cash = INITIAL_CASH
+
+            for entry in sorted(log_raw, key=lambda x: x["timestamp"]):
+                ticker = entry["ticker"]
+                qty = entry["qty"]
+                price = entry["price"]
+                ts = entry["timestamp"]
+
+                if entry["side"] == "buy":
+                    buys.setdefault(ticker, []).append({"price": price, "qty": qty, "timestamp": ts})
+                    running_cash -= price * qty
+                    cash_curve.append({"timestamp": ts, "cash": running_cash})
+
+                elif entry["side"] == "sell":
+                    buy_list = buys.get(ticker, [])
+                    remaining_sell = qty
+                    while remaining_sell > 0 and buy_list:
+                        b = buy_list[0]
+                        matched = min(b["qty"], remaining_sell)
+                        pnl = (price - b["price"]) * matched
+                        hold_days = (
+                            pd.Timestamp(ts) - pd.Timestamp(b["timestamp"])
+                        ).days
+                        trades_closed.append({
+                            "銘柄": ticker,
+                            "買値": b["price"],
+                            "売値": price,
+                            "株数": matched,
+                            "損益": pnl,
+                            "保有日数": hold_days,
+                            "勝敗": "勝" if pnl > 0 else "負",
+                            "決済日時": ts,
+                        })
+                        b["qty"] -= matched
+                        remaining_sell -= matched
+                        if b["qty"] == 0:
+                            buy_list.pop(0)
+                    running_cash += price * qty
+                    cash_curve.append({"timestamp": ts, "cash": running_cash})
+
+            # 総資産（現金 + 含み）
+            total_unrealized = sum(p["unrealized_pnl"] for p in status["positions"])
+            total_assets = status["cash"] + sum(p["market_value"] for p in status["positions"])
+
+            # ── サマリー指標 ──────────────────────────────────────────────
+            total_pnl = sum(t["損益"] for t in trades_closed)
+            win_count = sum(1 for t in trades_closed if t["損益"] > 0)
+            lose_count = sum(1 for t in trades_closed if t["損益"] <= 0)
+            total_closed = len(trades_closed)
+            win_rate = win_count / total_closed * 100 if total_closed > 0 else 0
+            avg_win = (
+                sum(t["損益"] for t in trades_closed if t["損益"] > 0) / win_count
+                if win_count > 0 else 0
+            )
+            avg_loss = (
+                sum(t["損益"] for t in trades_closed if t["損益"] <= 0) / lose_count
+                if lose_count > 0 else 0
+            )
+            avg_hold = (
+                sum(t["保有日数"] for t in trades_closed) / total_closed
+                if total_closed > 0 else 0
+            )
+            pnl_pct = (total_assets - INITIAL_CASH) / INITIAL_CASH * 100
+
+            # ── メトリクス表示 ────────────────────────────────────────────
+            sm1, sm2, sm3, sm4 = st.columns(4)
+            pnl_delta = f"{'+' if total_pnl>=0 else ''}{total_pnl:,.0f}円"
+            sm1.metric("総資産", f"{total_assets:,.0f}円",
+                       delta=f"{'+' if pnl_pct>=0 else ''}{pnl_pct:.1f}%")
+            sm2.metric("確定損益", pnl_delta)
+            sm3.metric("勝率", f"{win_rate:.0f}%",
+                       delta=f"{win_count}勝 {lose_count}敗" if total_closed > 0 else "未決済")
+            sm4.metric("平均保有日数", f"{avg_hold:.1f}日" if total_closed > 0 else "-")
+
+            sm5, sm6, sm7, sm8 = st.columns(4)
+            sm5.metric("平均利益/トレード", f"{avg_win:+,.0f}円" if win_count > 0 else "-")
+            sm6.metric("平均損失/トレード", f"{avg_loss:+,.0f}円" if lose_count > 0 else "-")
+            rr = abs(avg_win / avg_loss) if avg_loss != 0 else 0
+            sm7.metric("リスクリワード比", f"1:{rr:.1f}" if rr > 0 else "-")
+            sm8.metric("総取引数（決済済）", f"{total_closed}件")
+
+            st.markdown("---")
+
+            # ── 資産推移グラフ ────────────────────────────────────────────
+            st.markdown("##### 資産推移")
+            curve_df = pd.DataFrame(cash_curve)
+            # 現在の総資産を末尾に追加
+            curve_df = pd.concat([
+                curve_df,
+                pd.DataFrame([{"timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+                               "cash": total_assets}])
+            ], ignore_index=True)
+            curve_df["timestamp"] = pd.to_datetime(curve_df["timestamp"])
+
+            fig_curve = go.Figure()
+            fig_curve.add_trace(go.Scatter(
+                x=curve_df["timestamp"], y=curve_df["cash"],
+                mode="lines+markers",
+                line=dict(color="#26a69a", width=2),
+                marker=dict(size=6),
+                fill="tozeroy",
+                fillcolor="rgba(38,166,154,0.1)",
+                name="総資産",
+            ))
+            fig_curve.add_hline(y=INITIAL_CASH, line_dash="dash",
+                                line_color="#888", annotation_text="初期資金 100万円")
+            fig_curve.update_layout(
+                paper_bgcolor="#0e1117", plot_bgcolor="#1a1d23",
+                font=dict(color="#fafafa"), height=280,
+                margin=dict(l=0, r=0, t=10, b=0),
+                xaxis=dict(gridcolor="#2a2d35"),
+                yaxis=dict(gridcolor="#2a2d35", tickformat=",.0f"),
+                showlegend=False,
+            )
+            st.plotly_chart(fig_curve, use_container_width=True)
+
+            # ── 銘柄別成績 ────────────────────────────────────────────────
+            if trades_closed:
+                st.markdown("---")
+                st.markdown("##### 銘柄別損益")
+                ticker_pnl = {}
+                for t in trades_closed:
+                    tk = t["銘柄"]
+                    ticker_pnl[tk] = ticker_pnl.get(tk, 0) + t["損益"]
+
+                tk_df = pd.DataFrame([
+                    {"銘柄": tk, "損益": pnl}
+                    for tk, pnl in sorted(ticker_pnl.items(), key=lambda x: x[1], reverse=True)
+                ])
+                colors = ["#26a69a" if v >= 0 else "#ef5350" for v in tk_df["損益"]]
+                fig_tk = go.Figure(go.Bar(
+                    x=tk_df["銘柄"], y=tk_df["損益"],
+                    marker_color=colors,
+                    text=[f"{'+' if v>=0 else ''}{v:,.0f}円" for v in tk_df["損益"]],
+                    textposition="outside",
+                ))
+                fig_tk.update_layout(
+                    paper_bgcolor="#0e1117", plot_bgcolor="#1a1d23",
+                    font=dict(color="#fafafa"), height=260,
+                    margin=dict(l=0, r=0, t=10, b=0),
+                    yaxis=dict(gridcolor="#2a2d35", tickformat=",.0f"),
+                    xaxis=dict(gridcolor="#2a2d35"),
+                    showlegend=False,
+                )
+                st.plotly_chart(fig_tk, use_container_width=True)
+
+                # ── 決済済みトレード一覧 ──────────────────────────────────
+                st.markdown("---")
+                st.markdown("##### 決済済みトレード一覧")
+                closed_df = pd.DataFrame(trades_closed)
+                closed_df["損益"] = closed_df["損益"].apply(
+                    lambda x: f"+{x:,.0f}" if x >= 0 else f"{x:,.0f}"
+                )
+                closed_df = closed_df[["決済日時", "銘柄", "買値", "売値", "株数", "損益", "保有日数", "勝敗"]]
+                st.dataframe(closed_df[::-1], use_container_width=True, hide_index=True)
 
 
 # ─── トレードガイド ───────────────────────────────────────────────────────────
