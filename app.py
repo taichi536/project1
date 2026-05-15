@@ -1283,53 +1283,51 @@ elif page == "📊 テクニカル分析":
             else:
                 st.info("直近3本で特定のパターンは検出されませんでした")
 
-        st.markdown("#### 🤖 機械学習シグナル予測（RandomForest + GradientBoosting）")
-        ml_horizon = st.slider("予測期間（日）", min_value=3, max_value=20, value=5, step=1,
-                               help="何日後の価格が上昇しているかを予測します")
-        if st.button("🔮 ML予測を実行", type="secondary"):
-            with st.spinner("モデルを学習中...（初回は30秒ほどかかります）"):
-                ml_result = train_model(df, horizon=ml_horizon)
+        with st.expander("🤖 機械学習シグナル予測（参考）", expanded=False):
+          st.caption("⚠️ データ量が少ない銘柄では精度が低くなります。テクニカル分析の補助としてのみ使用してください。")
+          ml_horizon = st.slider("予測期間（日）", min_value=3, max_value=20, value=5, step=1,
+                                 help="何日後の価格が上昇しているかを予測します")
+          if st.button("🔮 ML予測を実行", type="secondary"):
+              with st.spinner("モデルを学習中...（初回は30秒ほどかかります）"):
+                  ml_result = train_model(df, horizon=ml_horizon)
 
-            if ml_result.get("error"):
-                st.warning(ml_result["error"])
-            else:
-                prob = ml_result["up_probability"]
-                ml_color = ml_result["ml_color"]
-                mc1, mc2, mc3, mc4 = st.columns(4)
-                mc1.metric(f"{ml_horizon}日後の予測", ml_result["ml_verdict"])
-                mc2.metric("上昇確率", f"{prob}%")
-                mc3.metric("モデル精度（検証）", f"{ml_result['ensemble_accuracy']}%",
-                           help="過去データのテスト期間での正解率。50%以上なら参考になります")
-                mc4.metric("信頼度", f"{ml_result['confidence']:.0f}%",
-                           help="50%から離れるほど確信が強い予測です")
+              if ml_result.get("error"):
+                  st.warning(ml_result["error"])
+              else:
+                  prob = ml_result["up_probability"]
+                  ml_color = ml_result["ml_color"]
+                  mc1, mc2, mc3, mc4 = st.columns(4)
+                  mc1.metric(f"{ml_horizon}日後の予測", ml_result["ml_verdict"])
+                  mc2.metric("上昇確率", f"{prob}%")
+                  mc3.metric("モデル精度（検証）", f"{ml_result['ensemble_accuracy']}%",
+                             help="過去データのテスト期間での正解率。50%以上なら参考になります")
+                  mc4.metric("信頼度", f"{ml_result['confidence']:.0f}%",
+                             help="50%から離れるほど確信が強い予測です")
 
-                # 上昇確率ゲージ
-                st.markdown(
-                    f"""<div style="background:#1a1d23;border-radius:8px;height:20px;margin:8px 0">
-                    <div style="width:{prob}%;background:{ml_color};height:20px;border-radius:8px;
-                         display:flex;align-items:center;justify-content:center;
-                         color:white;font-size:0.8em;font-weight:bold">{prob}%</div>
-                    </div>""",
-                    unsafe_allow_html=True,
-                )
-                st.caption("⚠️ 機械学習の予測は参考情報です。過去のパターンが未来に繰り返される保証はありません。")
+                  st.markdown(
+                      f"""<div style="background:#1a1d23;border-radius:8px;height:20px;margin:8px 0">
+                      <div style="width:{prob}%;background:{ml_color};height:20px;border-radius:8px;
+                           display:flex;align-items:center;justify-content:center;
+                           color:white;font-size:0.8em;font-weight:bold">{prob}%</div>
+                      </div>""",
+                      unsafe_allow_html=True,
+                  )
 
-                # 特徴量重要度
-                with st.expander("📊 予測に使われた指標の重要度"):
-                    fi = ml_result["feature_importance"]
-                    import plotly.express as px
-                    fig_fi = px.bar(
-                        x=fi.values * 100, y=fi.index, orientation="h",
-                        labels={"x": "重要度 (%)", "y": "指標"},
-                        color=fi.values,
-                        color_continuous_scale="teal",
-                    )
-                    fig_fi.update_layout(
-                        paper_bgcolor="#0e1117", plot_bgcolor="#1a1d23",
-                        font=dict(color="#fafafa"), height=300,
-                        showlegend=False, coloraxis_showscale=False,
-                    )
-                    st.plotly_chart(fig_fi, use_container_width=True, config={"scrollZoom": True})
+                  with st.expander("📊 予測に使われた指標の重要度"):
+                      fi = ml_result["feature_importance"]
+                      import plotly.express as px
+                      fig_fi = px.bar(
+                          x=fi.values * 100, y=fi.index, orientation="h",
+                          labels={"x": "重要度 (%)", "y": "指標"},
+                          color=fi.values,
+                          color_continuous_scale="teal",
+                      )
+                      fig_fi.update_layout(
+                          paper_bgcolor="#0e1117", plot_bgcolor="#1a1d23",
+                          font=dict(color="#fafafa"), height=300,
+                          showlegend=False, coloraxis_showscale=False,
+                      )
+                      st.plotly_chart(fig_fi, use_container_width=True, config={"scrollZoom": True})
 
         st.markdown("---")
         ai_tab1, ai_tab2 = st.tabs(["🤖 テクニカルAI解説", "🌐 マクロ・ニュース影響"])
@@ -2286,45 +2284,37 @@ export JQUANTS_PASSWORD="your_password"
 """, language="bash")
 
         with rt_col2:
-            st.markdown("#### 🇺🇸 米国株：Alpaca Markets（無料）")
-            st.markdown("""
-**米国株のリアルタイム価格**が無料で取得できます。
-
-**登録手順：**
-1. [Alpaca Markets](https://alpaca.markets/) でアカウント作成（無料）
-2. ダッシュボード → 「API Keys」でキーを発行
-3. 下記に入力（Paper Trading キーでOK）
-""")
-            alp_key = st.text_input("Alpaca API Key",
-                                     value=os.getenv("ALPACA_API_KEY", ""),
-                                     type="password",
-                                     placeholder="PKxxxxxx...")
-            alp_secret = st.text_input("Alpaca Secret Key",
-                                        value=os.getenv("ALPACA_SECRET_KEY", ""),
-                                        type="password")
-            if st.button("✅ Alpaca 接続テスト"):
-                if alp_key and alp_secret:
-                    try:
-                        import requests as req
-                        resp = req.get(
-                            "https://data.alpaca.markets/v2/stocks/AAPL/quotes/latest",
-                            headers={"APCA-API-KEY-ID": alp_key,
-                                     "APCA-API-SECRET-KEY": alp_secret},
-                            timeout=8,
-                        )
-                        if resp.status_code == 200:
-                            price = resp.json().get("quote", {})
-                            mid = (price.get("ap", 0) + price.get("bp", 0)) / 2
-                            st.success(f"接続成功！AAPL 現在値: ${mid:.2f} ✅")
-                        else:
-                            st.error(f"接続失敗: {resp.status_code}")
-                    except Exception as e:
-                        st.error(f"エラー: {e}")
-                else:
-                    st.warning("APIキーを入力してください")
-            st.code(f"""export ALPACA_API_KEY="{alp_key or 'your_api_key'}"
-export ALPACA_SECRET_KEY="{alp_secret or 'your_secret_key'}"
-""", language="bash")
+            st.markdown("#### 🇺🇸 米国株データ")
+            st.info("米国株はyfinanceで自動取得されます。現時点では追加設定不要です。")
+            with st.expander("Alpaca Markets（リアルタイム価格・オプション）", expanded=False):
+                st.markdown("米国株のリアルタイム価格が必要な場合のみ設定してください。")
+                alp_key = st.text_input("Alpaca API Key",
+                                         value=os.getenv("ALPACA_API_KEY", ""),
+                                         type="password",
+                                         placeholder="PKxxxxxx...")
+                alp_secret = st.text_input("Alpaca Secret Key",
+                                            value=os.getenv("ALPACA_SECRET_KEY", ""),
+                                            type="password")
+                if st.button("✅ Alpaca 接続テスト"):
+                    if alp_key and alp_secret:
+                        try:
+                            import requests as req
+                            resp = req.get(
+                                "https://data.alpaca.markets/v2/stocks/AAPL/quotes/latest",
+                                headers={"APCA-API-KEY-ID": alp_key,
+                                         "APCA-API-SECRET-KEY": alp_secret},
+                                timeout=8,
+                            )
+                            if resp.status_code == 200:
+                                price = resp.json().get("quote", {})
+                                mid = (price.get("ap", 0) + price.get("bp", 0)) / 2
+                                st.success(f"接続成功！AAPL 現在値: ${mid:.2f} ✅")
+                            else:
+                                st.error(f"接続失敗: {resp.status_code}")
+                        except Exception as e:
+                            st.error(f"エラー: {e}")
+                    else:
+                        st.warning("APIキーを入力してください")
 
         st.markdown("---")
         st.markdown("#### 📊 現在のデータソース状況")
@@ -2490,33 +2480,8 @@ elif page == "🤖 自動売買":
     tab_settings, tab_positions, tab_log = st.tabs(["⚙️ 設定", "📊 ポジション", "📋 取引ログ"])
 
     with tab_settings:
-        st.markdown("#### ブローカー選択")
-        broker_help = {
-            "paper": "💡 ペーパートレード（仮想取引）。API不要。動作確認に使ってください。",
-            "kabu": "🏦 kabu STATION（auカブコム証券）。国内株専用。デスクトップアプリが必要。",
-            "alpaca": "🌎 Alpaca Markets。米国株専用。ALPACA_API_KEY / ALPACA_SECRET_KEY が必要。",
-        }
-        broker_choice = st.radio(
-            "使用するブローカー",
-            ["paper", "kabu", "alpaca"],
-            index=["paper", "kabu", "alpaca"].index(status["settings"].get("broker", "paper")),
-            format_func=lambda x: {"paper": "ペーパートレード", "kabu": "kabu STATION（国内株）", "alpaca": "Alpaca（米国株）"}[x],
-            horizontal=True,
-        )
-        st.info(broker_help[broker_choice])
-
-        if broker_choice == "kabu":
-            st.markdown("**kabu STATION 設定**")
-            kabu_pw = st.text_input("APIパスワード", type="password",
-                                     value=os.getenv("KABU_API_PASSWORD", ""),
-                                     help="kabu STATIONアプリ内で設定したAPIパスワード")
-            st.caption("※ 入力値は .env ファイルに手動で保存してください: `KABU_API_PASSWORD=xxx`")
-        elif broker_choice == "alpaca":
-            st.markdown("**Alpaca API 設定**")
-            alp_key = st.text_input("API Key", type="password", value=os.getenv("ALPACA_API_KEY", ""))
-            alp_sec = st.text_input("Secret Key", type="password", value=os.getenv("ALPACA_SECRET_KEY", ""))
-            alp_paper = st.checkbox("ペーパー口座を使用（推奨）", value=os.getenv("ALPACA_PAPER", "true") == "true")
-            st.caption("※ Alpaca公式サイトで口座開設後、APIキーを取得してください。")
+        broker_choice = "paper"
+        st.info("💡 現在はペーパートレード（仮想取引）モードで動作しています。実口座への切り替えはSBI証券のAPI対応後に対応予定です。")
 
         st.markdown("---")
         st.markdown("#### 取引ルール")
@@ -2567,17 +2532,16 @@ elif page == "🤖 自動売買":
             os.environ["BROKER"] = broker_choice
             st.success("設定を保存しました。alert_runner.py を再起動すると反映されます。")
 
-        if broker_choice == "paper":
-            st.markdown("---")
-            st.markdown("#### ペーパートレードのリセット")
-            init_cash = st.number_input("初期資金（円）", min_value=100_000, max_value=100_000_000,
-                                         value=1_000_000, step=100_000)
-            if st.button("ペーパートレードをリセット", type="secondary"):
-                from modules.broker import PaperBroker
-                pb = PaperBroker(initial_cash=init_cash)
-                pb.reset(initial_cash=init_cash)
-                st.success(f"リセット完了。初期資金: {init_cash:,.0f}円")
-                st.rerun()
+        st.markdown("---")
+        st.markdown("#### ペーパートレードのリセット")
+        init_cash = st.number_input("初期資金（円）", min_value=100_000, max_value=100_000_000,
+                                     value=1_000_000, step=100_000)
+        if st.button("ペーパートレードをリセット", type="secondary"):
+            from modules.broker import PaperBroker
+            pb = PaperBroker(initial_cash=init_cash)
+            pb.reset(initial_cash=init_cash)
+            st.success(f"リセット完了。初期資金: {init_cash:,.0f}円")
+            st.rerun()
 
     with tab_positions:
         st.markdown("#### 現在のポジション")
