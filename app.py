@@ -80,7 +80,7 @@ with st.sidebar:
 
     page = st.radio(
         "メニュー",
-        ["🏠 ダッシュボード", "🔭 銘柄スキャン", "📊 テクニカル分析", "🔍 スクリーニング", "📋 ファンダメンタル分析", "🌐 マクロ・ニュース", "🔬 バックテスト", "📐 ポートフォリオ", "📔 投資日記", "🔔 通知設定", "📖 トレードガイド"],
+        ["🏠 ダッシュボード", "🔭 銘柄スキャン", "📊 テクニカル分析", "🔍 スクリーニング", "📋 ファンダメンタル分析", "🌐 マクロ・ニュース", "🔬 バックテスト", "📐 ポートフォリオ", "📔 投資日記", "🔔 通知設定", "🤖 自動売買", "📖 トレードガイド"],
         label_visibility="collapsed",
         key="menu_page",
     )
@@ -2441,6 +2441,174 @@ python alert_runner.py --mode signal     # シグナルのみ
 python alert_runner.py --tickers 7203,AAPL  # 銘柄を指定
 ```
 """)
+
+
+# ─── 自動売買 ─────────────────────────────────────────────────────────────────
+elif page == "🤖 自動売買":
+    st.title("🤖 自動売買設定")
+    st.caption("シグナルが出たとき、自動で証券会社に注文を送る機能です。まずはペーパートレードで動作確認してください。")
+
+    from modules.auto_trade import AutoTrader
+    from modules.broker import PaperBroker
+    trader = AutoTrader()
+    status = trader.get_status()
+
+    # ── 接続状態 ──────────────────────────────────────────────────────────────
+    st.markdown("### 🔌 ブローカー接続状態")
+    conn_color = "#26a69a" if status["connected"] else "#ef5350"
+    conn_label = "接続中" if status["connected"] else "未接続"
+    enabled_color = "#26a69a" if status["enabled"] else "#888"
+    enabled_label = "有効" if status["enabled"] else "無効"
+    c1, c2, c3, c4 = st.columns(4)
+    c1.markdown(f"<div style='background:#1e1e2e;border-radius:10px;padding:14px;text-align:center'>"
+                f"<div style='color:#888;font-size:0.8em'>ブローカー</div>"
+                f"<div style='font-size:1.1em;font-weight:bold'>{status['broker_name']}</div></div>",
+                unsafe_allow_html=True)
+    c2.markdown(f"<div style='background:#1e1e2e;border-radius:10px;padding:14px;text-align:center'>"
+                f"<div style='color:#888;font-size:0.8em'>接続</div>"
+                f"<div style='font-size:1.2em;font-weight:bold;color:{conn_color}'>{conn_label}</div></div>",
+                unsafe_allow_html=True)
+    c3.markdown(f"<div style='background:#1e1e2e;border-radius:10px;padding:14px;text-align:center'>"
+                f"<div style='color:#888;font-size:0.8em'>自動売買</div>"
+                f"<div style='font-size:1.2em;font-weight:bold;color:{enabled_color}'>{enabled_label}</div></div>",
+                unsafe_allow_html=True)
+    c4.markdown(f"<div style='background:#1e1e2e;border-radius:10px;padding:14px;text-align:center'>"
+                f"<div style='color:#888;font-size:0.8em'>現金残高</div>"
+                f"<div style='font-size:1.2em;font-weight:bold'>{status['cash']:,.0f}円</div></div>",
+                unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── タブ ──────────────────────────────────────────────────────────────────
+    tab_settings, tab_positions, tab_log = st.tabs(["⚙️ 設定", "📊 ポジション", "📋 取引ログ"])
+
+    with tab_settings:
+        st.markdown("#### ブローカー選択")
+        broker_help = {
+            "paper": "💡 ペーパートレード（仮想取引）。API不要。動作確認に使ってください。",
+            "kabu": "🏦 kabu STATION（auカブコム証券）。国内株専用。デスクトップアプリが必要。",
+            "alpaca": "🌎 Alpaca Markets。米国株専用。ALPACA_API_KEY / ALPACA_SECRET_KEY が必要。",
+        }
+        broker_choice = st.radio(
+            "使用するブローカー",
+            ["paper", "kabu", "alpaca"],
+            index=["paper", "kabu", "alpaca"].index(status["settings"].get("broker", "paper")),
+            format_func=lambda x: {"paper": "ペーパートレード", "kabu": "kabu STATION（国内株）", "alpaca": "Alpaca（米国株）"}[x],
+            horizontal=True,
+        )
+        st.info(broker_help[broker_choice])
+
+        if broker_choice == "kabu":
+            st.markdown("**kabu STATION 設定**")
+            kabu_pw = st.text_input("APIパスワード", type="password",
+                                     value=os.getenv("KABU_API_PASSWORD", ""),
+                                     help="kabu STATIONアプリ内で設定したAPIパスワード")
+            st.caption("※ 入力値は .env ファイルに手動で保存してください: `KABU_API_PASSWORD=xxx`")
+        elif broker_choice == "alpaca":
+            st.markdown("**Alpaca API 設定**")
+            alp_key = st.text_input("API Key", type="password", value=os.getenv("ALPACA_API_KEY", ""))
+            alp_sec = st.text_input("Secret Key", type="password", value=os.getenv("ALPACA_SECRET_KEY", ""))
+            alp_paper = st.checkbox("ペーパー口座を使用（推奨）", value=os.getenv("ALPACA_PAPER", "true") == "true")
+            st.caption("※ Alpaca公式サイトで口座開設後、APIキーを取得してください。")
+
+        st.markdown("---")
+        st.markdown("#### 取引ルール")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            risk_pct = st.slider(
+                "1取引の許容損失（資金の%）",
+                min_value=0.5, max_value=5.0, step=0.5,
+                value=float(status["settings"].get("risk_pct", 2.0)),
+                help="例: 2% → 100万円の場合、1回の損失上限は2万円"
+            )
+            min_score = st.slider(
+                "自動買い発動スコア（最低）",
+                min_value=3, max_value=6, step=1,
+                value=int(status["settings"].get("min_score", 4)),
+                help="スコアがこの値以上のとき自動で買い注文"
+            )
+        with col_b:
+            max_pos_pct = st.slider(
+                "1銘柄への最大投資比率（%）",
+                min_value=5, max_value=30, step=5,
+                value=int(status["settings"].get("max_position_pct", 10)),
+                help="1銘柄に資金の何%まで投入するか"
+            )
+            use_limit = st.checkbox(
+                "指値注文を使用（推奨）",
+                value=status["settings"].get("use_limit_order", True),
+                help="成行注文より不利な価格での約定を防ぐ"
+            )
+
+        st.markdown("---")
+        st.markdown("#### 自動売買のON/OFF")
+        st.warning("⚠️ 実口座で有効にする前に、必ずペーパートレードで動作確認してください。")
+        new_enabled = st.toggle(
+            "自動売買を有効にする",
+            value=status["enabled"],
+        )
+
+        if st.button("設定を保存", type="primary"):
+            trader.save_settings({
+                "broker": broker_choice,
+                "risk_pct": risk_pct,
+                "max_position_pct": float(max_pos_pct),
+                "min_score": min_score,
+                "use_limit_order": use_limit,
+                "enabled": new_enabled,
+            })
+            os.environ["BROKER"] = broker_choice
+            st.success("設定を保存しました。alert_runner.py を再起動すると反映されます。")
+
+        if broker_choice == "paper":
+            st.markdown("---")
+            st.markdown("#### ペーパートレードのリセット")
+            init_cash = st.number_input("初期資金（円）", min_value=100_000, max_value=100_000_000,
+                                         value=1_000_000, step=100_000)
+            if st.button("ペーパートレードをリセット", type="secondary"):
+                from modules.broker import PaperBroker
+                pb = PaperBroker(initial_cash=init_cash)
+                pb.reset(initial_cash=init_cash)
+                st.success(f"リセット完了。初期資金: {init_cash:,.0f}円")
+                st.rerun()
+
+    with tab_positions:
+        st.markdown("#### 現在のポジション")
+        positions = status["positions"]
+        if positions:
+            pos_df = pd.DataFrame(positions)
+            pos_df.columns = ["銘柄", "保有株数", "平均取得価格", "時価評価額", "含み損益"]
+            pos_df["含み損益"] = pos_df["含み損益"].apply(
+                lambda x: f"+{x:,.0f}" if x > 0 else f"{x:,.0f}"
+            )
+            st.dataframe(pos_df, use_container_width=True, hide_index=True)
+            total_val = sum(p["market_value"] for p in positions)
+            total_pnl = sum(p["unrealized_pnl"] for p in positions)
+            pnl_color = "#26a69a" if total_pnl >= 0 else "#ef5350"
+            m1, m2, m3 = st.columns(3)
+            m1.metric("時価評価額合計", f"{total_val:,.0f}円")
+            m1.metric("含み損益合計", f"{'+' if total_pnl>=0 else ''}{total_pnl:,.0f}円")
+            m2.metric("現金残高", f"{status['cash']:,.0f}円")
+            m3.metric("総資産（概算）", f"{status['cash']+total_val:,.0f}円")
+        else:
+            st.info("現在保有中のポジションはありません。")
+
+    with tab_log:
+        st.markdown("#### 取引ログ（ペーパートレードのみ）")
+        if status["settings"].get("broker", "paper") == "paper":
+            from modules.broker import PaperBroker
+            pb = PaperBroker()
+            log = pb.get_trade_log()
+            if log:
+                log_df = pd.DataFrame(log)
+                log_df = log_df[["timestamp", "ticker", "side", "qty", "price", "order_type", "status"]]
+                log_df.columns = ["日時", "銘柄", "売買", "株数", "価格", "注文種別", "状態"]
+                log_df["売買"] = log_df["売買"].map({"buy": "買い", "sell": "売り"})
+                st.dataframe(log_df[::-1], use_container_width=True, hide_index=True)
+            else:
+                st.info("まだ取引履歴がありません。")
+        else:
+            st.info("取引ログはペーパートレードモードでのみ表示されます。")
 
 
 # ─── トレードガイド ───────────────────────────────────────────────────────────

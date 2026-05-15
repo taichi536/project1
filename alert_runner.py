@@ -29,6 +29,9 @@ from modules.notifier import send_signal_alert, send_screening_alert, send_stop_
 from modules.screening import screen_single
 from modules.diary import get_trades, calc_pnl
 from modules.dashboard import load_watchlist
+from modules.auto_trade import AutoTrader
+
+_trader = AutoTrader()
 
 # ── 設定 ──────────────────────────────────────────────────────────────────────
 # 環境変数 WATCH_TICKERS が未設定なら watchlist.json を使う
@@ -64,10 +67,21 @@ def run_signal_alerts(tickers: list[str] | None = None):
     for ticker in targets:
         ticker = ticker.strip()
         try:
-            df = fetch_ohlcv(ticker, period="6mo")
+            df = fetch_ohlcv(ticker, period="2y")
             df = compute_all(df)
             sigs = evaluate_signals(df)
             verdict, score = overall_signal(sigs, df=df)
+
+            # 1時間足で短期エントリータイミングを確認
+            if verdict == "買い":
+                try:
+                    from modules.signals import multi_timeframe_signal
+                    tf_results = multi_timeframe_signal(ticker)
+                    h1 = next((r for r in tf_results if "1時間" in r["timeframe"]), None)
+                    if h1 and h1["verdict"] == "売り":
+                        print(f"    ⚠️ 1時間足が売りシグナル → 短期では下落圧力あり（日足シグナルは維持）")
+                except Exception:
+                    pass
             price = float(df["Close"].iloc[-1])
             rsi = float(df["RSI"].dropna().iloc[-1]) if "RSI" in df.columns and len(df["RSI"].dropna()) > 0 else None
             atr = float(df["ATR"].dropna().iloc[-1]) if "ATR" in df.columns and len(df["ATR"].dropna()) > 0 else None
@@ -156,6 +170,19 @@ def run_signal_alerts(tickers: list[str] | None = None):
                         atr=atr,
                     )
                 print(f"    → 通知送信: {result}")
+
+                # 自動売買（有効な場合のみ）
+                if _trader.is_enabled():
+                    trade_result = _trader.execute_signal(
+                        ticker=ticker,
+                        verdict=verdict,
+                        score=score,
+                        price=price,
+                        atr=atr,
+                        stop_loss=price * 0.95 if verdict == "買い" else None,
+                    )
+                    if trade_result:
+                        print(f"    → 自動売買: {trade_result.get('status')} {trade_result.get('message', '')}")
             else:
                 print(f"    → シグナル変化なし、通知スキップ")
 

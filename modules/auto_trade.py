@@ -1,0 +1,186 @@
+"""
+自動売買実行モジュール
+
+シグナル判定結果を受け取り、証券会社APIに注文を送る。
+ペーパートレード/実口座を切り替えて動作する。
+
+使用例（alert_runner.py から呼び出す）:
+    from modules.auto_trade import AutoTrader
+    trader = AutoTrader()
+    result = trader.execute_signal(ticker, verdict, score, price, atr, stop_loss)
+"""
+
+import os
+import json
+from pathlib import Path
+from datetime import datetime
+from modules.broker import get_broker, calc_order_qty, BrokerBase
+
+
+_SETTINGS_FILE = Path(__file__).parent.parent / ".auto_trade_settings.json"
+
+_DEFAULT_SETTINGS = {
+    "enabled": False,           # 自動売買の有効/無効
+    "risk_pct": 2.0,            # 1取引の許容損失（資金の%）
+    "max_position_pct": 10.0,   # 1銘柄への最大投資比率（%）
+    "min_score": 4,             # 自動買いに必要な最低スコア
+    "sell_score": -4,           # 自動売りに必要な最大スコア
+    "use_limit_order": True,    # True=指値, False=成行
+    "limit_offset_pct": 0.3,   # 指値: 現在値+X%で買い注文
+    "stop_loss_atr_mult": 2.0,  # ATR×倍数で損切りライン設定
+    "broker": "paper",          # "paper" / "kabu" / "alpaca"
+}
+
+
+class AutoTrader:
+    """
+    シグナルに基づいて自動的に注文を送るクラス。
+    設定は .auto_trade_settings.json に永続化する。
+    """
+
+    def __init__(self):
+        self.settings = self._load_settings()
+        self.broker: BrokerBase = get_broker()
+
+    def _load_settings(self) -> dict:
+        if _SETTINGS_FILE.exists():
+            try:
+                saved = json.loads(_SETTINGS_FILE.read_text())
+                return {**_DEFAULT_SETTINGS, **saved}
+            except Exception:
+                pass
+        return _DEFAULT_SETTINGS.copy()
+
+    def save_settings(self, updates: dict):
+        self.settings.update(updates)
+        _SETTINGS_FILE.write_text(
+            json.dumps(self.settings, ensure_ascii=False, indent=2)
+        )
+
+    def is_enabled(self) -> bool:
+        return self.settings.get("enabled", False)
+
+    def get_status(self) -> dict:
+        """接続状態・残高・ポジションを返す"""
+        connected = self.broker.is_connected()
+        balance = self.broker.get_balance() if connected else {"cash": 0, "buying_power": 0}
+        positions = self.broker.get_positions() if connected else []
+        return {
+            "broker_name": self.broker.broker_name(),
+            "connected": connected,
+            "enabled": self.is_enabled(),
+            "cash": balance["cash"],
+            "buying_power": balance["buying_power"],
+            "positions": positions,
+            "settings": self.settings,
+        }
+
+    def execute_signal(
+        self,
+        ticker: str,
+        verdict: str,
+        score: int,
+        price: float,
+        atr: float | None = None,
+        stop_loss: float | None = None,
+    ) -> dict | None:
+        """
+        シグナルに基づいて注文を送る。
+        自動売買が無効または条件を満たさない場合は None を返す。
+        """
+        if not self.is_enabled():
+            return None
+
+        if not self.broker.is_connected():
+            return {"status": "error", "message": "ブローカーに接続できません"}
+
+        s = self.settings
+
+        # 買いシグナル
+        if verdict == "買い" and score >= s["min_score"]:
+            return self._execute_buy(ticker, price, atr, stop_loss)
+
+        # 売りシグナル（保有している場合のみ）
+        elif verdict == "売り" and score <= s["sell_score"]:
+            return self._execute_sell(ticker, price)
+
+        return None
+
+    def _execute_buy(
+        self,
+        ticker: str,
+        price: float,
+        atr: float | None,
+        stop_loss: float | None,
+    ) -> dict:
+        s = self.settings
+        balance = self.broker.get_balance()
+        cash = balance["buying_power"]
+
+        # 損切りライン計算
+        sl_price = stop_loss
+        if sl_price is None and atr:
+            sl_price = price - atr * s["stop_loss_atr_mult"]
+
+        qty = calc_order_qty(
+            cash=cash,
+            price=price,
+            risk_pct=s["risk_pct"],
+            stop_loss_price=sl_price,
+            max_position_pct=s["max_position_pct"],
+        )
+
+        if qty <= 0:
+            return {"status": "skipped", "message": f"購入可能株数が0（現金: {cash:,.0f}円）"}
+
+        order_type = "limit" if s["use_limit_order"] else "market"
+        limit_price = round(price * (1 + s["limit_offset_pct"] / 100), 1) if order_type == "limit" else None
+
+        result = self.broker.place_order(
+            ticker=ticker,
+            side="buy",
+            qty=qty,
+            order_type=order_type,
+            price=limit_price,
+            stop_price=None,
+        )
+
+        result.update({
+            "ticker": ticker,
+            "side": "buy",
+            "qty": qty,
+            "exec_price": limit_price or price,
+            "stop_loss": sl_price,
+            "estimated_cost": qty * (limit_price or price),
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        return result
+
+    def _execute_sell(self, ticker: str, price: float) -> dict:
+        # 保有ポジションを確認
+        positions = self.broker.get_positions()
+        pos = next((p for p in positions if p["ticker"] == ticker), None)
+        if not pos or pos["qty"] <= 0:
+            return {"status": "skipped", "message": f"{ticker}の保有ポジションなし"}
+
+        qty = int(pos["qty"])
+        s = self.settings
+        order_type = "limit" if s["use_limit_order"] else "market"
+        limit_price = round(price * (1 - s["limit_offset_pct"] / 100), 1) if order_type == "limit" else None
+
+        result = self.broker.place_order(
+            ticker=ticker,
+            side="sell",
+            qty=qty,
+            order_type=order_type,
+            price=limit_price,
+        )
+
+        result.update({
+            "ticker": ticker,
+            "side": "sell",
+            "qty": qty,
+            "exec_price": limit_price or price,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        return result
