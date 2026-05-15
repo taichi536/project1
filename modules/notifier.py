@@ -7,7 +7,7 @@ def _telegram(token: str, chat_id: str, text: str) -> bool:
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
         resp = requests.post(url, json={
-            "chat_id": chat_id,
+            "chat_id": int(chat_id),
             "text": text,
             "parse_mode": "HTML",
         }, timeout=10)
