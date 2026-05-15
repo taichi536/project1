@@ -632,6 +632,12 @@
       <input type="text" id="gas-secret" placeholder="シークレットキー（デフォルト: snowwe2024）" style="width:100%;">
     </div>
     <div style="font-size:10px; color:#888; line-height:1.6;">スカウト送信時に両方のスプレッドシートへ自動記録します</div>
+  </div>
+
+  <div class="setting-group">
+    <div class="label">ポジション管理GAS（ポジション提案の精度向上）</div>
+    <input type="text" id="position-gas-url" placeholder="ポジション管理GAS URL" style="width:100%; margin-bottom:5px;">
+    <div style="font-size:10px; color:#888; line-height:1.6;">ポジション名と募集要件を登録したGASのURLを入力すると、ポジション提案の精度が向上します。未入力の場合はデフォルト一覧を使用します。</div>
     <button class="save-btn" id="gas-test-btn" style="margin-top:6px; width:100%; font-size:11px;">🔗 スプレッドシート接続テスト</button>
     <div id="gas-test-result" style="font-size:11px; margin-top:5px; padding:6px; background:#f5f4f0; border-radius:6px; display:none; word-break:break-all;"></div>
   </div>

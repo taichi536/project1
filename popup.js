@@ -95,6 +95,7 @@ async function loadSettings() {
   if (gas.url) $('gas-url').value = gas.url;
   if (gas.dbUrl) $('gas-db-url').value = gas.dbUrl;
   if (gas.secret) $('gas-secret').value = gas.secret;
+  if (gas.positionUrl) $('position-gas-url').value = gas.positionUrl;
 
   if (c.companyTiers && c.companyTiers.length > 0) {
     document.querySelectorAll('#company-tier-group .checkbox-item').forEach(label => {
@@ -139,6 +140,7 @@ $('settings-save-btn').addEventListener('click', async () => {
     url: $('gas-url').value.trim(),
     dbUrl: $('gas-db-url').value.trim(),
     secret: $('gas-secret').value.trim() || 'snowwe2024',
+    positionUrl: $('position-gas-url').value.trim(),
   };
 
   await chrome.storage.local.set({ screeningCriteria: criteria, gasSettings });
@@ -424,13 +426,49 @@ async function runSuggestPosition() {
   $('suggest-btn').disabled = false;
 }
 
+async function fetchPositionsFromGas(positionUrl, secret) {
+  const res = await fetch(positionUrl, {
+    method: 'POST',
+    body: JSON.stringify({ secret, action: 'getPositions' }),
+  });
+  if (!res.ok) throw new Error(`GAS接続エラー (${res.status})`);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'ポジション取得失敗');
+  return data.positions || [];
+}
+
 async function suggestPosition(apiKey, profileText) {
   apiKey = sanitizeApiKey(apiKey);
-  const positionList = Array.from(document.querySelectorAll('#position-select option'))
-    .map(o => o.value).filter(Boolean).join('\n');
-  const prompt = `あなたはアクセンチュア日本法人への転職支援を専門とするハイクラス転職エージェントです。
-アクセンチュアの各ポジションが実際にどのような経験・スキルを求めているか、あなた自身の知識を最大限活用して判断してください。
 
+  // GASからポジション取得を試みる
+  const r = await chrome.storage.local.get(['gasSettings']);
+  const gas = r.gasSettings || {};
+  let positionListText = '';
+  let usingGas = false;
+
+  if (gas.positionUrl) {
+    try {
+      setStatus('suggest', 'loading', 'GASからポジション情報を取得中...');
+      const positions = await fetchPositionsFromGas(gas.positionUrl, gas.secret || 'snowwe2024');
+      if (positions.length > 0) {
+        positionListText = positions
+          .map(p => p.description ? `${p.name}: ${p.description}` : p.name)
+          .join('\n');
+        usingGas = true;
+        setStatus('suggest', 'loading', `${positions.length}件のポジション情報でポジションを分析中...`);
+      }
+    } catch (e) {
+      // GAS取得失敗時はデフォルト一覧にフォールバック
+    }
+  }
+
+  if (!usingGas) {
+    positionListText = Array.from(document.querySelectorAll('#position-select option'))
+      .map(o => o.value).filter(Boolean).join('\n');
+    setStatus('suggest', 'loading', 'ポジションを分析中...');
+  }
+
+  const prompt = `あなたはアクセンチュア日本法人への転職支援を専門とするハイクラス転職エージェントです。
 候補者にスカウトを送る際、どのポジションで打てば「刺さるか」を判断してください。
 
 【判断の視点】
@@ -444,7 +482,7 @@ async function suggestPosition(apiKey, profileText) {
 - スコアは「このポジションで打ったら候補者に刺さる確度」として1〜100で評価すること
 
 【募集ポジション一覧】
-${positionList}
+${positionListText}
 
 【候補者プロフィール】
 ${profileText}
