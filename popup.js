@@ -460,11 +460,14 @@ async function suggestPosition(apiKey, profileText) {
   }
 
   if (!usingGas) {
-    // デフォルト一覧（説明文なし）
-    positions = Array.from(document.querySelectorAll('#position-select option'))
-      .map(o => ({ name: o.value, description: '' })).filter(p => p.name);
+    // GAS未設定：従来通り1回のSonnet呼び出し（ポジション名のみ）
+    const positionListText = Array.from(document.querySelectorAll('#position-select option'))
+      .map(o => o.value).filter(Boolean).join('\n');
+    setStatus('suggest', 'loading', 'ポジションを分析中...');
+    return await suggestPositionSingleStep(apiKey, profileText, positionListText);
   }
 
+  // GAS設定済み：2ステップ処理
   // ── Step 1: Haikuで全ポジションから上位10件に絞り込み ──
   setStatus('suggest', 'loading', `Step1: ${positions.length}件から候補を絞り込み中...`);
   const nameOnlyList = positions.map(p => p.name).join('\n');
@@ -505,7 +508,6 @@ JSON配列のみで出力してください（説明不要）:
   if (arrMatch) {
     try { top10Names = JSON.parse(arrMatch[0]); } catch (_) {}
   }
-  // 絞り込み結果をpositionsから検索してマッチング（名前が一致するもの）
   const top10 = top10Names.length > 0
     ? top10Names.map(name => positions.find(p => p.name === name)).filter(Boolean)
     : positions.slice(0, 10);
@@ -515,21 +517,25 @@ JSON配列のみで出力してください（説明不要）:
   const detailList = top10
     .map(p => p.description ? `${p.name}: ${p.description}` : p.name)
     .join('\n');
+  return await suggestPositionSingleStep(apiKey, profileText, detailList);
+}
 
-  const step2Prompt = `あなたはアクセンチュア日本法人への転職支援を専門とするハイクラス転職エージェントです。
+async function suggestPositionSingleStep(apiKey, profileText, positionListText) {
+  const prompt = `あなたはアクセンチュア日本法人への転職支援を専門とするハイクラス転職エージェントです。
 候補者にスカウトを送る際、どのポジションで打てば「刺さるか」を判断してください。
 
 【判断の視点】
-1. 候補者の職歴・実績から見て、即戦力として活かせるか
-2. 候補者の希望職種・転職軸と合致しているか
-3. 上記2つが重なるポジションを最優先
+1. 候補者の職歴・実績から見て、アクセンチュアのどのポジションで即戦力として活かせるか
+2. 候補者の希望職種・転職軸（プロフィールに記載あれば）と合致しているか
+3. 上記2つが重なるポジションを最優先。希望職種の記載がない場合は職歴から転職軸を推測する
 
 【重要ルール】
-- 必ず【候補ポジション一覧】に記載されたポジション名をそのまま使用すること
+- 必ず【募集ポジション一覧】に記載されたポジション名をそのまま使用すること
+- 一覧にないポジション名は絶対に使用しないこと
 - スコアは「このポジションで打ったら候補者に刺さる確度」として1〜100で評価すること
 
-【候補ポジション一覧】
-${detailList}
+【募集ポジション一覧】
+${positionListText}
 
 【候補者プロフィール】
 ${profileText}
@@ -538,7 +544,7 @@ ${profileText}
 {"suggestions":[{"position":"ポジション名","match_score":90,"reason":"推奨理由を1文で記述"}]}
 ※必ず守ること: reasonは1文で簡潔に。ダブルクォート・改行・バックスラッシュを含めないこと。`;
 
-  const step2Res = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -549,15 +555,15 @@ ${profileText}
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 800,
-      messages: [{ role: 'user', content: step2Prompt }]
+      messages: [{ role: 'user', content: prompt }]
     })
   });
-  if (!step2Res.ok) {
-    const err = await step2Res.json().catch(() => ({}));
-    throw new Error(err.error?.message || `APIエラー (${step2Res.status})`);
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || `APIエラー (${response.status})`);
   }
-  const step2Data = await step2Res.json();
-  const text = (step2Data.content?.[0]?.text || '').trim();
+  const data = await response.json();
+  const text = (data.content?.[0]?.text || '').trim();
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('AIの応答からJSONを抽出できませんでした');
   const cleaned = jsonMatch[0]
