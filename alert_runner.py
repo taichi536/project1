@@ -22,6 +22,8 @@ import time
 import os
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
+load_dotenv()
 from modules.data_fetcher import fetch_ohlcv, fetch_earnings_date
 from modules.technical import compute_all
 from modules.signals import evaluate_signals, overall_signal
