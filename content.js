@@ -352,24 +352,39 @@ function extractBasicInfo(cardEl) {
 }
 
 // スカウトボタンのクリックを検知して履歴に記録
-document.addEventListener('click', async e => {
+document.addEventListener('click', e => {
   const btn = e.target.closest('button, a');
   if (!btn) return;
   const text = (btn.innerText || '').trim();
   if (text !== 'スカウト' && !text.includes('スカウトを送る') && !text.includes('スカウトする')) return;
 
   const cards = findCandidateCardsByPlatform();
-
-  // まずボタンがカード内にあるか確認
   let card = cards.find(c => c.contains(btn) || c === btn.closest('[class*="card"],[class*="row"],li,article'));
-
-  // RDS等で右パネルにボタンがある場合は選択中のカードを使う
   if (!card && _selectedCard) card = _selectedCard;
 
-  if (!card) return;
-
-  const id = getCandidateId(card);
-  if (id) await recordScoutSent(id, extractBasicInfo(card));
+  if (card) {
+    // 1回目クリック（候補者一覧/モーダル画面）：candidate情報をpendingとして即座に保存
+    const id = getCandidateId(card);
+    if (id) {
+      const info = extractBasicInfo(card);
+      chrome.storage.local.set({
+        pendingScout: { id, info, ts: Date.now() }
+      });
+    }
+  } else {
+    // 2回目クリック（テンプレ選択画面）：pendingを読んで記録
+    chrome.storage.local.get(['pendingScout'], r => {
+      const pending = r.pendingScout;
+      if (!pending || !pending.id) return;
+      if (Date.now() - pending.ts > 30 * 60 * 1000) {
+        // 30分以上前のpendingは無効
+        chrome.storage.local.remove('pendingScout');
+        return;
+      }
+      recordScoutSent(pending.id, pending.info);
+      chrome.storage.local.remove('pendingScout');
+    });
+  }
 }, true);
 
 // -------------------------------------------------------
