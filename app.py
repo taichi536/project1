@@ -12,7 +12,7 @@ st.set_page_config(
 
 from modules.data_fetcher import fetch_ohlcv, fetch_info, fetch_earnings_date
 from modules.technical import compute_all
-from modules.signals import evaluate_signals, overall_signal, generate_action_plan, evaluate_hold_signal, evaluate_watch_signal, detect_breakout, calc_signal_accuracy, multi_timeframe_signal
+from modules.signals import evaluate_signals, overall_signal, generate_action_plan, evaluate_hold_signal, evaluate_watch_signal, detect_breakout, calc_signal_accuracy, multi_timeframe_signal, calc_signal_confidence
 from modules.charts import build_main_chart
 from modules.fundamental import get_fundamental_summary, get_risk_metrics
 from modules.screening import screen_single
@@ -612,12 +612,21 @@ elif page == "📊 テクニカル分析":
             for s in top2
         )
 
+        _confidence = calc_signal_confidence(signals, verdict)
+        _conf_color = "#26a69a" if _confidence >= 70 else ("#ffd54f" if _confidence >= 50 else "#ef5350")
+        _conf_label = "高" if _confidence >= 70 else ("中" if _confidence >= 50 else "低")
+
         st.markdown(
             f"""<div style="background:{sig_color}22;border:2px solid {sig_color};
                 border-radius:16px;padding:24px;text-align:center;margin-bottom:16px">
                 <div style="font-size:3em">{sig_emoji}</div>
                 <div style="font-size:2em;font-weight:bold;color:{sig_color}">{verdict}</div>
                 <div style="font-size:1.1em;color:#ccc;margin-top:4px">{sig_msg}</div>
+                <div style="margin-top:8px">
+                  <span style="background:{_conf_color}33;border:1px solid {_conf_color};padding:3px 12px;border-radius:20px;font-size:0.9em;color:{_conf_color}">
+                    シグナル一致率 {_confidence}%（{_conf_label}）
+                  </span>
+                </div>
                 <div style="margin-top:12px">{reasons_html}</div>
             </div>""",
             unsafe_allow_html=True,

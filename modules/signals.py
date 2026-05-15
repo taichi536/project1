@@ -118,6 +118,28 @@ def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) 
             "スコア": score,
         })
 
+    # --- ADX（トレンド強度）: 横ばい相場でのシグナルを除外 ---
+    adx = _latest(df, "ADX")
+    di_plus = _latest(df, "DI_plus")
+    di_minus = _latest(df, "DI_minus")
+    if adx is not None and di_plus is not None and di_minus is not None:
+        if adx >= 25 and di_plus > di_minus:
+            judge, score = f"強い上昇トレンド（ADX {adx:.0f}）→ シグナル信頼性高", 2
+        elif adx >= 25 and di_minus > di_plus:
+            judge, score = f"強い下落トレンド（ADX {adx:.0f}）→ 下落圧力が強い", -2
+        elif adx >= 20 and di_plus > di_minus:
+            judge, score = f"上昇トレンド中（ADX {adx:.0f}）→ 追い風あり", 1
+        elif adx >= 20 and di_minus > di_plus:
+            judge, score = f"下落トレンド中（ADX {adx:.0f}）→ 慎重に", -1
+        else:
+            judge, score = f"横ばい相場（ADX {adx:.0f}）→ シグナルの信頼性低下", 0
+        signals.append({
+            "指標": "ADX（トレンド強度）",
+            "値": f"ADX {adx:.1f} / DI+ {di_plus:.1f} / DI- {di_minus:.1f}",
+            "判定": judge,
+            "スコア": score,
+        })
+
     # --- 出来高トレンド（OBV）: ストキャスティクスを置き換え ---
     # ストキャスティクスはRSIと同じ「過熱感」を測定するため重複。
     # OBVは「出来高が価格変動を支持しているか」という独立した情報を提供する。
@@ -167,6 +189,23 @@ def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) 
     return signals
 
 
+def calc_signal_confidence(signals: list[dict], verdict: str) -> int:
+    """
+    シグナルの一致率を返す（0〜100%）。
+    verdict方向に何%の指標が同意しているかを示す。
+    """
+    if not signals:
+        return 0
+    if verdict == "買い":
+        agree = sum(1 for s in signals if s["スコア"] > 0)
+    elif verdict == "売り":
+        agree = sum(1 for s in signals if s["スコア"] < 0)
+    else:
+        neutral = sum(1 for s in signals if s["スコア"] == 0)
+        agree = neutral
+    return round(agree / len(signals) * 100)
+
+
 def overall_signal(
     signals: list[dict],
     df: pd.DataFrame = None,
@@ -174,38 +213,58 @@ def overall_signal(
 ) -> tuple[str, int]:
     """
     シグナルを総合判定する。
-    dfを渡すとトレンドフィルターが有効になる。
+    dfを渡すとトレンドフィルター（SMA + ADX）が有効になる。
 
-    トレンドフィルターの役割:
-    長期移動平均より大幅に下にある銘柄（下落トレンド）で買いシグナルが出ても、
-    それは「落ちるナイフをつかむ」リスクが高い。スコアにペナルティを加える。
+    精度向上のポイント:
+    1. SMAフィルター: 長期MAより大幅に下なら買いにペナルティ
+    2. ADXフィルター: ADX>25で下落トレンド確認時は買いを強制的に封鎖
+    3. 横ばいフィルター: ADX<20の横ばい相場ではスコア閾値を引き上げ
     """
     total = sum(s["スコア"] for s in signals)
     max_score = len(signals) * 2
     if max_score == 0:
         return "様子見", 0
 
-    # トレンドフィルター
     trend_adj = 0
+    adx_confirmed_down = False
+    sideways_market = False
+
     if df is not None:
+        # SMAトレンドフィルター
         sma_col = f"SMA{sma_long}"
         _sma = df[sma_col].dropna() if sma_col in df.columns else pd.Series(dtype=float)
         if len(_sma) > 0:
             _gap = (df["Close"].iloc[-1] - _sma.iloc[-1]) / _sma.iloc[-1]
             if _gap < -0.07:
-                # 長期MAより7%以上下: 下落トレンド確認 → 買いシグナルに厳しくする
                 trend_adj = -2
             elif _gap < -0.03:
                 trend_adj = -1
             elif _gap > 0.07:
-                # 長期MAより7%以上上: 上昇トレンド確認 → 押し目買いを支持
                 trend_adj = 1
 
-    pct = (total + trend_adj) / max_score
+        # ADXフィルター: 強い下落トレンドでは買い禁止
+        _adx = df["ADX"].dropna() if "ADX" in df.columns else pd.Series(dtype=float)
+        _dip = df["DI_plus"].dropna() if "DI_plus" in df.columns else pd.Series(dtype=float)
+        _dim = df["DI_minus"].dropna() if "DI_minus" in df.columns else pd.Series(dtype=float)
+        if len(_adx) > 0 and len(_dip) > 0 and len(_dim) > 0:
+            adx_val = _adx.iloc[-1]
+            dip_val = _dip.iloc[-1]
+            dim_val = _dim.iloc[-1]
+            if adx_val >= 25 and dim_val > dip_val:
+                adx_confirmed_down = True  # 強い下落トレンド確認 → 買い不可
+                trend_adj -= 2
+            elif adx_val < 20:
+                sideways_market = True  # 横ばい → シグナル信頼性低
 
-    if pct >= 0.30:
+    adjusted = total + trend_adj
+    # 横ばい相場では閾値を厳しくする（より多くの指標が一致しないと動かない）
+    threshold = 0.40 if sideways_market else 0.30
+
+    pct = adjusted / max_score
+
+    if pct >= threshold and not adx_confirmed_down:
         return "買い", total
-    elif pct <= -0.30:
+    elif pct <= -threshold:
         return "売り", total
     else:
         return "様子見", total
