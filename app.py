@@ -612,11 +612,12 @@ elif page == "📊 テクニカル分析":
 
         # シンプルな理由（上位2つ）
         top2 = sorted(signals, key=lambda x: abs(x["スコア"]), reverse=True)[:2]
-        reasons_html = "　".join(
-            f"<span style='background:{'#1e3a2f' if s['スコア']>0 else '#3a1e1e'};padding:2px 8px;border-radius:12px;font-size:0.85em'>"
-            f"{'✅' if s['スコア']>0 else '⚠️'} {s['指標'].split('(')[0].strip()}: {s['判定']}</span>"
-            for s in top2
-        )
+        def _reason_span(s):
+            bg = "#1e3a2f" if s["スコア"] > 0 else "#3a1e1e"
+            icon = "✅" if s["スコア"] > 0 else "⚠️"
+            name = s["指標"].split("(")[0].strip()
+            return f"<span style='background:{bg};padding:2px 8px;border-radius:12px;font-size:0.85em'>{icon} {name}: {s['判定']}</span>"
+        reasons_html = "　".join(_reason_span(s) for s in top2)
 
         _detail = get_signal_detail(signals, verdict, df=df, sma_long=sma_long)
         _grade = _detail["grade"]
