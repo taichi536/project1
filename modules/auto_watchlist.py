@@ -72,13 +72,13 @@ def get_universe_tickers(categories: list[str]) -> list[str]:
 def run_auto_watchlist(verbose: bool = True) -> dict:
     """
     ユニバースをスキャンしてウォッチリストを自動更新する。
-    Returns: {"added": [...], "removed": [...], "skipped": int}
+    Returns: {"added": [...], "removed": [...], "skipped": int, "scores": {ticker: score}}
     """
     settings = load_settings()
     if not settings["enabled"]:
         if verbose:
             print("[自動ウォッチリスト] 無効（設定でONにしてください）")
-        return {"added": [], "removed": [], "skipped": 0}
+        return {"added": [], "removed": [], "skipped": 0, "scores": {}}
 
     watchlist = load_watchlist()
     state = _load_state()
@@ -95,6 +95,7 @@ def run_auto_watchlist(verbose: bool = True) -> dict:
     added = []
     removed = []
     skipped = 0
+    scores = {}  # ticker → score の記録
 
     if verbose:
         print(f"[自動ウォッチリスト] {len(universe_tickers)}銘柄をスキャン中...")
@@ -106,6 +107,7 @@ def run_auto_watchlist(verbose: bool = True) -> dict:
             sigs = evaluate_signals(df)
             verdict, score = overall_signal(sigs, df=df)
 
+            scores[ticker] = {"verdict": verdict, "score": score}
             if verbose:
                 print(f"  {ticker}: {verdict} score={score:+d}")
 
@@ -150,4 +152,4 @@ def run_auto_watchlist(verbose: bool = True) -> dict:
         print(f"\n[自動ウォッチリスト] 完了: +{len(added)}件追加 / -{len(removed)}件削除")
         print(f"  現在のウォッチリスト（{len(watchlist)}銘柄）: {watchlist}")
 
-    return {"added": added, "removed": removed, "skipped": skipped}
+    return {"added": added, "removed": removed, "skipped": skipped, "scores": scores}
