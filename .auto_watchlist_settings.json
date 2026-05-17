@@ -1,0 +1,11 @@
+{
+  "enabled": true,
+  "categories": [
+    "🇯🇵 日本株メジャー"
+  ],
+  "add_score_threshold": 3,
+  "remove_score_threshold": -2,
+  "remove_consecutive_days": 3,
+  "max_watchlist_size": 20,
+  "protected_tickers": []
+}
