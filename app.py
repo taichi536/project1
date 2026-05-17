@@ -2843,20 +2843,25 @@ elif page == "🤖 自動売買":
                     "max_watchlist_size": max_size,
                     "protected_tickers": protected,
                 })
-                with st.spinner(f"{n_targets}銘柄をスキャン中... しばらくお待ちください"):
-                    result = run_auto_watchlist(verbose=False)
-                # スキャン後にenabledを元に戻す
-                aw_save({"enabled": aw_enabled})
-                if result["added"] or result["removed"]:
-                    if result["added"]:
-                        st.success(f"✅ 追加: {', '.join(result['added'])}（{len(result['added'])}銘柄）")
-                    if result["removed"]:
-                        st.warning(f"❌ 削除: {', '.join(result['removed'])}（{len(result['removed'])}銘柄）")
-                else:
-                    st.info("変更なし。現在のウォッチリストの銘柄はシグナルが安定しています。")
-                if result["skipped"] > 0:
-                    st.caption(f"ウォッチリスト上限のため{result['skipped']}銘柄をスキップしました")
-                st.rerun()
+                progress_text = st.empty()
+                try:
+                    with st.spinner(f"{n_targets}銘柄をスキャン中... しばらくお待ちください"):
+                        result = run_auto_watchlist(verbose=False)
+                    aw_save({"enabled": aw_enabled})
+                    if result["added"] or result["removed"]:
+                        if result["added"]:
+                            st.success(f"✅ 追加: {', '.join(result['added'])}（{len(result['added'])}銘柄）")
+                        if result["removed"]:
+                            st.warning(f"❌ 削除: {', '.join(result['removed'])}（{len(result['removed'])}銘柄）")
+                    else:
+                        st.info("変更なし。現在のウォッチリストの銘柄はシグナルが安定しています。")
+                    if result["skipped"] > 0:
+                        st.caption(f"ウォッチリスト上限のため{result['skipped']}銘柄をスキップしました")
+                    st.rerun()
+                except Exception as e:
+                    aw_save({"enabled": aw_enabled})
+                    st.error(f"スキャン中にエラーが発生しました: {e}")
+                    st.code(str(e), language="text")
 
 
 # ─── トレードガイド ───────────────────────────────────────────────────────────
