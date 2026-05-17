@@ -356,13 +356,24 @@ function extractBasicInfo(cardEl) {
   // 会社名を抽出
   let company = '';
   if (getPlatform() === 'rds') {
-    // RDS: '現職'/'前職' の直後の行が会社名（「株式会社〇〇／職種」形式の場合は「／」前を使用）
+    // RDS: '現職'/'前職' の後の行から会社名を探す（ノイズ行はスキップ）
     const idx = lines.findIndex(l => l === '現職' || l === '前職');
-    if (idx >= 0 && idx + 1 < lines.length) {
-      company = lines[idx + 1].split(/[／/]/)[0].trim();
-    } else {
+    if (idx >= 0) {
+      const noisePatterns = [
+        /^スカウト履歴/, /^他\d+/, /^\d+〜\d+万円/, /^\d+万円/,
+        /^\d+社経験/, /^\d+歳$/, /^レジュメ更新/, /^会員ID/,
+      ];
+      for (let i = idx + 1; i < lines.length && i < idx + 5; i++) {
+        const line = lines[i];
+        if (!line || line.length < 2) continue;
+        if (noisePatterns.some(p => p.test(line))) continue;
+        company = line.split(/[／/]/)[0].trim();
+        break;
+      }
+    }
+    if (!company) {
       // フォールバック：株式会社などを含む行
-      company = lines.find(l => /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,/.test(l)) || '';
+      company = lines.find(l => /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,/.test(l))?.split(/[／/]/)[0].trim() || '';
     }
   } else {
     company = lines[0] || '';
