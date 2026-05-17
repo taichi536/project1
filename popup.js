@@ -15,6 +15,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   Array.from(posSel.options).forEach(opt => {
     currentPosSel.appendChild(new Option(opt.text, opt.value || opt.text));
   });
+
+  // ポジション一覧を chrome.storage に保存（content.js からメール本文照合に使用）
+  const positionList = Array.from(posSel.options).map(o => o.text.trim()).filter(Boolean);
+  chrome.storage.local.set({ positionList });
   if (result.currentPosition) {
     posSel.value = result.currentPosition;
     currentPosSel.value = result.currentPosition;

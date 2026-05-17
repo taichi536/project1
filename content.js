@@ -410,20 +410,32 @@ document.addEventListener('click', e => {
       console.log('[Snow-we] candidateId が取得できなかったため保存スキップ');
     }
   } else if (text === '確認') {
-    // 「確認」クリック時：テンプレート名をDOMから読み取ってpendingScoutに追記
+    // 「確認」クリック時：メール本文とポジション一覧を照合してポジション名を特定
     const raw = sessionStorage.getItem('pendingScout');
     if (!raw) return;
     try {
       const pending = JSON.parse(raw);
-      // UI共通ワード以外で10文字以上のボタン/リンクテキストをテンプレート名候補とする
-      const skipWords = new Set(['確認','キャンセル','編集','保存','閉じる','テンプレートを呼び出す','求人票名を挿入','直近の会社名を挿入','未評価に戻す']);
-      const templateName = Array.from(document.querySelectorAll('button, a'))
-        .map(el => el.innerText.trim())
-        .find(t => t.length >= 8 && !skipWords.has(t) && !/^[A-Z]$/.test(t));
-      if (templateName) {
-        pending.templateName = templateName;
+
+      // メール本文テキストを取得（textarea または contenteditable）
+      const bodyEl = document.querySelector('textarea') ||
+                     document.querySelector('[contenteditable="true"]');
+      const bodyText = bodyEl ? bodyEl.value || bodyEl.innerText || '' : document.body.innerText;
+
+      // chrome.storage からポジション一覧を取得して本文と照合
+      const { positionList } = await chrome.storage.local.get('positionList');
+      let matched = '';
+      if (positionList && positionList.length > 0) {
+        // 長いポジション名から優先照合（部分一致）
+        const sorted = [...positionList].sort((a, b) => b.length - a.length);
+        matched = sorted.find(p => p && bodyText.includes(p)) || '';
+      }
+
+      if (matched) {
+        pending.templateName = matched;
         sessionStorage.setItem('pendingScout', JSON.stringify(pending));
-        console.log('[Snow-we] テンプレート名保存:', templateName);
+        console.log('[Snow-we] ポジション照合成功:', matched);
+      } else {
+        console.log('[Snow-we] ポジション照合できず（本文にポジション名が見つかりません）');
       }
     } catch (_) {}
 
