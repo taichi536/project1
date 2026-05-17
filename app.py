@@ -2547,20 +2547,36 @@ elif page == "🤖 自動売買":
         st.markdown("#### 現在のポジション")
         positions = status["positions"]
         if positions:
-            pos_df = pd.DataFrame(positions)
-            pos_df.columns = ["銘柄", "保有株数", "平均取得価格", "時価評価額", "含み損益"]
-            pos_df["含み損益"] = pos_df["含み損益"].apply(
-                lambda x: f"+{x:,.0f}" if x > 0 else f"{x:,.0f}"
-            )
-            st.dataframe(pos_df, use_container_width=True, hide_index=True)
-            total_val = sum(p["market_value"] for p in positions)
-            total_pnl = sum(p["unrealized_pnl"] for p in positions)
-            pnl_color = "#26a69a" if total_pnl >= 0 else "#ef5350"
+            # 現在値を取得して時価・含み損益を更新
+            from modules.data_fetcher import fetch_realtime_price
+            updated_positions = []
+            for p in positions:
+                try:
+                    rt = fetch_realtime_price(p["ticker"])
+                    current_price = rt.get("price") or p["avg_price"]
+                except Exception:
+                    current_price = p["avg_price"]
+                market_val = p["qty"] * current_price
+                unrealized = market_val - p["qty"] * p["avg_price"]
+                updated_positions.append({
+                    "銘柄": p["ticker"],
+                    "保有株数": int(p["qty"]),
+                    "平均取得価格": f"{p['avg_price']:,.1f}",
+                    "現在値": f"{current_price:,.1f}",
+                    "時価評価額": f"{market_val:,.0f}",
+                    "含み損益": f"{'+' if unrealized>=0 else ''}{unrealized:,.0f}",
+                })
+            st.dataframe(pd.DataFrame(updated_positions), use_container_width=True, hide_index=True)
+
+            total_val = sum(p["qty"] * (fetch_realtime_price(p["ticker"]).get("price") or p["avg_price"])
+                           for p in positions)
+            total_pnl = total_val - sum(p["qty"] * p["avg_price"] for p in positions)
             m1, m2, m3 = st.columns(3)
             m1.metric("時価評価額合計", f"{total_val:,.0f}円")
             m1.metric("含み損益合計", f"{'+' if total_pnl>=0 else ''}{total_pnl:,.0f}円")
             m2.metric("現金残高", f"{status['cash']:,.0f}円")
-            m3.metric("総資産（概算）", f"{status['cash']+total_val:,.0f}円")
+            m3.metric("総資産", f"{status['cash']+total_val:,.0f}円",
+                      delta=f"{'+' if (status['cash']+total_val-1_000_000)>=0 else ''}{status['cash']+total_val-1_000_000:,.0f}円")
         else:
             st.info("現在保有中のポジションはありません。")
 
@@ -2594,9 +2610,11 @@ elif page == "🤖 自動売買":
         else:
             # ── 売買ペアを組み合わせてP&L計算 ──────────────────────────────
             buys = {}   # ticker → [{"price", "qty", "timestamp"}]
-            trades_closed = []  # 決済済みトレード
-            cash_curve = [{"timestamp": log_raw[0]["timestamp"], "cash": INITIAL_CASH}]
+            trades_closed = []
+            # 総資産推移: 現金 + 保有株のコスト（過去点）、現在値（最終点）
             running_cash = INITIAL_CASH
+            running_positions = {}  # ticker → {qty, avg_price}
+            asset_curve = [{"timestamp": log_raw[0]["timestamp"], "total": INITIAL_CASH}]
 
             for entry in sorted(log_raw, key=lambda x: x["timestamp"]):
                 ticker = entry["ticker"]
@@ -2607,7 +2625,10 @@ elif page == "🤖 自動売買":
                 if entry["side"] == "buy":
                     buys.setdefault(ticker, []).append({"price": price, "qty": qty, "timestamp": ts})
                     running_cash -= price * qty
-                    cash_curve.append({"timestamp": ts, "cash": running_cash})
+                    pos = running_positions.get(ticker, {"qty": 0, "avg_price": price})
+                    new_qty = pos["qty"] + qty
+                    new_avg = (pos["qty"] * pos["avg_price"] + qty * price) / new_qty
+                    running_positions[ticker] = {"qty": new_qty, "avg_price": new_avg}
 
                 elif entry["side"] == "sell":
                     buy_list = buys.get(ticker, [])
@@ -2616,28 +2637,29 @@ elif page == "🤖 自動売買":
                         b = buy_list[0]
                         matched = min(b["qty"], remaining_sell)
                         pnl = (price - b["price"]) * matched
-                        hold_days = (
-                            pd.Timestamp(ts) - pd.Timestamp(b["timestamp"])
-                        ).days
+                        hold_days = (pd.Timestamp(ts) - pd.Timestamp(b["timestamp"])).days
                         trades_closed.append({
-                            "銘柄": ticker,
-                            "買値": b["price"],
-                            "売値": price,
-                            "株数": matched,
-                            "損益": pnl,
-                            "保有日数": hold_days,
-                            "勝敗": "勝" if pnl > 0 else "負",
-                            "決済日時": ts,
+                            "銘柄": ticker, "買値": b["price"], "売値": price,
+                            "株数": matched, "損益": pnl, "保有日数": hold_days,
+                            "勝敗": "勝" if pnl > 0 else "負", "決済日時": ts,
                         })
                         b["qty"] -= matched
                         remaining_sell -= matched
                         if b["qty"] == 0:
                             buy_list.pop(0)
                     running_cash += price * qty
-                    cash_curve.append({"timestamp": ts, "cash": running_cash})
+                    pos = running_positions.get(ticker, {"qty": 0, "avg_price": 0})
+                    new_qty = pos["qty"] - qty
+                    if new_qty <= 0:
+                        running_positions.pop(ticker, None)
+                    else:
+                        running_positions[ticker] = {"qty": new_qty, "avg_price": pos["avg_price"]}
 
-            # 総資産（現金 + 含み）
-            total_unrealized = sum(p["unrealized_pnl"] for p in status["positions"])
+                # 各取引時点の総資産 = 現金 + 保有株コスト（近似）
+                stock_value = sum(p["qty"] * p["avg_price"] for p in running_positions.values())
+                asset_curve.append({"timestamp": ts, "total": running_cash + stock_value})
+
+            # 現在の総資産（現金 + 実際の時価）
             total_assets = status["cash"] + sum(p["market_value"] for p in status["positions"])
 
             # ── サマリー指標 ──────────────────────────────────────────────
@@ -2680,19 +2702,19 @@ elif page == "🤖 自動売買":
             st.markdown("---")
 
             # ── 資産推移グラフ ────────────────────────────────────────────
-            st.markdown("##### 資産推移")
-            curve_df = pd.DataFrame(cash_curve)
-            # 現在の総資産を末尾に追加
+            st.markdown("##### 資産推移（現金＋保有株時価）")
+            curve_df = pd.DataFrame(asset_curve)
+            # 現在の総資産（実際の時価）を末尾に追加
             curve_df = pd.concat([
                 curve_df,
                 pd.DataFrame([{"timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
-                               "cash": total_assets}])
+                               "total": total_assets}])
             ], ignore_index=True)
             curve_df["timestamp"] = pd.to_datetime(curve_df["timestamp"])
 
             fig_curve = go.Figure()
             fig_curve.add_trace(go.Scatter(
-                x=curve_df["timestamp"], y=curve_df["cash"],
+                x=curve_df["timestamp"], y=curve_df["total"],
                 mode="lines+markers",
                 line=dict(color="#26a69a", width=2),
                 marker=dict(size=6),
