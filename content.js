@@ -809,9 +809,25 @@ async function triggerAutoAdd() {
   await saveAutoAddProgress({ running: false });
 }
 
-// -------------------------------------------------------
-// プロフィール全文取得（プラットフォーム別）
-// -------------------------------------------------------
+// RDSのプロフィール/レジュメタブに切り替える
+async function tryClickRDSResumeTab() {
+  const tabLabels = ['レジュメ', 'プロフィール', '基本情報', '職務経歴'];
+  for (const label of tabLabels) {
+    const tab = Array.from(document.querySelectorAll('button, [role="tab"], li, span, a'))
+      .find(el => {
+        const t = (el.innerText || '').trim();
+        return t === label || t.startsWith(label);
+      });
+    if (tab) {
+      tab.click();
+      await sleep(700);
+      return true;
+    }
+  }
+  return false;
+}
+
+
 async function getFullProfile(cardEl, fallbackText) {
   const platform = getPlatform();
 
@@ -1703,6 +1719,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       try {
         const isRDS = location.hostname.includes('rikunabi') || location.hostname.includes('hrtech');
         if (isRDS) {
+          // スカウト履歴タブが表示されている場合はレジュメタブに切り替える
+          const panel = findRDSDetailPanel();
+          const panelText = (panel?.innerText || '').trim();
+          if (panelText.startsWith('スカウト履歴') || panelText.startsWith('スカウト送信')) {
+            await tryClickRDSResumeTab();
+          }
           await scrollModalToBottom();
         } else {
           await scrollRightPanelToBottom();
