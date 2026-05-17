@@ -8,11 +8,29 @@ const $ = id => document.getElementById(id);
 document.addEventListener('DOMContentLoaded', async () => {
   const result = await chrome.storage.local.get(['apiKey', 'currentPosition']);
   if (result.apiKey) $('api-key').value = result.apiKey;
-  if (result.currentPosition) $('position-select').value = result.currentPosition;
 
-  // ポジション変更時にstorageへ保存（content.jsのスカウト記録で使用）
-  $('position-select').addEventListener('change', () => {
-    chrome.storage.local.set({ currentPosition: $('position-select').value });
+  // 「送信ポジション」セレクタを position-select と同じ選択肢で初期化
+  const currentPosSel = $('current-position-select');
+  const posSel = $('position-select');
+  Array.from(posSel.options).forEach(opt => {
+    currentPosSel.appendChild(new Option(opt.text, opt.value || opt.text));
+  });
+  if (result.currentPosition) {
+    posSel.value = result.currentPosition;
+    currentPosSel.value = result.currentPosition;
+  }
+
+  // 上部セレクタ変更 → currentPosition 保存 & 隠しセレクタも同期
+  currentPosSel.addEventListener('change', () => {
+    const val = currentPosSel.value;
+    posSel.value = val;
+    chrome.storage.local.set({ currentPosition: val });
+  });
+
+  // 隠しセレクタ変更時も上部セレクタと同期
+  posSel.addEventListener('change', () => {
+    currentPosSel.value = posSel.value;
+    chrome.storage.local.set({ currentPosition: posSel.value });
   });
 
   // タブ切り替え
