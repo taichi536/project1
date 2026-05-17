@@ -357,34 +357,25 @@ function extractBasicInfo(cardEl) {
   let company = '';
   if (getPlatform() === 'rds') {
     const idx = lines.findIndex(l => l === '現職' || l === '前職');
-    const noisePatterns = [
-      /^スカウト履歴/, /^他\d+/, /^\d+〜\d+万円/, /^\d+万円/,
-      /^\d+社経験/, /^\d+歳$/, /^レジュメ更新/, /^会員ID/,
-      /^\d{4}\/\d{2}/, /^最終ログイン/, /^神奈川県|東京都|大阪府|[^\s]{2,3}[都道府県]/,
-    ];
+    const companyRe = /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,|ホールディングス|グループ|銀行|証券|保険|大学|病院/;
     if (idx >= 0) {
-      // 現職/前職の後を探す
-      for (let i = idx + 1; i < lines.length && i < idx + 5; i++) {
+      // 現職/前職の前後5行で、会社名キーワードを含む最も近い行を使う
+      let bestLine = '';
+      let bestDist = Infinity;
+      for (let i = Math.max(0, idx - 5); i < Math.min(lines.length, idx + 5); i++) {
+        if (i === idx) continue;
         const line = lines[i];
         if (!line || line.length < 2) continue;
-        if (noisePatterns.some(p => p.test(line))) continue;
-        company = line.split(/[／/]/)[0].trim();
-        break;
-      }
-      // 後に見つからなければ前を探す
-      if (!company) {
-        for (let i = idx - 1; i >= 0 && i > idx - 5; i--) {
-          const line = lines[i];
-          if (!line || line.length < 2) continue;
-          if (noisePatterns.some(p => p.test(line))) continue;
-          company = line.split(/[／/]/)[0].trim();
-          break;
+        if (companyRe.test(line) || (line.includes('／') && line.length > 4)) {
+          const dist = Math.abs(i - idx);
+          if (dist < bestDist) { bestDist = dist; bestLine = line; }
         }
       }
+      if (bestLine) company = bestLine.split(/[／/]/)[0].trim();
     }
     if (!company) {
-      // フォールバック：株式会社などを含む行
-      company = lines.find(l => /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,/.test(l))?.split(/[／/]/)[0].trim() || '';
+      // フォールバック：ページ全体で会社名キーワードを含む行
+      company = lines.find(l => companyRe.test(l))?.split(/[／/]/)[0].trim() || '';
     }
   } else {
     company = lines[0] || '';
