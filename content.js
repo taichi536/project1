@@ -359,27 +359,35 @@ document.addEventListener('click', e => {
   const text = (btn.innerText || '').trim();
   if (text !== 'スカウト' && !text.includes('スカウトを送る') && !text.includes('スカウトする')) return;
 
+  console.log('[Snow-we] スカウト系ボタン検知:', JSON.stringify(text));
+
   const cards = findCandidateCardsByPlatform();
   let card = cards.find(c => c.contains(btn) || c === btn.closest('[class*="card"],[class*="row"],li,article'));
   if (!card && _selectedCard) card = _selectedCard;
 
+  console.log('[Snow-we] カード検出:', card ? 'あり' : 'なし', '/ _selectedCard:', _selectedCard ? 'あり' : 'なし', '/ カード総数:', cards.length);
+
   if (card) {
     // 1回目クリック（候補者一覧/モーダル画面）
-    // sessionStorageに同期で保存（ページ遷移前に確実に完了）
     const id = getCandidateId(card);
+    console.log('[Snow-we] 1回目クリック candidateId:', id);
     if (id) {
       sessionStorage.setItem('pendingScout', JSON.stringify({
         id, info: extractBasicInfo(card), ts: Date.now()
       }));
+      console.log('[Snow-we] pendingScout を sessionStorage に保存しました');
+    } else {
+      console.log('[Snow-we] candidateId が取得できなかったため保存スキップ');
     }
   } else {
     // 2回目クリック（テンプレ選択画面）：その場で即座に記録
-    // RDSはSPAのためページリロードが発生しない→ページロード時のIIFEは使えない
     const raw = sessionStorage.getItem('pendingScout');
+    console.log('[Snow-we] 2回目クリック / pendingScout:', raw ? 'あり' : 'なし');
     if (raw) {
       try {
         const pending = JSON.parse(raw);
         if (pending && pending.id && Date.now() - pending.ts < 30 * 60 * 1000) {
+          console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id);
           recordScoutSent(pending.id, pending.info || {});
         }
       } catch (_) {}
