@@ -457,7 +457,13 @@ document.addEventListener('click', e => {
           console.log('[Snow-we] ポジション一覧件数:', positionList.length, '/ 先頭3件:', positionList.slice(0, 3));
           console.log('[Snow-we] メール本文先頭200字:', bodyText.substring(0, 200));
           const sorted = [...positionList].sort((a, b) => b.length - a.length);
-          matched = sorted.find(p => p && bodyText.includes(p)) || '';
+          // 完全一致 → カッコ/ハイフン前のコア部分で照合
+          matched = sorted.find(p => {
+            if (!p) return false;
+            if (bodyText.includes(p)) return true;
+            const core = p.split(/[（(【]/)[0].split(/\s[-–—]\s|\s[-–—]$/)[0].trim();
+            return core.length >= 6 && bodyText.includes(core);
+          }) || '';
         } catch (_) {}
 
         if (matched) {
