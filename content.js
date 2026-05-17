@@ -421,14 +421,14 @@ document.addEventListener('click', e => {
                      document.querySelector('[contenteditable="true"]');
       const bodyText = bodyEl ? bodyEl.value || bodyEl.innerText || '' : document.body.innerText;
 
-      // chrome.storage からポジション一覧を取得して本文と照合
-      const { positionList } = await chrome.storage.local.get('positionList');
+      // background.js からポジション一覧を取得して本文と照合
       let matched = '';
-      if (positionList && positionList.length > 0) {
-        // 長いポジション名から優先照合（部分一致）
+      try {
+        const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+        const positionList = res?.positions || [];
         const sorted = [...positionList].sort((a, b) => b.length - a.length);
         matched = sorted.find(p => p && bodyText.includes(p)) || '';
-      }
+      } catch (_) {}
 
       if (matched) {
         pending.templateName = matched;

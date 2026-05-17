@@ -9,16 +9,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const result = await chrome.storage.local.get(['apiKey', 'currentPosition']);
   if (result.apiKey) $('api-key').value = result.apiKey;
 
-  // 「送信ポジション」セレクタを position-select と同じ選択肢で初期化
+  // background.js からポジション一覧を取得してセレクタを初期化
   const currentPosSel = $('current-position-select');
   const posSel = $('position-select');
-  Array.from(posSel.options).forEach(opt => {
-    currentPosSel.appendChild(new Option(opt.text, opt.value || opt.text));
+  const { positions } = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+  (positions || []).forEach(name => {
+    const opt = new Option(name, name);
+    posSel.appendChild(opt);
+    currentPosSel.appendChild(new Option(name, name));
   });
-
-  // ポジション一覧を chrome.storage に保存（content.js からメール本文照合に使用）
-  const positionList = Array.from(posSel.options).map(o => o.text.trim()).filter(Boolean);
-  chrome.storage.local.set({ positionList });
   if (result.currentPosition) {
     posSel.value = result.currentPosition;
     currentPosSel.value = result.currentPosition;
