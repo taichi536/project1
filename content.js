@@ -1651,13 +1651,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     (async () => {
       try {
         const isRDS = location.hostname.includes('rikunabi') || location.hostname.includes('hrtech');
-        // RDSは中央モーダルのためscrollModalToBottom、それ以外は右パネルスクロール
         if (isRDS) {
           await scrollModalToBottom();
         } else {
           await scrollRightPanelToBottom();
         }
         const profileText = extractProfile();
+        const panel = findRDSDetailPanel();
+        console.log('[Snow-we] extractProfile 結果:', profileText.length, '文字');
+        console.log('[Snow-we] detailPanel:', panel ? `あり (${(panel.innerText||'').trim().length}文字)` : 'なし');
+        console.log('[Snow-we] プロフィール先頭100文字:', profileText.substring(0, 100));
 
         // RDSで候補者が未選択（テキストが極端に短い）場合のみ選択を促す
         const looksEmpty = profileText.trim().length < 50;
