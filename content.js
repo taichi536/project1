@@ -392,59 +392,64 @@ document.addEventListener('click', e => {
   const btn = e.target.closest('button, a');
   if (!btn) return;
   const text = (btn.innerText || '').trim();
-  if (text !== 'スカウト' && text !== '確認' && text !== '送信' && text !== '送信する' && !text.includes('スカウトを送る') && !text.includes('スカウトする')) return;
+
+  const isScoutBtn   = text === 'スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする');
+  const isConfirmBtn = text === '確認';
+  const isSendBtn    = text === '送信' || text === '送信する';
+  if (!isScoutBtn && !isConfirmBtn && !isSendBtn) return;
 
   console.log('[Snow-we] スカウト系ボタン検知:', JSON.stringify(text));
 
-  const cards = findCandidateCardsByPlatform();
-  let card = cards.find(c => c.contains(btn) || c === btn.closest('[class*="card"],[class*="row"],li,article'));
+  // ── スカウトボタン：候補者カードを特定して保存 ──
+  if (isScoutBtn) {
+    const cards = findCandidateCardsByPlatform();
+    let card = cards.find(c => c.contains(btn) || c === btn.closest('[class*="card"],[class*="row"],li,article'));
 
-  // 「スカウト」ボタンのみ：カードが見つからない場合はボタンに最も近いカードを位置で探す
-  if (!card && text === 'スカウト') {
-    if (_selectedCard) {
-      card = _selectedCard;
-    } else {
-      const btnRect = btn.getBoundingClientRect();
-      const btnCenter = btnRect.top + btnRect.height / 2;
-      let minDist = Infinity;
-      for (const c of cards) {
-        const r = c.getBoundingClientRect();
-        const dist = Math.abs((r.top + r.height / 2) - btnCenter);
-        if (dist < minDist) { minDist = dist; card = c; }
+    if (!card) {
+      if (_selectedCard) {
+        card = _selectedCard;
+      } else {
+        const btnRect = btn.getBoundingClientRect();
+        const btnCenter = btnRect.top + btnRect.height / 2;
+        let minDist = Infinity;
+        for (const c of cards) {
+          const r = c.getBoundingClientRect();
+          const dist = Math.abs((r.top + r.height / 2) - btnCenter);
+          if (dist < minDist) { minDist = dist; card = c; }
+        }
+        if (minDist > 300) card = null;
       }
-      if (minDist > 300) card = null; // 300px 以上離れていたら無視
     }
+
+    console.log('[Snow-we] カード検出:', card ? 'あり' : 'なし', '/ _selectedCard:', _selectedCard ? 'あり' : 'なし', '/ カード総数:', cards.length);
+
+    if (card) {
+      const id = getCandidateId(card);
+      console.log('[Snow-we] 1回目クリック candidateId:', id);
+      console.log('[Snow-we] カードテキスト行:', (card.innerText || '').split('\n').map(l=>l.trim()).filter(Boolean).slice(0,10));
+      if (id) {
+        sessionStorage.setItem('pendingScout', JSON.stringify({
+          id, info: extractBasicInfo(card), ts: Date.now()
+        }));
+        console.log('[Snow-we] pendingScout を sessionStorage に保存しました');
+      } else {
+        console.log('[Snow-we] candidateId が取得できなかったため保存スキップ');
+      }
+    }
+    return;
   }
 
-  console.log('[Snow-we] カード検出:', card ? 'あり' : 'なし', '/ _selectedCard:', _selectedCard ? 'あり' : 'なし', '/ カード総数:', cards.length);
-
-  if (card) {
-    // 1回目クリック（候補者一覧/モーダル画面）
-    const id = getCandidateId(card);
-    console.log('[Snow-we] 1回目クリック candidateId:', id);
-    console.log('[Snow-we] カードテキスト行:', (card.innerText || '').split('\n').map(l=>l.trim()).filter(Boolean).slice(0,10));
-    if (id) {
-      sessionStorage.setItem('pendingScout', JSON.stringify({
-        id, info: extractBasicInfo(card), ts: Date.now()
-      }));
-      console.log('[Snow-we] pendingScout を sessionStorage に保存しました');
-    } else {
-      console.log('[Snow-we] candidateId が取得できなかったため保存スキップ');
-    }
-  } else if (text === '確認') {
-    // 「確認」クリック時：メール本文とポジション一覧を照合してポジション名を特定
+  // ── 確認ボタン：メール本文からポジションを照合 ──
+  if (isConfirmBtn) {
     const raw = sessionStorage.getItem('pendingScout');
     if (!raw) return;
     (async () => {
       try {
         const pending = JSON.parse(raw);
-
-        // メール本文テキストを取得（textarea または contenteditable）
         const bodyEl = document.querySelector('textarea') ||
                        document.querySelector('[contenteditable="true"]');
         const bodyText = bodyEl ? bodyEl.value || bodyEl.innerText || '' : document.body.innerText;
 
-        // background.js からポジション一覧を取得して本文と照合
         let matched = '';
         try {
           const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
@@ -462,21 +467,21 @@ document.addEventListener('click', e => {
         }
       } catch (_) {}
     })();
+    return;
+  }
 
-  } else {
-    // 「送信」「送信する」クリック時：記録
-    const raw = sessionStorage.getItem('pendingScout');
-    console.log('[Snow-we] 送信クリック / pendingScout:', raw ? 'あり' : 'なし');
-    if (raw) {
-      try {
-        const pending = JSON.parse(raw);
-        if (pending && pending.id && Date.now() - pending.ts < 30 * 60 * 1000) {
-          console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし');
-          recordScoutSent(pending.id, pending.info || {}, pending.templateName || '');
-        }
-      } catch (_) {}
-      sessionStorage.removeItem('pendingScout');
-    }
+  // ── 送信ボタン：スカウト記録 ──
+  const raw = sessionStorage.getItem('pendingScout');
+  console.log('[Snow-we] 送信クリック / pendingScout:', raw ? 'あり' : 'なし');
+  if (raw) {
+    try {
+      const pending = JSON.parse(raw);
+      if (pending && pending.id && Date.now() - pending.ts < 30 * 60 * 1000) {
+        console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし');
+        recordScoutSent(pending.id, pending.info || {}, pending.templateName || '');
+      }
+    } catch (_) {}
+    sessionStorage.removeItem('pendingScout');
   }
 }, true);
 
