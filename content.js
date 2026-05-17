@@ -356,10 +356,14 @@ function extractBasicInfo(cardEl) {
   // 会社名を抽出
   let company = '';
   if (getPlatform() === 'rds') {
-    // RDS: '現職'/'前職' の直前の行が会社名
+    // RDS: '現職'/'前職' の直前の行が会社名（「他X種」などのノイズ行はスキップ）
     const idx = lines.findIndex(l => l === '現職' || l === '前職');
     if (idx > 0) {
-      company = lines[idx - 1];
+      let companyIdx = idx - 1;
+      while (companyIdx > 0 && /^他\d+種$/.test(lines[companyIdx])) {
+        companyIdx--;
+      }
+      company = lines[companyIdx] || '';
     } else {
       // フォールバック：株式会社などを含む行
       company = lines.find(l => /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,/.test(l)) || '';
