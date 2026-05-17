@@ -410,9 +410,15 @@ document.addEventListener('click', e => {
       console.log('[Snow-we] candidateId が取得できなかったため保存スキップ');
     }
   } else {
-    // 2回目クリック（テンプレ選択画面）：その場で即座に記録
+    // 2回目クリック（送信ボタン）：テンプレート名を読んでポジションとして記録
     const raw = sessionStorage.getItem('pendingScout');
     console.log('[Snow-we] 2回目クリック / pendingScout:', raw ? 'あり' : 'なし');
+
+    // テンプレート名をDOMから取得（デバッグ用に全候補を出力）
+    const allText = Array.from(document.querySelectorAll('h1,h2,h3,h4,[class*="title"],[class*="template"],[class*="subject"],[class*="name"]'))
+      .map(el => el.innerText.trim()).filter(t => t && t.length > 2 && t.length < 100);
+    console.log('[Snow-we] テンプレート名候補:', allText.slice(0, 10));
+
     if (raw) {
       try {
         const pending = JSON.parse(raw);
