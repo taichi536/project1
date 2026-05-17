@@ -1,6 +1,7 @@
 // content.js v1.5.0
 // 各媒体のプロフィールページからテキストを抽出する
 
+
 // -------------------------------------------------------
 // プラットフォーム判定
 // -------------------------------------------------------
@@ -363,29 +364,37 @@ document.addEventListener('click', e => {
   if (!card && _selectedCard) card = _selectedCard;
 
   if (card) {
-    // 1回目クリック（候補者一覧/モーダル画面）：candidate情報をpendingとして即座に保存
+    // 1回目クリック（候補者一覧/モーダル画面）
+    // sessionStorageに同期で保存（ページ遷移前に確実に完了）
     const id = getCandidateId(card);
     if (id) {
-      const info = extractBasicInfo(card);
-      chrome.storage.local.set({
-        pendingScout: { id, info, ts: Date.now() }
-      });
+      sessionStorage.setItem('pendingScout', JSON.stringify({
+        id, info: extractBasicInfo(card), ts: Date.now()
+      }));
     }
   } else {
-    // 2回目クリック（テンプレ選択画面）：pendingを読んで記録
-    chrome.storage.local.get(['pendingScout'], r => {
-      const pending = r.pendingScout;
-      if (!pending || !pending.id) return;
-      if (Date.now() - pending.ts > 30 * 60 * 1000) {
-        // 30分以上前のpendingは無効
-        chrome.storage.local.remove('pendingScout');
-        return;
-      }
-      recordScoutSent(pending.id, pending.info);
-      chrome.storage.local.remove('pendingScout');
-    });
+    // 2回目クリック（テンプレ選択画面）：送信確定フラグを同期で記録
+    const pending = sessionStorage.getItem('pendingScout');
+    if (pending) {
+      sessionStorage.setItem('scoutSent', '1');
+    }
   }
 }, true);
+
+// ページロード時：scoutSent + pendingScout が両方あれば記録して消去
+(function checkPendingScout() {
+  try {
+    const pending = JSON.parse(sessionStorage.getItem('pendingScout') || 'null');
+    const sent    = sessionStorage.getItem('scoutSent');
+    if (pending && sent && pending.id) {
+      if (Date.now() - pending.ts < 30 * 60 * 1000) {
+        recordScoutSent(pending.id, pending.info || {});
+      }
+      sessionStorage.removeItem('pendingScout');
+      sessionStorage.removeItem('scoutSent');
+    }
+  } catch (_) {}
+})();
 
 // -------------------------------------------------------
 // 「さらに読み込む」ボタンを押して全候補者をDOMに展開
