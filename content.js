@@ -361,9 +361,23 @@ document.addEventListener('click', e => {
 
   const cards = findCandidateCardsByPlatform();
   let card = cards.find(c => c.contains(btn) || c === btn.closest('[class*="card"],[class*="row"],li,article'));
-  // 「スカウト」ボタンのみ _selectedCard フォールバックを使う
-  // 「確認」には使わない（モーダル確認ボタンが1回目扱いになるため）
-  if (!card && text === 'スカウト' && _selectedCard) card = _selectedCard;
+
+  // 「スカウト」ボタンのみ：カードが見つからない場合はボタンに最も近いカードを位置で探す
+  if (!card && text === 'スカウト') {
+    if (_selectedCard) {
+      card = _selectedCard;
+    } else {
+      const btnRect = btn.getBoundingClientRect();
+      const btnCenter = btnRect.top + btnRect.height / 2;
+      let minDist = Infinity;
+      for (const c of cards) {
+        const r = c.getBoundingClientRect();
+        const dist = Math.abs((r.top + r.height / 2) - btnCenter);
+        if (dist < minDist) { minDist = dist; card = c; }
+      }
+      if (minDist > 300) card = null; // 300px 以上離れていたら無視
+    }
+  }
 
   console.log('[Snow-we] カード検出:', card ? 'あり' : 'なし', '/ _selectedCard:', _selectedCard ? 'あり' : 'なし', '/ カード総数:', cards.length);
 
