@@ -341,6 +341,17 @@ function extractBasicInfo(cardEl) {
   if (univMatch) {
     univ = univMatch[1].replace(/[（(（].*/, '').replace(/[学部研究科].*$/, '大学').trim();
   }
+  // RDSはカード一覧に大学名が出ないため、右パネルからも取得を試みる
+  if (getPlatform() === 'rds' && !univ) {
+    const panel = findRDSDetailPanel();
+    if (panel) {
+      const panelText = panel.innerText || '';
+      const panelUnivMatch = panelText.match(/([^\s\n　]{1,20}(?:大学院|大学|高専|専門学校)(?:大学院?)?(?:[-－][^\s\n　]{1,10})?)/);
+      if (panelUnivMatch) {
+        univ = panelUnivMatch[1].replace(/[（(（].*/, '').replace(/[学部研究科].*$/, '大学').trim();
+      }
+    }
+  }
 
   // 会社名を抽出
   let company = '';
@@ -413,31 +424,33 @@ document.addEventListener('click', e => {
     // 「確認」クリック時：メール本文とポジション一覧を照合してポジション名を特定
     const raw = sessionStorage.getItem('pendingScout');
     if (!raw) return;
-    try {
-      const pending = JSON.parse(raw);
-
-      // メール本文テキストを取得（textarea または contenteditable）
-      const bodyEl = document.querySelector('textarea') ||
-                     document.querySelector('[contenteditable="true"]');
-      const bodyText = bodyEl ? bodyEl.value || bodyEl.innerText || '' : document.body.innerText;
-
-      // background.js からポジション一覧を取得して本文と照合
-      let matched = '';
+    (async () => {
       try {
-        const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
-        const positionList = res?.positions || [];
-        const sorted = [...positionList].sort((a, b) => b.length - a.length);
-        matched = sorted.find(p => p && bodyText.includes(p)) || '';
-      } catch (_) {}
+        const pending = JSON.parse(raw);
 
-      if (matched) {
-        pending.templateName = matched;
-        sessionStorage.setItem('pendingScout', JSON.stringify(pending));
-        console.log('[Snow-we] ポジション照合成功:', matched);
-      } else {
-        console.log('[Snow-we] ポジション照合できず（本文にポジション名が見つかりません）');
-      }
-    } catch (_) {}
+        // メール本文テキストを取得（textarea または contenteditable）
+        const bodyEl = document.querySelector('textarea') ||
+                       document.querySelector('[contenteditable="true"]');
+        const bodyText = bodyEl ? bodyEl.value || bodyEl.innerText || '' : document.body.innerText;
+
+        // background.js からポジション一覧を取得して本文と照合
+        let matched = '';
+        try {
+          const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+          const positionList = res?.positions || [];
+          const sorted = [...positionList].sort((a, b) => b.length - a.length);
+          matched = sorted.find(p => p && bodyText.includes(p)) || '';
+        } catch (_) {}
+
+        if (matched) {
+          pending.templateName = matched;
+          sessionStorage.setItem('pendingScout', JSON.stringify(pending));
+          console.log('[Snow-we] ポジション照合成功:', matched);
+        } else {
+          console.log('[Snow-we] ポジション照合できず（本文にポジション名が見つかりません）');
+        }
+      } catch (_) {}
+    })();
 
   } else {
     // 「送信」「送信する」クリック時：記録
