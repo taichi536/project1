@@ -370,7 +370,7 @@ document.addEventListener('click', e => {
   const btn = e.target.closest('button, a');
   if (!btn) return;
   const text = (btn.innerText || '').trim();
-  if (text !== 'スカウト' && text !== '確認' && text !== '送信する' && !text.includes('スカウトを送る') && !text.includes('スカウトする')) return;
+  if (text !== 'スカウト' && text !== '送信' && text !== '送信する' && !text.includes('スカウトを送る') && !text.includes('スカウトする')) return;
 
   console.log('[Snow-we] スカウト系ボタン検知:', JSON.stringify(text));
 
