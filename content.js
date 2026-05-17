@@ -262,7 +262,7 @@ async function getScoutHistory() {
   return r[SCOUT_KEY] || {};
 }
 
-async function recordScoutSent(candidateId, info) {
+async function recordScoutSent(candidateId, info, templateName) {
   if (!candidateId) return;
   const now = Date.now();
   const platform = getPlatform();
@@ -288,7 +288,7 @@ async function recordScoutSent(candidateId, info) {
       age: ageNum,
       univ: info.univ || '',
       media: platform,
-      position: r2.currentPosition || '',
+      position: templateName || r2.currentPosition || '',
       ts: now,
     };
 
@@ -370,7 +370,7 @@ document.addEventListener('click', e => {
   const btn = e.target.closest('button, a');
   if (!btn) return;
   const text = (btn.innerText || '').trim();
-  if (text !== 'スカウト' && text !== '送信' && text !== '送信する' && !text.includes('スカウトを送る') && !text.includes('スカウトする')) return;
+  if (text !== 'スカウト' && text !== '確認' && text !== '送信' && text !== '送信する' && !text.includes('スカウトを送る') && !text.includes('スカウトする')) return;
 
   console.log('[Snow-we] スカウト系ボタン検知:', JSON.stringify(text));
 
@@ -409,22 +409,34 @@ document.addEventListener('click', e => {
     } else {
       console.log('[Snow-we] candidateId が取得できなかったため保存スキップ');
     }
-  } else {
-    // 2回目クリック（送信ボタン）：テンプレート名を読んでポジションとして記録
+  } else if (text === '確認') {
+    // 「確認」クリック時：テンプレート名をDOMから読み取ってpendingScoutに追記
     const raw = sessionStorage.getItem('pendingScout');
-    console.log('[Snow-we] 2回目クリック / pendingScout:', raw ? 'あり' : 'なし');
+    if (!raw) return;
+    try {
+      const pending = JSON.parse(raw);
+      // UI共通ワード以外で10文字以上のボタン/リンクテキストをテンプレート名候補とする
+      const skipWords = new Set(['確認','キャンセル','編集','保存','閉じる','テンプレートを呼び出す','求人票名を挿入','直近の会社名を挿入','未評価に戻す']);
+      const templateName = Array.from(document.querySelectorAll('button, a'))
+        .map(el => el.innerText.trim())
+        .find(t => t.length >= 8 && !skipWords.has(t) && !/^[A-Z]$/.test(t));
+      if (templateName) {
+        pending.templateName = templateName;
+        sessionStorage.setItem('pendingScout', JSON.stringify(pending));
+        console.log('[Snow-we] テンプレート名保存:', templateName);
+      }
+    } catch (_) {}
 
-    // テンプレート名をDOMから取得（デバッグ用に全候補を出力）
-    const allText = Array.from(document.querySelectorAll('h1,h2,h3,h4,[class*="title"],[class*="template"],[class*="subject"],[class*="name"]'))
-      .map(el => el.innerText.trim()).filter(t => t && t.length > 2 && t.length < 100);
-    console.log('[Snow-we] テンプレート名候補:', allText.slice(0, 10));
-
+  } else {
+    // 「送信」「送信する」クリック時：記録
+    const raw = sessionStorage.getItem('pendingScout');
+    console.log('[Snow-we] 送信クリック / pendingScout:', raw ? 'あり' : 'なし');
     if (raw) {
       try {
         const pending = JSON.parse(raw);
         if (pending && pending.id && Date.now() - pending.ts < 30 * 60 * 1000) {
-          console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id);
-          recordScoutSent(pending.id, pending.info || {});
+          console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし');
+          recordScoutSent(pending.id, pending.info || {}, pending.templateName || '');
         }
       } catch (_) {}
       sessionStorage.removeItem('pendingScout');
