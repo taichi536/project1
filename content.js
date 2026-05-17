@@ -335,16 +335,31 @@ function extractBasicInfo(cardEl) {
   const ageMatch = text.match(/(\d{2,3})歳/);
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
-  // 大学名を抽出（「〇〇大学」「〇〇大学院」「〇〇高専」のパターン）
+  // 大学名を抽出
   let univ = '';
   const univMatch = text.match(/([^\s\n　]{1,20}(?:大学院|大学|高専|専門学校)(?:大学院?)?(?:[-－][^\s\n　]{1,10})?)/);
   if (univMatch) {
     univ = univMatch[1].replace(/[（(（].*/, '').replace(/[学部研究科].*$/, '大学').trim();
   }
 
+  // 会社名を抽出
+  let company = '';
+  if (getPlatform() === 'rds') {
+    // RDS: '現職'/'前職' の直前の行が会社名
+    const idx = lines.findIndex(l => l === '現職' || l === '前職');
+    if (idx > 0) {
+      company = lines[idx - 1];
+    } else {
+      // フォールバック：株式会社などを含む行
+      company = lines.find(l => /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,/.test(l)) || '';
+    }
+  } else {
+    company = lines[0] || '';
+  }
+
   return {
     age: ageMatch ? `${ageMatch[1]}歳` : '',
-    company: lines[0] || '',
+    company,
     univ,
     name: '',
   };
