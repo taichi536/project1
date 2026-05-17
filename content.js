@@ -282,7 +282,7 @@ async function recordScoutSent(candidateId, info) {
   if (gas.url && gas.recruiter) {
     const ageNum = (info.age || '').replace(/[歳才]/, '');
     const payload = {
-      secret: gas.secret || 'snowwe2024',
+      secret: gas.secret,
       recruiter: gas.recruiter,
       company: info.company || '',
       age: ageNum,
@@ -292,12 +292,10 @@ async function recordScoutSent(candidateId, info) {
       ts: now,
     };
 
-    // 既存GAS（日付別シート）へ送信
-    fetch(gas.url, { method: 'POST', body: JSON.stringify(payload) }).catch(() => {});
-
-    // 新GAS（スカウト管理DB）へ送信
+    // バックグラウンド経由でGASへ送信（content.jsから直接fetchするとCORS/401になるため）
+    chrome.runtime.sendMessage({ type: 'gasPost', url: gas.url, payload });
     if (gas.dbUrl) {
-      fetch(gas.dbUrl, { method: 'POST', body: JSON.stringify(payload) }).catch(() => {});
+      chrome.runtime.sendMessage({ type: 'gasPost', url: gas.dbUrl, payload });
     }
   }
 }

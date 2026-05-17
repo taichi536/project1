@@ -33,6 +33,9 @@
     "https://*.hrtech.jp/*",
     "https://*.hrtech.rikunabi.com/*"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "パーソナライズ文を生成"
