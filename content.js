@@ -454,6 +454,8 @@ document.addEventListener('click', e => {
         try {
           const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
           const positionList = res?.positions || [];
+          console.log('[Snow-we] ポジション一覧件数:', positionList.length, '/ 先頭3件:', positionList.slice(0, 3));
+          console.log('[Snow-we] メール本文先頭200字:', bodyText.substring(0, 200));
           const sorted = [...positionList].sort((a, b) => b.length - a.length);
           matched = sorted.find(p => p && bodyText.includes(p)) || '';
         } catch (_) {}
