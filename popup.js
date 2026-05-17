@@ -139,7 +139,7 @@ $('settings-save-btn').addEventListener('click', async () => {
     recruiter: $('gas-recruiter').value,
     url: $('gas-url').value.trim(),
     dbUrl: $('gas-db-url').value.trim(),
-    secret: $('gas-secret').value.trim() || 'snowwe2024',
+    secret: $('gas-secret').value.trim(),
     positionUrl: $('position-gas-url').value.trim(),
   };
 
@@ -153,7 +153,7 @@ $('settings-save-btn').addEventListener('click', async () => {
 $('gas-test-btn').addEventListener('click', async () => {
   const url = $('gas-url').value.trim();
   const recruiter = $('gas-recruiter').value;
-  const secret = $('gas-secret').value.trim() || 'snowwe2024';
+  const secret = $('gas-secret').value.trim();
   const resultEl = $('gas-test-result');
   resultEl.style.display = 'block';
   resultEl.style.color = '#2c2c2a';
