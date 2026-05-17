@@ -357,15 +357,15 @@ document.addEventListener('click', e => {
   const btn = e.target.closest('button, a');
   if (!btn) return;
   const text = (btn.innerText || '').trim();
-  if (text !== 'スカウト' && !text.includes('スカウトを送る') && !text.includes('スカウトする')) return;
+  if (text !== 'スカウト' && text !== '確認' && !text.includes('スカウトを送る') && !text.includes('スカウトする')) return;
 
   console.log('[Snow-we] スカウト系ボタン検知:', JSON.stringify(text));
 
   const cards = findCandidateCardsByPlatform();
-  let card = cards.find(c => c.contains(btn) || c === btn.closest('[class*="card"],[class*="row"],li,article'));
-  if (!card && _selectedCard) card = _selectedCard;
+  // _selectedCard は使わない：モーダル内の「確認」ボタンが1回目扱いになるため
+  const card = cards.find(c => c.contains(btn) || c === btn.closest('[class*="card"],[class*="row"],li,article'));
 
-  console.log('[Snow-we] カード検出:', card ? 'あり' : 'なし', '/ _selectedCard:', _selectedCard ? 'あり' : 'なし', '/ カード総数:', cards.length);
+  console.log('[Snow-we] カード検出:', card ? 'あり' : 'なし', '/ カード総数:', cards.length);
 
   if (card) {
     // 1回目クリック（候補者一覧/モーダル画面）
