@@ -373,28 +373,20 @@ document.addEventListener('click', e => {
       }));
     }
   } else {
-    // 2回目クリック（テンプレ選択画面）：送信確定フラグを同期で記録
-    const pending = sessionStorage.getItem('pendingScout');
-    if (pending) {
-      sessionStorage.setItem('scoutSent', '1');
+    // 2回目クリック（テンプレ選択画面）：その場で即座に記録
+    // RDSはSPAのためページリロードが発生しない→ページロード時のIIFEは使えない
+    const raw = sessionStorage.getItem('pendingScout');
+    if (raw) {
+      try {
+        const pending = JSON.parse(raw);
+        if (pending && pending.id && Date.now() - pending.ts < 30 * 60 * 1000) {
+          recordScoutSent(pending.id, pending.info || {});
+        }
+      } catch (_) {}
+      sessionStorage.removeItem('pendingScout');
     }
   }
 }, true);
-
-// ページロード時：scoutSent + pendingScout が両方あれば記録して消去
-(function checkPendingScout() {
-  try {
-    const pending = JSON.parse(sessionStorage.getItem('pendingScout') || 'null');
-    const sent    = sessionStorage.getItem('scoutSent');
-    if (pending && sent && pending.id) {
-      if (Date.now() - pending.ts < 30 * 60 * 1000) {
-        recordScoutSent(pending.id, pending.info || {});
-      }
-      sessionStorage.removeItem('pendingScout');
-      sessionStorage.removeItem('scoutSent');
-    }
-  } catch (_) {}
-})();
 
 // -------------------------------------------------------
 // 「さらに読み込む」ボタンを押して全候補者をDOMに展開
