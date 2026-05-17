@@ -360,10 +360,12 @@ document.addEventListener('click', e => {
   console.log('[Snow-we] スカウト系ボタン検知:', JSON.stringify(text));
 
   const cards = findCandidateCardsByPlatform();
-  // _selectedCard は使わない：モーダル内の「確認」ボタンが1回目扱いになるため
-  const card = cards.find(c => c.contains(btn) || c === btn.closest('[class*="card"],[class*="row"],li,article'));
+  let card = cards.find(c => c.contains(btn) || c === btn.closest('[class*="card"],[class*="row"],li,article'));
+  // 「スカウト」ボタンのみ _selectedCard フォールバックを使う
+  // 「確認」には使わない（モーダル確認ボタンが1回目扱いになるため）
+  if (!card && text === 'スカウト' && _selectedCard) card = _selectedCard;
 
-  console.log('[Snow-we] カード検出:', card ? 'あり' : 'なし', '/ カード総数:', cards.length);
+  console.log('[Snow-we] カード検出:', card ? 'あり' : 'なし', '/ _selectedCard:', _selectedCard ? 'あり' : 'なし', '/ カード総数:', cards.length);
 
   if (card) {
     // 1回目クリック（候補者一覧/モーダル画面）
