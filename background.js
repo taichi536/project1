@@ -90,9 +90,29 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  // ポジション一覧を返す
+  // ポジション一覧を返す（GASスプレッドシートから取得、失敗時はハードコードで代替）
   if (msg.type === 'getPositionList') {
-    sendResponse({ positions: POSITION_LIST });
-    return false;
+    chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {
+      const positionUrl = gasSettings?.positionUrl;
+      const secret = gasSettings?.secret;
+      if (!positionUrl) {
+        sendResponse({ positions: POSITION_LIST });
+        return;
+      }
+      fetch(positionUrl, {
+        method: 'POST',
+        body: JSON.stringify({ secret, action: 'getPositions' }),
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data.ok && data.positions?.length > 0) {
+            sendResponse({ positions: data.positions.map(p => p.name) });
+          } else {
+            sendResponse({ positions: POSITION_LIST });
+          }
+        })
+        .catch(() => sendResponse({ positions: POSITION_LIST }));
+    });
+    return true;
   }
 });
