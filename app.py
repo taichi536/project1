@@ -2827,23 +2827,36 @@ elif page == "🤖 自動売買":
 
         # ── 今すぐスキャン ────────────────────────────────────────────────
         st.markdown("##### 今すぐスキャンを実行")
-        st.caption("設定を保存してから実行してください。銘柄数によっては数分かかります。")
+        n_targets = len(get_universe_tickers(selected_cats))
+        st.caption(f"選択中のカテゴリ: {len(selected_cats)}カテゴリ / {n_targets}銘柄 ── 完了まで約{max(1, n_targets // 15)}〜{max(2, n_targets // 8)}分かかります")
         if st.button("🔍 今すぐスキャン実行", type="secondary", key="aw_scan"):
-            with st.spinner(f"{len(get_universe_tickers(selected_cats))}銘柄をスキャン中..."):
-                # 一時的にenabledをTrueにしてスキャン実行
-                aw_save({"enabled": True})
-                result = run_auto_watchlist(verbose=False)
-                aw_save({"enabled": aw_enabled})
-            if result["added"] or result["removed"]:
-                if result["added"]:
-                    st.success(f"✅ 追加: {', '.join(result['added'])}（{len(result['added'])}銘柄）")
-                if result["removed"]:
-                    st.warning(f"❌ 削除: {', '.join(result['removed'])}（{len(result['removed'])}銘柄）")
+            if not selected_cats:
+                st.error("スキャンするカテゴリを1つ以上選択してください")
             else:
-                st.info("変更なし。ウォッチリストは現状維持です。")
-            if result["skipped"] > 0:
-                st.caption(f"上限のため{result['skipped']}銘柄をスキップしました")
-            st.rerun()
+                # スキャン前に現在のUI設定を自動保存
+                aw_save({
+                    "enabled": True,
+                    "categories": selected_cats,
+                    "add_score_threshold": add_thresh,
+                    "remove_score_threshold": remove_thresh,
+                    "remove_consecutive_days": remove_days,
+                    "max_watchlist_size": max_size,
+                    "protected_tickers": protected,
+                })
+                with st.spinner(f"{n_targets}銘柄をスキャン中... しばらくお待ちください"):
+                    result = run_auto_watchlist(verbose=False)
+                # スキャン後にenabledを元に戻す
+                aw_save({"enabled": aw_enabled})
+                if result["added"] or result["removed"]:
+                    if result["added"]:
+                        st.success(f"✅ 追加: {', '.join(result['added'])}（{len(result['added'])}銘柄）")
+                    if result["removed"]:
+                        st.warning(f"❌ 削除: {', '.join(result['removed'])}（{len(result['removed'])}銘柄）")
+                else:
+                    st.info("変更なし。現在のウォッチリストの銘柄はシグナルが安定しています。")
+                if result["skipped"] > 0:
+                    st.caption(f"ウォッチリスト上限のため{result['skipped']}銘柄をスキップしました")
+                st.rerun()
 
 
 # ─── トレードガイド ───────────────────────────────────────────────────────────
