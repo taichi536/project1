@@ -385,6 +385,7 @@ document.addEventListener('click', e => {
     // 1回目クリック（候補者一覧/モーダル画面）
     const id = getCandidateId(card);
     console.log('[Snow-we] 1回目クリック candidateId:', id);
+    console.log('[Snow-we] カードテキスト行:', (card.innerText || '').split('\n').map(l=>l.trim()).filter(Boolean).slice(0,10));
     if (id) {
       sessionStorage.setItem('pendingScout', JSON.stringify({
         id, info: extractBasicInfo(card), ts: Date.now()
