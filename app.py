@@ -2829,6 +2829,8 @@ elif page == "🤖 自動売買":
         st.markdown("##### 今すぐスキャンを実行")
         n_targets = len(get_universe_tickers(selected_cats))
         st.caption(f"選択中のカテゴリ: {len(selected_cats)}カテゴリ / {n_targets}銘柄 ── 完了まで約{max(1, n_targets // 15)}〜{max(2, n_targets // 8)}分かかります")
+        result_area = st.empty()
+
         if st.button("🔍 今すぐスキャン実行", type="secondary", key="aw_scan"):
             if not selected_cats:
                 st.error("スキャンするカテゴリを1つ以上選択してください")
@@ -2842,20 +2844,22 @@ elif page == "🤖 自動売買":
                     "max_watchlist_size": max_size,
                     "protected_tickers": protected,
                 })
-                try:
-                    with st.spinner(f"{n_targets}銘柄をスキャン中... しばらくお待ちください（{max(1, n_targets // 15)}〜{max(2, n_targets // 8)}分）"):
-                        run_auto_watchlist(verbose=False)
-                    aw_save({"enabled": aw_enabled})
-                    st.rerun()
-                except Exception as e:
-                    aw_save({"enabled": aw_enabled})
-                    st.error(f"スキャン中にエラーが発生しました: {e}")
+                with st.spinner(f"{n_targets}銘柄をスキャン中... しばらくお待ちください（{max(1, n_targets // 15)}〜{max(2, n_targets // 8)}分）"):
+                    try:
+                        last = run_auto_watchlist(verbose=False)
+                        aw_save({"enabled": aw_enabled})
+                    except Exception as e:
+                        aw_save({"enabled": aw_enabled})
+                        st.error(f"エラー: {e}")
+                        last = None
 
-        # 前回のスキャン結果をファイルから常時表示
-        last = load_last_result()
+        # スキャン結果をファイルから常時表示（ページ再読み込み後も残る）
+        else:
+            last = load_last_result()
+
         if last:
             st.markdown("---")
-            st.markdown(f"##### 📋 前回のスキャン結果　`{last.get('timestamp', '')}`")
+            st.markdown(f"##### 📋 スキャン結果　`{last.get('timestamp', '')}`")
             if last.get("added") or last.get("removed"):
                 if last.get("added"):
                     st.success(f"✅ 追加: {', '.join(last['added'])}（{len(last['added'])}銘柄）")
