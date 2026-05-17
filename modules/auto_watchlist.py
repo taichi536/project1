@@ -16,6 +16,7 @@ from modules.signals import evaluate_signals, overall_signal
 
 _SETTINGS_FILE = Path(__file__).parent.parent / ".auto_watchlist_settings.json"
 _STATE_FILE = Path(__file__).parent.parent / ".auto_watchlist_state.json"
+_RESULT_FILE = Path(__file__).parent.parent / ".auto_watchlist_last_result.json"
 
 DEFAULT_SETTINGS = {
     "enabled": False,
@@ -148,8 +149,29 @@ def run_auto_watchlist(verbose: bool = True) -> dict:
     save_watchlist(watchlist)
     _save_state({"weak_counts": weak_counts, "last_run": today})
 
+    result = {
+        "added": added,
+        "removed": removed,
+        "skipped": skipped,
+        "scores": scores,
+        "scanned": len(scores),
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "watchlist": watchlist,
+    }
+    _RESULT_FILE.write_text(json.dumps(result, ensure_ascii=False, indent=2))
+
     if verbose:
         print(f"\n[自動ウォッチリスト] 完了: +{len(added)}件追加 / -{len(removed)}件削除")
         print(f"  現在のウォッチリスト（{len(watchlist)}銘柄）: {watchlist}")
 
-    return {"added": added, "removed": removed, "skipped": skipped, "scores": scores}
+    return result
+
+
+def load_last_result() -> dict | None:
+    """前回のスキャン結果をファイルから読み込む"""
+    if _RESULT_FILE.exists():
+        try:
+            return json.loads(_RESULT_FILE.read_text())
+        except Exception:
+            pass
+    return None

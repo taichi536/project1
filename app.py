@@ -2756,7 +2756,7 @@ elif page == "🤖 自動売買":
         st.markdown("#### 🔍 自動ウォッチリスト管理")
         st.markdown("ユニバースから強いシグナルが出た銘柄を自動でウォッチリストに追加・削除します。")
 
-        from modules.auto_watchlist import load_settings as aw_load, save_settings as aw_save, get_universe_tickers, run_auto_watchlist
+        from modules.auto_watchlist import load_settings as aw_load, save_settings as aw_save, get_universe_tickers, run_auto_watchlist, load_last_result
         from modules.universe import UNIVERSE
         aw_settings = aw_load()
 
@@ -2844,41 +2844,35 @@ elif page == "🤖 自動売買":
                 })
                 try:
                     with st.spinner(f"{n_targets}銘柄をスキャン中... しばらくお待ちください（{max(1, n_targets // 15)}〜{max(2, n_targets // 8)}分）"):
-                        result = run_auto_watchlist(verbose=False)
+                        run_auto_watchlist(verbose=False)
                     aw_save({"enabled": aw_enabled})
-                    st.session_state["aw_scan_result"] = result
+                    st.rerun()
                 except Exception as e:
                     aw_save({"enabled": aw_enabled})
-                    st.session_state["aw_scan_result"] = {"error": str(e)}
+                    st.error(f"スキャン中にエラーが発生しました: {e}")
 
-        # スキャン結果を永続表示（rerunしない）
-        if "aw_scan_result" in st.session_state:
-            result = st.session_state["aw_scan_result"]
+        # 前回のスキャン結果をファイルから常時表示
+        last = load_last_result()
+        if last:
             st.markdown("---")
-            st.markdown("##### 📋 スキャン結果")
-            if "error" in result:
-                st.error(f"エラー: {result['error']}")
-            elif result.get("added") or result.get("removed"):
-                if result.get("added"):
-                    st.success(f"✅ ウォッチリストに追加: {', '.join(result['added'])}（{len(result['added'])}銘柄）")
-                if result.get("removed"):
-                    st.warning(f"❌ ウォッチリストから削除: {', '.join(result['removed'])}（{len(result['removed'])}銘柄）")
-                if result.get("skipped", 0) > 0:
-                    st.caption(f"上限のため{result['skipped']}銘柄をスキップ")
-                if st.button("ウォッチリストを更新", type="primary"):
-                    del st.session_state["aw_scan_result"]
-                    st.rerun()
+            st.markdown(f"##### 📋 前回のスキャン結果　`{last.get('timestamp', '')}`")
+            if last.get("added") or last.get("removed"):
+                if last.get("added"):
+                    st.success(f"✅ 追加: {', '.join(last['added'])}（{len(last['added'])}銘柄）")
+                if last.get("removed"):
+                    st.warning(f"❌ 削除: {', '.join(last['removed'])}（{len(last['removed'])}銘柄）")
+                if last.get("skipped", 0) > 0:
+                    st.caption(f"上限のため{last['skipped']}銘柄をスキップ")
             else:
-                st.info("変更なし。ウォッチリストは現状維持です。")
-                scores = result.get("scores", {})
-                if scores:
-                    st.caption(f"スキャン完了: {len(scores)}銘柄を確認")
-                    score_rows = sorted(scores.items(), key=lambda x: x[1]["score"], reverse=True)
-                    score_df = pd.DataFrame([
-                        {"銘柄": t, "シグナル": v["verdict"], "スコア": f"{v['score']:+d}"}
-                        for t, v in score_rows
-                    ])
-                    st.dataframe(score_df, use_container_width=True, hide_index=True, height=300)
+                st.info(f"変更なし（{last.get('scanned', 0)}銘柄をスキャン済み）")
+            scores = last.get("scores", {})
+            if scores:
+                score_rows = sorted(scores.items(), key=lambda x: x[1]["score"], reverse=True)
+                score_df = pd.DataFrame([
+                    {"銘柄": t, "シグナル": v["verdict"], "スコア": f"{v['score']:+d}"}
+                    for t, v in score_rows
+                ])
+                st.dataframe(score_df, use_container_width=True, hide_index=True, height=300)
 
 
 # ─── トレードガイド ───────────────────────────────────────────────────────────
