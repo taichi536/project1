@@ -1146,19 +1146,30 @@ function checkIncomeNG(profileText) {
   if (!ageMatch) return null;
   const age = parseInt(ageMatch[1], 10);
   const income = extractIncomeFromText(profileText);
-  if (income === null) return null; // 年収不明は判定しない
+  if (income === null) return null; // 年収不明はClaudeに任せる
 
-  // プリチェックはITエンジニア基準（低い方）を使う
-  // IT・文系どちらに分類されてもNG確定の場合のみ弾く。境界線はClaudeに任せる
-  let itThreshold;
-  if (age < 30)      itThreshold = 350;
-  else if (age <= 35) itThreshold = 500;
-  else if (age <= 40) itThreshold = 700;
-  else if (age <= 45) itThreshold = 800;
-  else itThreshold = null;
+  // ITエンジニア系キーワードで職種を判定
+  const isIT = /エンジニア|ソフトウェア開発|インフラ|クラウド|システム開発|SE[^\w]|データエンジニア|バックエンド|フロントエンド|DevOps/.test(profileText);
 
-  if (itThreshold !== null && income < itThreshold) {
-    console.log(`[Snow-we] 年収NG: ${age}歳 ${income}万 < IT閾値${itThreshold}万（職種問わずNG）`);
+  let threshold;
+  if (isIT) {
+    if (age < 30)      threshold = 350;
+    else if (age <= 35) threshold = 500;
+    else if (age <= 40) threshold = 700;
+    else if (age <= 45) threshold = 800;
+    else threshold = null;
+  } else {
+    // 文系職（またはIT判定できない場合）は文系基準で判定
+    if (age < 30)      threshold = 500;
+    else if (age <= 35) threshold = 700;
+    else if (age <= 39) threshold = 800;
+    else if (age <= 42) threshold = 1000;
+    else if (age <= 45) threshold = 1200;
+    else threshold = null;
+  }
+
+  if (threshold !== null && income < threshold) {
+    console.log(`[Snow-we] 年収NG: ${age}歳 ${income}万 < 閾値${threshold}万 (${isIT ? 'IT' : '文系'})`);
     return 'NG';
   }
   return null;
@@ -1438,7 +1449,7 @@ function buildCriteriaText(criteria, platform) {
     if (criteria.ageMax) parts.push(`${criteria.ageMax}歳以下`);
     lines.push(`- 年齢追加条件: ${parts.join('かつ')}`);
   }
-  if (criteria.minTenure) lines.push(`- 在籍期間: 過去の全職歴を含め、${criteria.minTenure}年未満の在籍が明確に確認できる場合のみNG。不明・記載なしはOK`);
+  if (criteria.minTenure) lines.push(`- 在籍期間: 職歴の中に${criteria.minTenure}年未満の在籍が1社でもある場合はNG。在籍期間が読み取れる職歴で判断し、読み取れない職歴はスキップ。転職回数が多い・在籍期間が短い傾向が見られる場合はNG`);
   if (criteria.requiredKeywords) lines.push(`- 必須経験: ${criteria.requiredKeywords}`);
   if (criteria.excludeCompanies) lines.push(`- 除外企業（追加）: 職歴に${criteria.excludeCompanies}が含まれる場合は即NG`);
   if (criteria.excludeKeywords)  lines.push(`- 除外: ${criteria.excludeKeywords}`);
