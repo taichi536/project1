@@ -727,6 +727,9 @@ ${candidateList}
   const parsed = JSON.parse(clean);
   return (parsed.results || []).map(r => r.overall || r.o || '要確認');
 }
+
+// Claude APIを呼び出す（content.js内から直接）
+async function callBatchScreeningAPI(apiKey, cards, criteria) {
   const criteriaLines = buildCriteriaText(criteria, getPlatform());
   const candidateList = cards.map((c, i) =>
     `候補者${i + 1}: ${c.summary}`
