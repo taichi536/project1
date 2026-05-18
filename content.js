@@ -355,7 +355,19 @@ function extractBasicInfo(cardEl) {
 
   // 会社名を抽出
   let company = '';
-  if (getPlatform() === 'rds') {
+  if (getPlatform() === 'ambi') {
+    // AMBIカード: 株式会社等を含む行を優先、なければNo.XXXXより後の行
+    company = lines.find(l => /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,/.test(l)) || '';
+    if (!company) {
+      const noIdx = lines.findIndex(l => /^No\.\d+$/.test(l));
+      if (noIdx >= 0) {
+        company = lines.slice(noIdx + 1).find(l =>
+          l.length > 3 && !['既読', '未読', '未読にする', '既読にする', '男性', '女性'].includes(l) &&
+          !/スカウト受信|興味あり|通$/.test(l)
+        ) || '';
+      }
+    }
+  } else if (getPlatform() === 'rds') {
     const idx = lines.findIndex(l => l === '現職' || l === '前職');
     const companyRe = /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,|ホールディングス|グループ|銀行|証券|保険|大学|病院/;
     if (idx >= 0) {
