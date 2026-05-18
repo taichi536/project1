@@ -670,6 +670,35 @@ function showAutoStatus(message, autoDismissMs) {
   }
 }
 
+// Claude API fetch with retry on 529 (overloaded)
+async function claudeFetch(apiKey, body, maxRetries = 4) {
+  let delay = 3000;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify(body)
+    });
+    if (response.status === 529) {
+      if (attempt === maxRetries) throw new Error('APIが混み合っています。しばらく待ってから再試行してください。');
+      showToast(`APIが混み合っています。${delay / 1000}秒後にリトライ... (${attempt + 1}/${maxRetries})`, delay - 200);
+      await sleep(delay);
+      delay = Math.min(delay * 2, 30000);
+      continue;
+    }
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `APIエラー (${response.status})`);
+    }
+    return response.json();
+  }
+}
+
 // Claude APIを呼び出す（content.js内から直接）
 async function callBatchScreeningAPI(apiKey, cards, criteria) {
   const criteriaLines = buildCriteriaText(criteria, getPlatform());
@@ -691,26 +720,11 @@ ${candidateList}
 以下のJSON形式のみで出力してください（説明不要・reasonは10文字以内）:
 {"results":[{"i":1,"o":"OK"},{"i":2,"o":"NG"}]}`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
-      messages: [{ role: 'user', content: prompt }]
-    })
+  const data = await claudeFetch(apiKey, {
+    model: 'claude-sonnet-4-6',
+    max_tokens: 2000,
+    messages: [{ role: 'user', content: prompt }]
   });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `APIエラー (${response.status})`);
-  }
-  const data = await response.json();
   const text = (data.content?.[0]?.text || '').trim();
   const clean = text.replace(/```json|```/g, '').trim();
   const parsed = JSON.parse(clean);
@@ -1053,26 +1067,11 @@ ${profileText}
 JSON1行のみで出力:
 {"o":"OK"} または {"o":"NG"} または {"o":"要確認"}`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 20,
-      messages: [{ role: 'user', content: prompt }]
-    })
+  const data = await claudeFetch(apiKey, {
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 20,
+    messages: [{ role: 'user', content: prompt }]
   });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `APIエラー (${response.status})`);
-  }
-  const data = await response.json();
   const text = (data.content?.[0]?.text || '').trim();
   const match = text.match(/"o"\s*:\s*"([^"]+)"/);
   return match ? match[1] : '要確認';
