@@ -1092,18 +1092,17 @@ function checkIncomeNG(profileText) {
   const income = extractIncomeFromText(profileText);
   if (income === null) return null; // 年収不明は判定しない
 
-  // プリチェックは文系基準（厳しい方）を使う
-  // ITエンジニアは文系基準より緩いため、文系基準を下回る＝職種問わずNG確定
-  let threshold;
-  if (age < 30)      threshold = 500;
-  else if (age <= 35) threshold = 700;
-  else if (age <= 39) threshold = 800;
-  else if (age <= 42) threshold = 1000;
-  else if (age <= 45) threshold = 1200;
-  else threshold = null;
+  // プリチェックはITエンジニア基準（低い方）を使う
+  // IT・文系どちらに分類されてもNG確定の場合のみ弾く。境界線はClaudeに任せる
+  let itThreshold;
+  if (age < 30)      itThreshold = 350;
+  else if (age <= 35) itThreshold = 500;
+  else if (age <= 40) itThreshold = 700;
+  else if (age <= 45) itThreshold = 800;
+  else itThreshold = null;
 
-  if (threshold !== null && income < threshold) {
-    console.log(`[Snow-we] 年収NG: ${age}歳 ${income}万 < 文系閾値${threshold}万`);
+  if (itThreshold !== null && income < itThreshold) {
+    console.log(`[Snow-we] 年収NG: ${age}歳 ${income}万 < IT閾値${itThreshold}万（職種問わずNG）`);
     return 'NG';
   }
   return null;
