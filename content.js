@@ -483,15 +483,33 @@ document.addEventListener('click', e => {
   // ── 送信ボタン：スカウト記録 ──
   const raw = sessionStorage.getItem('pendingScout');
   console.log('[Snow-we] 送信クリック / pendingScout:', raw ? 'あり' : 'なし');
+  sessionStorage.removeItem('pendingScout');
   if (raw) {
-    try {
-      const pending = JSON.parse(raw);
-      if (pending && pending.id && Date.now() - pending.ts < 30 * 60 * 1000) {
-        console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし');
-        recordScoutSent(pending.id, pending.info || {}, pending.templateName || '');
-      }
-    } catch (_) {}
-    sessionStorage.removeItem('pendingScout');
+    (async () => {
+      try {
+        const pending = JSON.parse(raw);
+        if (pending && pending.id && Date.now() - pending.ts < 30 * 60 * 1000) {
+          // AMBIはテンプレートドロップダウンからポジションを取得
+          if (!pending.templateName && getPlatform() === 'ambi') {
+            const tmplSel = document.querySelector('select');
+            const tmplVal = tmplSel ? (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim() : '';
+            if (tmplVal && tmplVal !== 'テンプレートの選択') {
+              const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+              const positionList = res?.positions || [];
+              const sorted = [...positionList].sort((a, b) => b.length - a.length);
+              pending.templateName = sorted.find(p => {
+                if (!p) return false;
+                if (tmplVal.includes(p)) return true;
+                const core = p.split(/[（(【]/)[0].split(/\s[-–—]\s|\s[-–—]$/)[0].trim();
+                return core.length >= 6 && tmplVal.includes(core);
+              }) || '';
+            }
+          }
+          console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし');
+          recordScoutSent(pending.id, pending.info || {}, pending.templateName || '');
+        }
+      } catch (_) {}
+    })();
   }
 }, true);
 
