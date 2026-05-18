@@ -1273,7 +1273,7 @@ function buildCriteriaText(criteria, platform) {
   if (isBizreach) {
     lines.push(`\n【Bizreach専用：厳格基準（3つすべて満たす場合のみOK）】`);
     lines.push(`- 社格：大手企業・外資系・有名上場企業のみOK。中小企業・無名企業はNG`);
-    lines.push(`- 学歴：早慶上智・MARCH・国立大学以上のみOK。それ未満はNG`);
+    lines.push(`- 学歴：早慶上智・MARCH・国立大学はOK。関関同立（関西大・関西学院大・同志社大・立命館大）は大手企業在籍の場合のみOK。それ以外はNG`);
     lines.push(`- 年収：以下の基準を満たすこと（満たさない場合はNG）`);
     lines.push(`- 判定方針：迷う場合・要確認はすべてNG。3条件すべて明確にOKの場合のみOK`);
   }
