@@ -1298,20 +1298,21 @@ function buildCriteriaText(criteria, platform) {
   lines.push(`- 「ITエンジニア系」: ソフトウェア開発・インフラ・クラウド・システム構築・SE・データエンジニア等のIT技術職`);
   lines.push(`- 「文系職」: コンサル・営業・マーケ・経営企画・財務・人事・その他ビジネス職`);
 
-  lines.push(`\n【文系職の年収基準】（年収明記時のみ適用）`);
+  lines.push(`\n【文系職の年収基準】`);
   lines.push(`- 20代: 500万円未満 → NG`);
   lines.push(`- 30〜35歳: 700万円未満 → NG`);
   lines.push(`- 36〜39歳: 800万円未満 → NG`);
   lines.push(`- 40〜42歳: 1000万円未満 → NG`);
   lines.push(`- 43〜45歳: 1200万円未満 → NG`);
   lines.push(`- 46歳以上: 1200万以上かつ財務・経理・FP&A職歴あり → 要確認、それ以外 → NG`);
+  lines.push(`※年収が明記されており基準を下回る場合は必ずNG。年収が不明・記載なしの場合は「要確認」`);
 
-  lines.push(`\n【ITエンジニア系の年収基準】（年収明記時のみ適用）`);
+  lines.push(`\n【ITエンジニア系の年収基準】`);
   lines.push(`- 20代: 350万円未満 → NG`);
   lines.push(`- 30〜35歳: 500万円未満 → NG`);
   lines.push(`- 36〜40歳: 700万円未満 → NG`);
   lines.push(`- 40〜45歳: 800万円未満 → NG`);
-  lines.push(`※年収が不明な場合はこの項目をスキップしてOK扱い`);
+  lines.push(`※年収が明記されており基準を下回る場合は必ずNG。年収が不明・記載なしの場合は「要確認」`);
 
   lines.push(`\n【文系職の社格・学歴・転職回数】`);
   lines.push(`- 社格: 上場企業・大手グループ・知名度ある企業はOK。無名の零細企業のみNG`);
@@ -1323,7 +1324,10 @@ function buildCriteriaText(criteria, platform) {
   lines.push(`- 学歴: 問わない（高卒以上OK、スキル重視）`);
   lines.push(`- 転職回数: 20代最大3社、30代最大4社、40代最大5社。1社の在籍が1年未満の場合は注意`);
 
-  lines.push(`\n【判定方針】一次選考のため迷う場合は必ずOK。明確な基準違反のみNG`);
+  lines.push(`\n【判定方針】`);
+  lines.push(`- 年収基準を下回ることが明確な場合は必ずNG（迷う余地なし）`);
+  lines.push(`- 年収以外の基準で迷う場合は「要確認」。明確な違反のみNG`);
+  lines.push(`- 絶対NG条件（アクセンチュア・秘書等）に該当する場合は他の条件に関わらず即NG`);
 
   // 追加条件（設定タブで入力された場合）
   const ai = criteria.ageIncome || {};
