@@ -255,7 +255,7 @@ setupClickTracking();
 // スカウト送信履歴の管理
 // -------------------------------------------------------
 const SCOUT_KEY = 'scoutHistory';
-const RESCOUNT_DAYS = 90; // 3ヶ月 = 90日
+const RESCOUNT_DAYS = 7; // 1週間 = 7日
 
 async function getScoutHistory() {
   const r = await chrome.storage.local.get([SCOUT_KEY]);
