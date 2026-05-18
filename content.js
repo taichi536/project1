@@ -810,16 +810,22 @@ async function triggerAutoAdd() {
       }
     }
 
+    // 年収チェック（明記されていて基準を下回る場合はAI呼び出し不要でNG確定）
+    const incomeNG = checkIncomeNG(profileText);
     let overall;
-    try {
-      overall = await judgeSingleCandidate(apiKey, profileText, criteria);
-    } catch (err) {
-      console.error('[Snow-we] judgeSingleCandidate error:', err);
-      setBatchBadge(el, 'warn', `⚠️ 判定失敗: ${(err.message || '').slice(0, 30)}`);
-      totalProcessed++;
-      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
-      await sleep(700);
-      continue;
+    if (incomeNG) {
+      overall = 'NG';
+    } else {
+      try {
+        overall = await judgeSingleCandidate(apiKey, profileText, criteria);
+      } catch (err) {
+        console.error('[Snow-we] judgeSingleCandidate error:', err);
+        setBatchBadge(el, 'warn', `⚠️ 判定失敗: ${(err.message || '').slice(0, 30)}`);
+        totalProcessed++;
+        await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+        await sleep(700);
+        continue;
+      }
     }
 
     setBatchBadge(el,
@@ -1061,6 +1067,55 @@ async function handleAddDialog(tagName) {
       if (found) { found.click(); return; }
     }
   }
+}
+
+// プロフィールテキストから年収（万円）を抽出する
+function extractIncomeFromText(text) {
+  // 「現年収」「年収」「想定年収」などに続く数値を優先的に拾う
+  const patterns = [
+    /現年収[^\d]*(\d{3,4})万/,
+    /年収[^\d]*(\d{3,4})万/,
+    /(\d{3,4})万円?(?:程度|前後|台)?(?:\s|　|$|\/|・)/,
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m) return parseInt(m[1], 10);
+  }
+  return null;
+}
+
+// 年齢と年収からNG判定を返す（確実にNGの場合のみ 'NG'、それ以外は null）
+function checkIncomeNG(profileText) {
+  const ageMatch = profileText.match(/(\d{2})歳/);
+  if (!ageMatch) return null;
+  const age = parseInt(ageMatch[1], 10);
+  const income = extractIncomeFromText(profileText);
+  if (income === null) return null; // 年収不明は判定しない
+
+  // ITエンジニア系キーワードで職種を簡易判定
+  const isIT = /エンジニア|開発|プログラ|インフラ|クラウド|SE[^A-Z]|システム構築|データエンジニア/.test(profileText);
+
+  let threshold;
+  if (isIT) {
+    if (age < 30)      threshold = 350;
+    else if (age <= 35) threshold = 500;
+    else if (age <= 40) threshold = 700;
+    else if (age <= 45) threshold = 800;
+    else threshold = null;
+  } else {
+    if (age < 30)      threshold = 500;
+    else if (age <= 35) threshold = 700;
+    else if (age <= 39) threshold = 800;
+    else if (age <= 42) threshold = 1000;
+    else if (age <= 45) threshold = 1200;
+    else threshold = null;
+  }
+
+  if (threshold !== null && income < threshold) {
+    console.log(`[Snow-we] 年収NG: ${age}歳 ${income}万 < 閾値${threshold}万 (${isIT ? 'IT' : '文系'})`);
+    return 'NG';
+  }
+  return null;
 }
 
 // 1候補者のAI判定（Haiku使用：高速・低コスト）
