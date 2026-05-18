@@ -699,8 +699,34 @@ async function claudeFetch(apiKey, body, maxRetries = 4) {
   }
 }
 
-// Claude APIを呼び出す（content.js内から直接）
-async function callBatchScreeningAPI(apiKey, cards, criteria) {
+// プロフィールテキストの配列をバッチ判定する
+async function judgeProfileBatch(apiKey, profileTexts, criteria) {
+  const criteriaLines = buildCriteriaText(criteria, getPlatform());
+  const candidateList = profileTexts.map((t, i) =>
+    `候補者${i + 1}:\n${t.slice(0, 800)}`
+  ).join('\n\n');
+
+  const prompt = `転職エージェントの一次選定アシスタントです。
+
+【選定基準】
+${criteriaLines}
+
+【候補者一覧】
+${candidateList}
+
+各候補者をJSON1行で出力（必ず${profileTexts.length}人分）:
+{"results":[{"i":1,"o":"OK"},{"i":2,"o":"NG"}]}`;
+
+  const data = await claudeFetch(apiKey, {
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 200,
+    messages: [{ role: 'user', content: prompt }]
+  });
+  const text = (data.content?.[0]?.text || '').trim();
+  const clean = text.replace(/```json|```/g, '').trim();
+  const parsed = JSON.parse(clean);
+  return (parsed.results || []).map(r => r.overall || r.o || '要確認');
+}
   const criteriaLines = buildCriteriaText(criteria, getPlatform());
   const candidateList = cards.map((c, i) =>
     `候補者${i + 1}: ${c.summary}`
@@ -770,34 +796,30 @@ async function triggerAutoAdd() {
   // RDSはパネルを信頼するためストレージ不要。他媒体のみ取得
   const scoutHistory = isRDS ? {} : await getScoutHistory();
 
+  // ─── Phase 1: プロフィール取得・即時NG判定 ───
+  const pending = []; // AI判定が必要な候補者
   for (let i = 0; i < cards.length; i++) {
     const { el, text: cardText } = cards[i];
-    showAutoStatus(`🤖 ${i + 1}/${cards.length}人処理中 ✅${addedCount}人追加`);
+    showAutoStatus(`📥 ${i + 1}/${cards.length}人 プロフィール取得中...`);
 
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    await sleep(500);
+    await sleep(400);
 
     const candidateId = getCandidateId(el);
 
     if (!isRDS) {
-      // 他媒体: ストレージの記録でチェック
       const status = scoutStatus(scoutHistory, candidateId);
       if (status.scouted && !status.reScoutable) {
         setBatchBadge(el, 'warn', `⏸ 送信済（${status.daysAgo}日前）`);
         totalProcessed++;
-        await sleep(200);
         continue;
       }
-      setBatchBadge(el, 'checking', status.scouted ? `🔄 再追加可（${status.daysAgo}日前）` : '🔍 判定中...');
-    } else {
-      setBatchBadge(el, 'checking', '🔍 判定中...');
     }
 
-    // プロフィール全文取得（RDSはここでカードをクリックしモーダルを開く）
+    setBatchBadge(el, 'checking', '📥 取得中...');
     let profileText = cardText;
     try { profileText = await getFullProfile(el, cardText); } catch (_) {}
 
-    // RDS: モーダルを下までスクロールして「スカウト送信」履歴を確認
     if (isRDS) {
       await scrollModalToBottom();
       const daysAgo = checkScoutSentInBody();
@@ -805,34 +827,60 @@ async function triggerAutoAdd() {
         setBatchBadge(el, 'warn', `⏸ 送信済（${daysAgo}日前）`);
         totalProcessed++;
         await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
-        await sleep(200);
         continue;
       }
     }
 
-    // 年収チェック（明記されていて基準を下回る場合はAI呼び出し不要でNG確定）
-    const incomeNG = checkIncomeNG(profileText);
-    let overall;
-    if (incomeNG) {
-      overall = 'NG';
-    } else {
-      try {
-        overall = await judgeSingleCandidate(apiKey, profileText, criteria);
-      } catch (err) {
-        console.error('[Snow-we] judgeSingleCandidate error:', err);
-        setBatchBadge(el, 'warn', `⚠️ 判定失敗: ${(err.message || '').slice(0, 30)}`);
-        totalProcessed++;
-        await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
-        await sleep(700);
-        continue;
+    // 年収チェック：IT閾値を下回る場合は即NG確定
+    if (checkIncomeNG(profileText)) {
+      setBatchBadge(el, 'ng', '❌ 見送り');
+      totalProcessed++;
+      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+      continue;
+    }
+
+    setBatchBadge(el, 'checking', '🔍 判定待ち...');
+    pending.push({ el, profileText, candidateId });
+  }
+
+  // ─── Phase 2: バッチAI判定（5人ずつ）───
+  const BATCH_SIZE = 5;
+  const overallMap = new Map(); // el → overall
+  for (let i = 0; i < pending.length; i += BATCH_SIZE) {
+    const batch = pending.slice(i, i + BATCH_SIZE);
+    showAutoStatus(`🤖 AI判定中... (${i + 1}〜${Math.min(i + BATCH_SIZE, pending.length)}/${pending.length}人)`);
+    batch.forEach(({ el }) => setBatchBadge(el, 'checking', '🤖 判定中...'));
+    try {
+      const results = await judgeProfileBatch(apiKey, batch.map(p => p.profileText), criteria);
+      batch.forEach(({ el }, j) => overallMap.set(el, results[j] || '要確認'));
+    } catch (err) {
+      console.error('[Snow-we] judgeProfileBatch error:', err);
+      // フォールバック：1人ずつ判定
+      for (const item of batch) {
+        try {
+          const r = await judgeSingleCandidate(apiKey, item.profileText, criteria);
+          overallMap.set(item.el, r);
+        } catch (e2) {
+          overallMap.set(item.el, 'error');
+        }
       }
+    }
+  }
+
+  // ─── Phase 3: 結果反映・リスト追加 ───
+  for (const { el, candidateId } of pending) {
+    const overall = overallMap.get(el) || '要確認';
+
+    if (overall === 'error') {
+      setBatchBadge(el, 'warn', '⚠️ 判定失敗');
+      totalProcessed++;
+      continue;
     }
 
     setBatchBadge(el,
       overall === 'OK' ? 'ok' : overall === 'NG' ? 'ng' : 'warn',
       overall === 'OK' ? '✅ スカウト候補' : overall === 'NG' ? '❌ 見送り' : '⚠️ 要確認');
 
-    // Bizreachはお金がかかるためOKのみ追加（要確認はスキップ）
     const shouldAdd = getPlatform() === 'bizreach' ? overall === 'OK' : (overall === 'OK' || overall === '要確認');
     if (shouldAdd) {
       const tagName = getPlatform() === 'bizreach' ? (criteria.autoTagName || 'KOJI→礼士郎スカウト') : (criteria.autoTagName || '');
@@ -851,7 +899,7 @@ async function triggerAutoAdd() {
 
     totalProcessed++;
     await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
-    await sleep(700);
+    await sleep(400);
   }
 
   // 次のページがあれば自動で移動して処理を続ける
