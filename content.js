@@ -1449,7 +1449,7 @@ function buildCriteriaText(criteria, platform) {
     if (criteria.ageMax) parts.push(`${criteria.ageMax}歳以下`);
     lines.push(`- 年齢追加条件: ${parts.join('かつ')}`);
   }
-  if (criteria.minTenure) lines.push(`- 在籍期間: 職歴の中に${criteria.minTenure}年未満の在籍が1社でもある場合はNG。在籍期間が読み取れる職歴で判断し、読み取れない職歴はスキップ。転職回数が多い・在籍期間が短い傾向が見られる場合はNG`);
+  if (criteria.minTenure) lines.push(`- 在籍期間: 異なる会社への転職で${criteria.minTenure}年未満の在籍が1社でもある場合はNG。同一会社内での部署異動・職種変更・昇格は同じ会社の在籍としてまとめて計算すること（例：同社に7年いて途中で役職変更した場合は7年として扱う）。在籍期間が読み取れない場合はスキップ`);
   if (criteria.requiredKeywords) lines.push(`- 必須経験: ${criteria.requiredKeywords}`);
   if (criteria.excludeCompanies) lines.push(`- 除外企業（追加）: 職歴に${criteria.excludeCompanies}が含まれる場合は即NG`);
   if (criteria.excludeKeywords)  lines.push(`- 除外: ${criteria.excludeKeywords}`);
