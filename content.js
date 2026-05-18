@@ -1219,22 +1219,41 @@ function buildCriteriaText(criteria) {
   lines.push(`- 職歴にアクセンチュアが含まれる場合は即NG`);
   lines.push(`- 職歴にベイカレントが含まれる場合は原則即NG。ただし43歳以上かつ財務・経理・FP&A等の職歴がある場合は「要確認」`);
   lines.push(`- 職種・職歴に秘書が含まれる場合は即NG`);
-  const ai = criteria.ageIncome || {};
-  const iv = (key, def) => ai[key] || def;
-  lines.push(`【ハードNG：年収が明記されており閾値を下回る場合は必ずNG（迷わずNG）】`);
-  lines.push(`- 20代: ${iv('age20s', 400)}万円未満 → NG`);
-  lines.push(`- 30〜35歳: ${iv('age30to35', 550)}万円未満 → NG`);
-  lines.push(`- 36〜39歳: ${iv('age36to39', 650)}万円未満 → NG`);
-  lines.push(`- 40〜42歳: ${iv('age40to42', 800)}万円未満 → NG`);
-  lines.push(`- 43〜45歳: ${iv('age43to45', 1000)}万円未満 → NG`);
-  lines.push(`- 46歳以上: 財務・経理・FP&A職歴あり → 要確認、それ以外 → NG`);
+  lines.push(`- ITエンジニア系で保守運用のみの場合は即NG`);
+
+  lines.push(`\n【職種判定】候補者の経歴から以下のどちらかに分類して、対応する基準を適用してください。`);
+  lines.push(`- 「ITエンジニア系」: ソフトウェア開発・インフラ・クラウド・システム構築・SE・データエンジニア等のIT技術職`);
+  lines.push(`- 「文系職」: コンサル・営業・マーケ・経営企画・財務・人事・その他ビジネス職`);
+
+  lines.push(`\n【文系職の年収基準】（年収明記時のみ適用）`);
+  lines.push(`- 20代: 500万円未満 → NG`);
+  lines.push(`- 30〜35歳: 700万円未満 → NG`);
+  lines.push(`- 36〜39歳: 800万円未満 → NG`);
+  lines.push(`- 40〜42歳: 1000万円未満 → NG`);
+  lines.push(`- 43〜45歳: 1200万円未満 → NG`);
+  lines.push(`- 46歳以上: 1200万以上かつ財務・経理・FP&A職歴あり → 要確認、それ以外 → NG`);
+
+  lines.push(`\n【ITエンジニア系の年収基準】（年収明記時のみ適用）`);
+  lines.push(`- 20代: 350万円未満 → NG`);
+  lines.push(`- 30〜35歳: 500万円未満 → NG`);
+  lines.push(`- 36〜40歳: 700万円未満 → NG`);
+  lines.push(`- 40〜45歳: 800万円未満 → NG`);
   lines.push(`※年収が不明な場合はこの項目をスキップしてOK扱い`);
-  lines.push(`【社格】上場企業・大手グループ・知名度ある企業はOK。無名の零細企業のみNG`);
-  lines.push(`【学歴】国立大学（横浜国立・筑波・神戸・広島・岡山・千葉など含む）・早慶上智・MARCHはOK。それ以外は社格・年収でカバーされればOK`);
-  lines.push(`【転職回数】20代最大2社、30代最大3社（3社目は年収高ければOK）、40代最大4社（3〜4社目は年収高ければOK）`);
-  lines.push(`【判定方針】一次選考のため迷う場合は必ずOK。明確な基準違反のみNG`);
+
+  lines.push(`\n【文系職の社格・学歴・転職回数】`);
+  lines.push(`- 社格: 上場企業・大手グループ・知名度ある企業はOK。無名の零細企業のみNG`);
+  lines.push(`- 学歴: 国立大学・早慶上智・MARCHはOK。それ以外は社格・年収でカバーされればOK`);
+  lines.push(`- 転職回数: 20代最大2社、30代最大3社（3社目は年収高ければOK）、40代最大4社`);
+
+  lines.push(`\n【ITエンジニア系の社格・学歴・転職回数】`);
+  lines.push(`- 社格: 問わない（大手でなくてもOK）`);
+  lines.push(`- 学歴: 問わない（高卒以上OK、スキル重視）`);
+  lines.push(`- 転職回数: 20代最大3社、30代最大4社、40代最大5社。1社の在籍が1年未満の場合は注意`);
+
+  lines.push(`\n【判定方針】一次選考のため迷う場合は必ずOK。明確な基準違反のみNG`);
 
   // 追加条件（設定タブで入力された場合）
+  const ai = criteria.ageIncome || {};
   if (criteria.ageMin || criteria.ageMax) {
     const parts = [];
     if (criteria.ageMin) parts.push(`${criteria.ageMin}歳以上`);
