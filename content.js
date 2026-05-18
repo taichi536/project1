@@ -782,8 +782,10 @@ async function triggerAutoAdd() {
   await loadAllCandidatesIntoDOM();
 
   const cards = extractAllCandidateCards();
+  console.log('[Snow-we] triggerAutoAdd cards found:', cards.length, 'platform:', getPlatform(), 'url:', location.href);
   if (cards.length === 0) {
     showAutoStatus('❌ 候補者が見つかりません。一覧ページで実行してください。', 4000);
+    await saveAutoAddProgress({ running: false });
     return;
   }
 
