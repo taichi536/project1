@@ -356,16 +356,15 @@ function extractBasicInfo(cardEl) {
   // 会社名を抽出
   let company = '';
   if (getPlatform() === 'ambi') {
-    // AMBIカード: 株式会社等を含む行を優先、なければNo.XXXXより後の行
-    company = lines.find(l => /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,/.test(l)) || '';
+    // AMBIカード: 「業界 / 部署」行の直前が会社名
+    const industryIdx = lines.slice().reverse().findIndex(l => l.includes(' / '));
+    if (industryIdx >= 0) {
+      const realIdx = lines.length - 1 - industryIdx;
+      if (realIdx > 0) company = lines[realIdx - 1];
+    }
+    // フォールバック: 株式会社等を含む行
     if (!company) {
-      const noIdx = lines.findIndex(l => /^No\.\d+$/.test(l));
-      if (noIdx >= 0) {
-        company = lines.slice(noIdx + 1).find(l =>
-          l.length > 3 && !['既読', '未読', '未読にする', '既読にする', '男性', '女性'].includes(l) &&
-          !/スカウト受信|興味あり|通$/.test(l)
-        ) || '';
-      }
+      company = lines.find(l => /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,/.test(l)) || '';
     }
   } else if (getPlatform() === 'rds') {
     const idx = lines.findIndex(l => l === '現職' || l === '前職');
