@@ -671,7 +671,7 @@ function showAutoStatus(message, autoDismissMs) {
 
 // Claude APIを呼び出す（content.js内から直接）
 async function callBatchScreeningAPI(apiKey, cards, criteria) {
-  const criteriaLines = buildCriteriaText(criteria);
+  const criteriaLines = buildCriteriaText(criteria, getPlatform());
   const candidateList = cards.map((c, i) =>
     `候補者${i + 1}: ${c.summary}`
   ).join('\n');
@@ -801,8 +801,11 @@ async function triggerAutoAdd() {
         overall === 'OK' ? 'ok' : overall === 'NG' ? 'ng' : 'warn',
         overall === 'OK' ? '✅ スカウト候補' : overall === 'NG' ? '❌ 見送り' : '⚠️ 要確認');
 
-      if (overall === 'OK' || overall === '要確認') {
-        const added = await clickAddButton(el, criteria.autoTagName || '');
+      // Bizreachはお金がかかるためOKのみ追加（要確認はスキップ）
+      const shouldAdd = getPlatform() === 'bizreach' ? overall === 'OK' : (overall === 'OK' || overall === '要確認');
+      if (shouldAdd) {
+        const tagName = getPlatform() === 'bizreach' ? (criteria.autoTagName || 'KOJI→礼士郎スカウト') : (criteria.autoTagName || '');
+        const added = await clickAddButton(el, tagName);
         if (added) {
           addedCount++;
           // リスト追加時点の情報を履歴に仮記録（スカウト送信とは別）
@@ -998,7 +1001,22 @@ async function handleAddDialog(tagName) {
   });
 
   for (const dialog of dialogs) {
-    // タグ入力欄があれば入力する
+    // Bizreach: チェックボックスリストからラベル名で検索してクリック
+    if (getPlatform() === 'bizreach' && tagName) {
+      const items = Array.from(dialog.querySelectorAll('label, li, [class*="item"], [class*="label"]'));
+      const target = items.find(el => (el.innerText || '').trim().includes(tagName));
+      if (target) {
+        const cb = target.querySelector('input[type="checkbox"]');
+        if (cb) { cb.click(); } else { target.click(); }
+        await sleep(400);
+        // 「閉じる」または確定ボタンをクリック
+        const closeBtn = Array.from(dialog.querySelectorAll('button,a')).find(b => ['閉じる','完了','保存'].includes((b.innerText || '').trim()));
+        if (closeBtn) closeBtn.click();
+        return;
+      }
+    }
+
+    // タグ入力欄があれば入力する（他媒体）
     if (tagName) {
       const input = dialog.querySelector('input[type="text"],input:not([type]),textarea');
       if (input) {
@@ -1022,7 +1040,7 @@ async function handleAddDialog(tagName) {
 
 // 1候補者のAI判定（Haiku使用：高速・低コスト）
 async function judgeSingleCandidate(apiKey, profileText, criteria) {
-  const criteriaLines = buildCriteriaText(criteria);
+  const criteriaLines = buildCriteriaText(criteria, getPlatform());
   const prompt = `転職エージェントの一次選定アシスタントです。
 
 【選定基準】
@@ -1240,7 +1258,9 @@ function checkScoutHistoryInElement(root) {
   return result;
 }
 
-function buildCriteriaText(criteria) {
+function buildCriteriaText(criteria, platform) {
+  platform = platform || getPlatform();
+  const isBizreach = platform === 'bizreach';
   const lines = [];
 
   // 常時適用される標準基準
@@ -1249,6 +1269,14 @@ function buildCriteriaText(criteria) {
   lines.push(`- 職歴にベイカレントが含まれる場合は原則即NG。ただし43歳以上かつ財務・経理・FP&A等の職歴がある場合は「要確認」`);
   lines.push(`- 職種・職歴に秘書が含まれる場合は即NG`);
   lines.push(`- ITエンジニア系で保守運用のみの場合は即NG`);
+
+  if (isBizreach) {
+    lines.push(`\n【Bizreach専用：厳格基準（3つすべて満たす場合のみOK）】`);
+    lines.push(`- 社格：大手企業・外資系・有名上場企業のみOK。中小企業・無名企業はNG`);
+    lines.push(`- 学歴：早慶上智・MARCH・国立大学以上のみOK。それ未満はNG`);
+    lines.push(`- 年収：以下の基準を満たすこと（満たさない場合はNG）`);
+    lines.push(`- 判定方針：迷う場合・要確認はすべてNG。3条件すべて明確にOKの場合のみOK`);
+  }
 
   lines.push(`\n【職種判定】候補者の経歴から以下のどちらかに分類して、対応する基準を適用してください。`);
   lines.push(`- 「ITエンジニア系」: ソフトウェア開発・インフラ・クラウド・システム構築・SE・データエンジニア等のIT技術職`);
