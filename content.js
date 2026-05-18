@@ -1438,8 +1438,7 @@ function buildCriteriaText(criteria, platform) {
 
   lines.push(`\n【判定方針】`);
   lines.push(`- 年収基準を下回ることが明確な場合は必ずNG（迷う余地なし）`);
-  lines.push(`- 学歴がMARCH以下でも、大手企業在籍かつ年収基準を満たす場合はOK`);
-  lines.push(`- 年収・社格・在籍期間がすべて問題ない場合は絶対NG条件に該当しない限りOK`);
+  lines.push(`- 年収・社格・在籍期間がすべて問題なく絶対NG条件にも該当しない場合はOK`);
   lines.push(`- 上記を満たすが一部情報が不明な場合は「要確認」。明確な基準違反のみNG`);
   lines.push(`- 絶対NG条件（アクセンチュア・秘書等）に該当する場合は他の条件に関わらず即NG`);
 
