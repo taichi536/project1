@@ -1218,6 +1218,7 @@ function buildCriteriaText(criteria) {
   lines.push(`【絶対NG】`);
   lines.push(`- 職歴にアクセンチュアが含まれる場合は即NG`);
   lines.push(`- 職歴にベイカレントが含まれる場合は原則即NG。ただし43歳以上かつ財務・経理・FP&A等の職歴がある場合は「要確認」`);
+  lines.push(`- 職種・職歴に秘書が含まれる場合は即NG`);
   const ai = criteria.ageIncome || {};
   const iv = (key, def) => ai[key] || def;
   lines.push(`【ハードNG：年収が明記されており閾値を下回る場合は必ずNG（迷わずNG）】`);
