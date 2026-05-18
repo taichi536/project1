@@ -714,17 +714,20 @@ ${criteriaLines}
 【候補者一覧】
 ${candidateList}
 
-各候補者をJSON1行で出力（必ず${profileTexts.length}人分）:
-{"results":[{"i":1,"o":"OK"},{"i":2,"o":"NG"}]}`;
+必ず以下のJSON形式のみで出力してください。説明・前置き・コードブロック不要。
+{"results":[{"i":1,"o":"OK"},{"i":2,"o":"NG"}]}
+※必ず${profileTexts.length}人分出力すること。oはOK/NG/要確認のいずれか。`;
 
   const data = await claudeFetch(apiKey, {
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 200,
+    max_tokens: 400,
     messages: [{ role: 'user', content: prompt }]
   });
   const text = (data.content?.[0]?.text || '').trim();
-  const clean = text.replace(/```json|```/g, '').trim();
-  const parsed = JSON.parse(clean);
+  // コードブロックや前後のテキストを除去してJSONオブジェクト部分だけ抽出
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('JSON not found: ' + text.slice(0, 80));
+  const parsed = JSON.parse(jsonMatch[0]);
   return (parsed.results || []).map(r => r.overall || r.o || '要確認');
 }
 
