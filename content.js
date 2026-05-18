@@ -804,8 +804,8 @@ async function triggerAutoAdd() {
   // RDSはパネルを信頼するためストレージ不要。他媒体のみ取得
   const scoutHistory = isRDS ? {} : await getScoutHistory();
 
-  // ─── Phase 1: プロフィール取得・即時NG判定 ───
-  const pending = []; // AI判定が必要な候補者
+  // ─── 候補者を1人ずつ処理 ───
+  const pending = []; // 処理済み記録用
   for (let i = 0; i < cards.length; i++) {
     const { el, text: cardText } = cards[i];
     showAutoStatus(`📥 ${i + 1}/${cards.length}人 プロフィール取得中...`);
@@ -847,41 +847,18 @@ async function triggerAutoAdd() {
       continue;
     }
 
-    setBatchBadge(el, 'checking', '🔍 判定待ち...');
-    pending.push({ el, profileText, candidateId });
-  }
-
-  // ─── Phase 2: バッチAI判定（5人ずつ）───
-  const BATCH_SIZE = 3;
-  const overallMap = new Map(); // el → overall
-  for (let i = 0; i < pending.length; i += BATCH_SIZE) {
-    const batch = pending.slice(i, i + BATCH_SIZE);
-    showAutoStatus(`🤖 AI判定中... (${i + 1}〜${Math.min(i + BATCH_SIZE, pending.length)}/${pending.length}人)`);
-    batch.forEach(({ el }) => setBatchBadge(el, 'checking', '🤖 判定中...'));
+    // ─── AI判定（1人ずつ）───
+    setBatchBadge(el, 'checking', '🤖 判定中...');
+    showAutoStatus(`🤖 ${pending.length + 1}人目 AI判定中... ✅${addedCount}人追加`);
+    let overall;
     try {
-      const results = await judgeProfileBatch(apiKey, batch.map(p => p.profileText), criteria);
-      batch.forEach(({ el }, j) => overallMap.set(el, results[j] || '要確認'));
+      overall = await judgeSingleCandidate(apiKey, profileText, criteria);
     } catch (err) {
-      console.error('[Snow-we] judgeProfileBatch error:', err);
-      // フォールバック：1人ずつ判定
-      for (const item of batch) {
-        try {
-          const r = await judgeSingleCandidate(apiKey, item.profileText, criteria);
-          overallMap.set(item.el, r);
-        } catch (e2) {
-          overallMap.set(item.el, 'error');
-        }
-      }
-    }
-  }
-
-  // ─── Phase 3: 結果反映・リスト追加 ───
-  for (const { el, candidateId } of pending) {
-    const overall = overallMap.get(el) || '要確認';
-
-    if (overall === 'error') {
-      setBatchBadge(el, 'warn', '⚠️ 判定失敗');
+      console.error('[Snow-we] judgeSingleCandidate error:', err);
+      setBatchBadge(el, 'warn', `⚠️ 判定失敗: ${(err.message || '').slice(0, 30)}`);
       totalProcessed++;
+      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+      await sleep(500);
       continue;
     }
 
@@ -906,8 +883,9 @@ async function triggerAutoAdd() {
     }
 
     totalProcessed++;
+    pending.push(el); // 処理済みとして記録
     await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
-    await sleep(400);
+    await sleep(500);
   }
 
   // 次のページがあれば自動で移動して処理を続ける
@@ -954,6 +932,8 @@ async function getFullProfile(cardEl, fallbackText) {
   if (platform === 'rds') {
     cardEl.click();
     await sleep(1500);
+    // スカウト履歴タブが表示されている場合はレジュメタブに切り替える
+    await tryClickRDSResumeTab();
     const panel = findRDSDetailPanel();
     if (panel) {
       const full = removeNonProfileSections(extractMainText(panel, 3000));
