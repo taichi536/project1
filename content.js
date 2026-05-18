@@ -686,7 +686,7 @@ async function claudeFetch(apiKey, body, maxRetries = 4) {
     });
     if (response.status === 529) {
       if (attempt === maxRetries) throw new Error('APIが混み合っています。しばらく待ってから再試行してください。');
-      showToast(`APIが混み合っています。${delay / 1000}秒後にリトライ... (${attempt + 1}/${maxRetries})`, delay - 200);
+      showAutoStatus(`APIが混み合っています。${delay / 1000}秒後にリトライ... (${attempt + 1}/${maxRetries})`, delay - 200);
       await sleep(delay);
       delay = Math.min(delay * 2, 30000);
       continue;
@@ -1092,27 +1092,18 @@ function checkIncomeNG(profileText) {
   const income = extractIncomeFromText(profileText);
   if (income === null) return null; // 年収不明は判定しない
 
-  // ITエンジニア系キーワードで職種を簡易判定
-  const isIT = /エンジニア|開発|プログラ|インフラ|クラウド|SE[^A-Z]|システム構築|データエンジニア/.test(profileText);
-
+  // プリチェックは文系基準（厳しい方）を使う
+  // ITエンジニアは文系基準より緩いため、文系基準を下回る＝職種問わずNG確定
   let threshold;
-  if (isIT) {
-    if (age < 30)      threshold = 350;
-    else if (age <= 35) threshold = 500;
-    else if (age <= 40) threshold = 700;
-    else if (age <= 45) threshold = 800;
-    else threshold = null;
-  } else {
-    if (age < 30)      threshold = 500;
-    else if (age <= 35) threshold = 700;
-    else if (age <= 39) threshold = 800;
-    else if (age <= 42) threshold = 1000;
-    else if (age <= 45) threshold = 1200;
-    else threshold = null;
-  }
+  if (age < 30)      threshold = 500;
+  else if (age <= 35) threshold = 700;
+  else if (age <= 39) threshold = 800;
+  else if (age <= 42) threshold = 1000;
+  else if (age <= 45) threshold = 1200;
+  else threshold = null;
 
   if (threshold !== null && income < threshold) {
-    console.log(`[Snow-we] 年収NG: ${age}歳 ${income}万 < 閾値${threshold}万 (${isIT ? 'IT' : '文系'})`);
+    console.log(`[Snow-we] 年収NG: ${age}歳 ${income}万 < 文系閾値${threshold}万`);
     return 'NG';
   }
   return null;
