@@ -810,27 +810,37 @@ async function triggerAutoAdd() {
       }
     }
 
+    let overall;
     try {
-      const overall = await judgeSingleCandidate(apiKey, profileText, criteria);
-      setBatchBadge(el,
-        overall === 'OK' ? 'ok' : overall === 'NG' ? 'ng' : 'warn',
-        overall === 'OK' ? '✅ スカウト候補' : overall === 'NG' ? '❌ 見送り' : '⚠️ 要確認');
+      overall = await judgeSingleCandidate(apiKey, profileText, criteria);
+    } catch (err) {
+      console.error('[Snow-we] judgeSingleCandidate error:', err);
+      setBatchBadge(el, 'warn', `⚠️ 判定失敗: ${(err.message || '').slice(0, 30)}`);
+      totalProcessed++;
+      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+      await sleep(700);
+      continue;
+    }
 
-      // Bizreachはお金がかかるためOKのみ追加（要確認はスキップ）
-      const shouldAdd = getPlatform() === 'bizreach' ? overall === 'OK' : (overall === 'OK' || overall === '要確認');
-      if (shouldAdd) {
-        const tagName = getPlatform() === 'bizreach' ? (criteria.autoTagName || 'KOJI→礼士郎スカウト') : (criteria.autoTagName || '');
+    setBatchBadge(el,
+      overall === 'OK' ? 'ok' : overall === 'NG' ? 'ng' : 'warn',
+      overall === 'OK' ? '✅ スカウト候補' : overall === 'NG' ? '❌ 見送り' : '⚠️ 要確認');
+
+    // Bizreachはお金がかかるためOKのみ追加（要確認はスキップ）
+    const shouldAdd = getPlatform() === 'bizreach' ? overall === 'OK' : (overall === 'OK' || overall === '要確認');
+    if (shouldAdd) {
+      const tagName = getPlatform() === 'bizreach' ? (criteria.autoTagName || 'KOJI→礼士郎スカウト') : (criteria.autoTagName || '');
+      try {
         const added = await clickAddButton(el, tagName);
         if (added) {
           addedCount++;
-          // リスト追加時点の情報を履歴に仮記録（スカウト送信とは別）
           if (candidateId) {
             scoutHistory[`listed_${candidateId}`] = { date: Date.now(), platform: getPlatform() };
           }
         }
+      } catch (err) {
+        console.error('[Snow-we] clickAddButton error:', err);
       }
-    } catch (_) {
-      setBatchBadge(el, 'warn', '⚠️ 判定失敗');
     }
 
     totalProcessed++;
@@ -1193,9 +1203,14 @@ function checkScoutSentInBody() {
   while (true) {
     const idx = bodyText.indexOf('スカウト送信', searchFrom);
     if (idx === -1) break;
-    // 「スカウト送信済み」のタブ名はスキップ（「済」が直後に続く）
-    if (bodyText[idx + 6] === '済') { searchFrom = idx + 7; continue; }
-    const section = bodyText.slice(idx, idx + 500);
+    const nextChars = bodyText.slice(idx + 6, idx + 10);
+    // 「スカウト送信済み」タブ・「スカウト送信履歴」見出し・「スカウト送信する」ボタンはスキップ
+    if (nextChars[0] === '済' || nextChars.startsWith('履歴') || nextChars.startsWith('する') || nextChars.startsWith('ボタン')) {
+      searchFrom = idx + 7;
+      continue;
+    }
+    // 日付は直後100文字以内に限定（遠い日付=職務経歴日付の誤検出を防ぐ）
+    const section = bodyText.slice(idx, idx + 100);
     const dates = section.match(/\d{4}\/\d{2}\/\d{2}/g) || [];
     for (const ds of dates) {
       const d = new Date(`${ds.replace(/\//g, '-')}T00:00:00+09:00`);
@@ -1206,6 +1221,7 @@ function checkScoutSentInBody() {
     searchFrom = idx + 7;
   }
   const result = minDays === Infinity ? null : minDays;
+  console.log('[Snow-we] checkScoutSentInBody result:', result);
   return result;
 }
 
