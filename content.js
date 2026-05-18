@@ -703,7 +703,7 @@ async function claudeFetch(apiKey, body, maxRetries = 4) {
 async function judgeProfileBatch(apiKey, profileTexts, criteria) {
   const criteriaLines = buildCriteriaText(criteria, getPlatform());
   const candidateList = profileTexts.map((t, i) =>
-    `候補者${i + 1}:\n${t.slice(0, 800)}`
+    `候補者${i + 1}:\n${t.slice(0, 2000)}`
   ).join('\n\n');
 
   const prompt = `転職エージェントの一次選定アシスタントです。
@@ -720,7 +720,7 @@ ${candidateList}
 
   const data = await claudeFetch(apiKey, {
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 400,
+    max_tokens: 600,
     messages: [{ role: 'user', content: prompt }]
   });
   const text = (data.content?.[0]?.text || '').trim();
@@ -852,7 +852,7 @@ async function triggerAutoAdd() {
   }
 
   // ─── Phase 2: バッチAI判定（5人ずつ）───
-  const BATCH_SIZE = 5;
+  const BATCH_SIZE = 3;
   const overallMap = new Map(); // el → overall
   for (let i = 0; i < pending.length; i += BATCH_SIZE) {
     const batch = pending.slice(i, i + BATCH_SIZE);
@@ -1438,7 +1438,9 @@ function buildCriteriaText(criteria, platform) {
 
   lines.push(`\n【判定方針】`);
   lines.push(`- 年収基準を下回ることが明確な場合は必ずNG（迷う余地なし）`);
-  lines.push(`- 年収以外の基準で迷う場合は「要確認」。明確な違反のみNG`);
+  lines.push(`- 学歴がMARCH以下でも、大手企業在籍かつ年収基準を満たす場合はOK`);
+  lines.push(`- 年収・社格・在籍期間がすべて問題ない場合は絶対NG条件に該当しない限りOK`);
+  lines.push(`- 上記を満たすが一部情報が不明な場合は「要確認」。明確な基準違反のみNG`);
   lines.push(`- 絶対NG条件（アクセンチュア・秘書等）に該当する場合は他の条件に関わらず即NG`);
 
   // 追加条件（設定タブで入力された場合）
