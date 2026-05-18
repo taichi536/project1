@@ -907,6 +907,20 @@ async function triggerAutoAdd() {
 }
 
 // RDSのプロフィール/レジュメタブに切り替える
+// 条件に関わらずレジュメ系タブを強制クリック
+async function forceClickRDSResumeTab() {
+  const tabLabels = ['レジュメ', 'プロフィール', '基本情報', '職務経歴'];
+  for (const label of tabLabels) {
+    const tab = Array.from(document.querySelectorAll('button, [role="tab"], li, span, a'))
+      .find(el => {
+        const t = (el.innerText || '').trim();
+        return t === label || t.startsWith(label);
+      });
+    if (tab) { tab.click(); await sleep(800); return true; }
+  }
+  return false;
+}
+
 async function tryClickRDSResumeTab() {
   // スカウト履歴系のタブが選択中かどうか確認
   const panel = findRDSDetailPanel();
@@ -944,6 +958,12 @@ async function getFullProfile(cardEl, fallbackText) {
     if (panel) {
       const full = removeNonProfileSections(extractMainText(panel, 3000));
       if (full.length > 200) return full;
+      // まだ短い場合は強制的にタブ切り替えを再試行
+      const switched = await forceClickRDSResumeTab();
+      if (switched) {
+        const full2 = removeNonProfileSections(extractMainText(findRDSDetailPanel(), 3000));
+        if (full2.length > 200) return full2;
+      }
     }
     return fallbackText.substring(0, 900);
   }
@@ -1552,10 +1572,11 @@ function removeNonProfileSections(text) {
     'エージェントからのメッセージ', 'この度はご連絡', '貴方様のご経歴を拝見',
     'ご経歴を拝見し', '採用担当者からのメッセージ', 'メッセージ履歴'
   ];
+  // パネル全体がスカウト履歴・候補者評価から始まる場合は空を返す（idx>50 の制限を撤廃）
   let cutIdx = text.length;
   for (const marker of stopMarkers) {
     const idx = text.indexOf(marker);
-    if (idx > 50 && idx < cutIdx) cutIdx = idx;
+    if (idx >= 0 && idx < cutIdx) cutIdx = idx;
   }
   return text.substring(0, cutIdx).trim();
 }
