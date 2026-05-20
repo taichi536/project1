@@ -539,31 +539,31 @@ def calc_order_qty(
     risk_pct: float = 2.0,
     stop_loss_price: float | None = None,
     max_position_pct: float = 10.0,
+    total_assets: float | None = None,
+    existing_value: float = 0.0,
 ) -> int:
     """
     ポジションサイズ計算（固定リスク法）。
 
-    risk_pct: 1回の取引で許容する損失（資金に対する%）
-    max_position_pct: 1銘柄への最大投資比率（%）
-
-    例: 資金100万円, リスク2%, 損切り5%の場合
-      → 損失上限: 2万円
-      → 1株あたり損失: 5%
-      → 買える株数: 2万 ÷ (価格×0.05) = 資金の40%相当
-      → ただしmax_position_pct=10%で上限キャップ
+    total_assets: 現金＋全ポジション時価の合計（総資産ベースでmax_position_pctを適用）
+    existing_value: 対象銘柄の既存保有額（買い増し上限チェックに使用）
     """
     if price <= 0:
         return 0
 
-    max_by_position = int(cash * max_position_pct / 100 / price)
+    base = total_assets if total_assets and total_assets > 0 else cash
+    max_total_value = base * max_position_pct / 100
+    remaining_value = max(max_total_value - existing_value, 0)
+    max_by_position = int(remaining_value / price)
 
     if stop_loss_price and stop_loss_price < price:
         loss_per_share = price - stop_loss_price
-        risk_amount = cash * risk_pct / 100
+        risk_amount = base * risk_pct / 100
         max_by_risk = int(risk_amount / loss_per_share)
         qty = min(max_by_position, max_by_risk)
     else:
-        # 損切り設定なし: 資金の最大投資比率のみで制限
         qty = max_by_position
 
+    # 手持ち現金を超えないようキャップ
+    qty = min(qty, int(cash / price))
     return max(qty, 0)

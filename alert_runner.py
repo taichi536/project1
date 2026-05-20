@@ -233,11 +233,14 @@ def run_stop_loss_check():
             stop = stop_map.get(ticker)
 
             if stop and current <= stop * STOP_LOSS_MARGIN:
-                # 同じ日に複数回通知しない
                 if notified_stops.get(ticker) != today:
                     print(f"  ⚠️ {ticker}: 現在値 {current:.2f} が損切りライン {stop:.2f} に接近！")
                     send_stop_loss_alert(ticker, current, stop)
                     notified_stops[ticker] = today
+                    # 自動売買が有効なら損切りを実行
+                    if _trader.is_enabled():
+                        trade_result = _trader._execute_sell(ticker, current, reason=f"損切りライン到達({stop:.2f})")
+                        print(f"    → 自動損切り: {trade_result.get('status')} {trade_result.get('message', '')}")
                 else:
                     print(f"  {ticker}: 損切り接近（本日通知済み）")
             else:

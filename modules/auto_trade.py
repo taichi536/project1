@@ -24,10 +24,12 @@ _DEFAULT_SETTINGS = {
     "risk_pct": 2.0,            # 1取引の許容損失（資金の%）
     "max_position_pct": 10.0,   # 1銘柄への最大投資比率（%）
     "min_score": 4,             # 自動買いに必要な最低スコア
-    "sell_score": -4,           # 自動売りに必要な最大スコア
+    "sell_score": -2,           # 自動売りに必要な最大スコア（緩和: -4→-2）
     "use_limit_order": True,    # True=指値, False=成行
     "limit_offset_pct": 0.3,   # 指値: 現在値+X%で買い注文
     "stop_loss_atr_mult": 2.0,  # ATR×倍数で損切りライン設定
+    "take_profit_pct": 10.0,    # 利確ライン: 買値から+X%で自動売却（0=無効）
+    "stop_loss_pct": 5.0,       # 固定損切り: 買値から-X%で自動売却（0=無効）
     "broker": "paper",          # "paper" / "kabu" / "alpaca"
 }
 
@@ -95,14 +97,26 @@ class AutoTrader:
             return {"status": "error", "message": "ブローカーに接続できません"}
 
         s = self.settings
+        positions = self.broker.get_positions()
+        pos = next((p for p in positions if p["ticker"] == ticker), None)
 
-        # 買いシグナル
+        # 保有中なら利確・損切りチェックを優先
+        if pos:
+            avg = pos["avg_price"]
+            tp_pct = s.get("take_profit_pct", 0)
+            sl_pct = s.get("stop_loss_pct", 0)
+            if tp_pct > 0 and price >= avg * (1 + tp_pct / 100):
+                return self._execute_sell(ticker, price, reason=f"利確(+{tp_pct}%)")
+            if sl_pct > 0 and price <= avg * (1 - sl_pct / 100):
+                return self._execute_sell(ticker, price, reason=f"損切り(-{sl_pct}%)")
+
+        # 買いシグナル（未保有 or 追加余地あり）
         if verdict == "買い" and score >= s["min_score"]:
-            return self._execute_buy(ticker, price, atr, stop_loss)
+            return self._execute_buy(ticker, price, atr, stop_loss, positions)
 
-        # 売りシグナル（保有している場合のみ）
-        elif verdict == "売り" and score <= s["sell_score"]:
-            return self._execute_sell(ticker, price)
+        # 売りシグナル
+        elif verdict == "売り" and score <= s["sell_score"] and pos:
+            return self._execute_sell(ticker, price, reason=f"売りシグナル(score={score:+d})")
 
         return None
 
@@ -112,15 +126,29 @@ class AutoTrader:
         price: float,
         atr: float | None,
         stop_loss: float | None,
+        positions: list[dict],
     ) -> dict:
         s = self.settings
         balance = self.broker.get_balance()
         cash = balance["buying_power"]
 
-        # 損切りライン計算
+        # 総資産と既存保有額を計算
+        total_assets = cash + sum(p.get("market_value", p["qty"] * p["avg_price"]) for p in positions)
+        existing = next((p for p in positions if p["ticker"] == ticker), None)
+        existing_value = existing.get("market_value", existing["qty"] * existing["avg_price"]) if existing else 0.0
+
+        # 既にmax_position_pct以上保有していればスキップ
+        if existing_value >= total_assets * s["max_position_pct"] / 100:
+            return {"status": "skipped", "message": f"{ticker}は既に上限({s['max_position_pct']}%)保有中"}
+
         sl_price = stop_loss
         if sl_price is None and atr:
             sl_price = price - atr * s["stop_loss_atr_mult"]
+        # 固定損切り%が設定されていればATRより優先して使う
+        sl_pct = s.get("stop_loss_pct", 0)
+        if sl_pct > 0:
+            sl_price_fixed = price * (1 - sl_pct / 100)
+            sl_price = sl_price_fixed if sl_price is None else max(sl_price, sl_price_fixed)
 
         qty = calc_order_qty(
             cash=cash,
@@ -128,6 +156,8 @@ class AutoTrader:
             risk_pct=s["risk_pct"],
             stop_loss_price=sl_price,
             max_position_pct=s["max_position_pct"],
+            total_assets=total_assets,
+            existing_value=existing_value,
         )
 
         if qty <= 0:
@@ -156,8 +186,7 @@ class AutoTrader:
         })
         return result
 
-    def _execute_sell(self, ticker: str, price: float) -> dict:
-        # 保有ポジションを確認
+    def _execute_sell(self, ticker: str, price: float, reason: str = "") -> dict:
         positions = self.broker.get_positions()
         pos = next((p for p in positions if p["ticker"] == ticker), None)
         if not pos or pos["qty"] <= 0:
@@ -181,6 +210,7 @@ class AutoTrader:
             "side": "sell",
             "qty": qty,
             "exec_price": limit_price or price,
+            "reason": reason,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         })
         return result
