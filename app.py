@@ -154,17 +154,21 @@ if page == "🏠 ダッシュボード":
     mst = market_status()
     col_r1, col_r2 = st.columns([2, 2])
     with col_r1:
-        auto_refresh = st.toggle("🔄 自動更新", value=False)
+        auto_refresh = st.toggle("🔄 自動更新",
+                                 value=st.session_state.get("auto_refresh", False),
+                                 key="auto_refresh")
     with col_r2:
         interval_label = st.selectbox(
             "間隔",
             ["1分", "3分", "5分", "15分"],
-            index=1,
+            index=st.session_state.get("auto_refresh_interval_idx", 1),
             disabled=not auto_refresh,
             label_visibility="collapsed",
+            key="auto_refresh_interval",
         )
     interval_map = {"1分": 60, "3分": 180, "5分": 300, "15分": 900}
     interval_sec = interval_map[interval_label]
+    st.session_state["auto_refresh_interval_idx"] = ["1分", "3分", "5分", "15分"].index(interval_label)
 
     if auto_refresh:
         st_autorefresh(interval=interval_sec * 1000, key="dashboard_refresh")
