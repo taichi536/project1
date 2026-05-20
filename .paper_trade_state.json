@@ -1,0 +1,41 @@
+{
+  "cash": 966017.2903326666,
+  "positions": {
+    "7203": {
+      "qty": 10,
+      "avg_price": 2503.2709667333424,
+      "last_price": 2503.2709667333424
+    },
+    "9984": {
+      "qty": 5,
+      "avg_price": 1790.0,
+      "last_price": 1790.0
+    }
+  },
+  "pending_orders": [],
+  "orders": [],
+  "trade_log": [
+    {
+      "order_id": "PAPER-20260520031938-7203",
+      "ticker": "7203",
+      "side": "buy",
+      "qty": 10,
+      "price": 2503.2709667333424,
+      "order_type": "market",
+      "timestamp": "2026-05-20 03:19:38",
+      "status": "filled",
+      "reason": "成行(スリッページ 0.13%)"
+    },
+    {
+      "order_id": "PAPER-20260520031938-9984",
+      "ticker": "9984",
+      "side": "buy",
+      "qty": 5,
+      "price": 1790.0,
+      "order_type": "limit",
+      "timestamp": "2026-05-20",
+      "status": "filled",
+      "reason": "指値約定"
+    }
+  ]
+}
