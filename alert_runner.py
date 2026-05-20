@@ -328,6 +328,28 @@ def main():
             print("📅 本日は市場休場日のためシグナルチェックをスキップします")
             return
 
+        # 未約定の指値注文を処理
+        if _trader.is_enabled() and hasattr(_trader.broker, "process_pending_orders"):
+            pending = _trader.broker.get_orders()
+            pending_tickers = list({o["ticker"] for o in pending if o.get("status") == "pending"})
+            if pending_tickers:
+                print(f"[指値注文処理] {len(pending_tickers)}銘柄の未約定注文を確認中...")
+                ohlcv_map = {}
+                for t in pending_tickers:
+                    try:
+                        df = fetch_ohlcv(t, period="3d")
+                        if not df.empty:
+                            row = df.iloc[-1]
+                            ohlcv_map[t] = {
+                                "open": float(row["Open"]), "high": float(row["High"]),
+                                "low": float(row["Low"]), "close": float(row["Close"]),
+                            }
+                    except Exception:
+                        pass
+                fill_results = _trader.broker.process_pending_orders(ohlcv_map)
+                for r in fill_results:
+                    print(f"  → {r['message']}")
+
         # 月曜の朝9時だけ自動ウォッチリスト更新（週1回）
         if args.mode in ("all", "watchlist"):
             now = datetime.now()

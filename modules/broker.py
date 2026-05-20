@@ -23,8 +23,9 @@ Alpaca 設定:
 
 import os
 import json
+import random
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -72,11 +73,16 @@ class BrokerBase:
 _PAPER_STATE_FILE = Path(__file__).parent.parent / ".paper_trade_state.json"
 
 
+_SLIPPAGE_RATE = 0.002   # 成行注文のスリッページ: 0.2%
+_PENDING_EXPIRY_DAYS = 3  # 指値注文が未約定のまま失効するまでの日数
+
+
 class PaperBroker(BrokerBase):
     """
     ペーパートレード（仮想売買）。
-    APIなしで動作し、.paper_trade_state.jsonに状態を保存する。
-    実際のお金は動かない。動作確認・戦略テストに使う。
+    - 成行注文: 即時約定、スリッページ 0.2% を加算
+    - 指値注文: 未約定キューに入れ、次回 process_pending_orders() で OHLCV を確認して約定判定
+    - 3日間未約定の指値はキャンセル
     """
 
     def __init__(self, initial_cash: float = 1_000_000.0):
@@ -84,10 +90,15 @@ class PaperBroker(BrokerBase):
         if not self._state:
             self._state = {
                 "cash": initial_cash,
-                "positions": {},   # ticker → {qty, avg_price}
+                "positions": {},       # ticker → {qty, avg_price}
+                "pending_orders": [],  # 未約定の指値注文
                 "orders": [],
                 "trade_log": [],
             }
+            self._save()
+        # 古いステートに pending_orders がない場合の互換対応
+        if "pending_orders" not in self._state:
+            self._state["pending_orders"] = []
             self._save()
 
     def _load(self) -> dict:
@@ -126,7 +137,7 @@ class PaperBroker(BrokerBase):
         return result
 
     def get_orders(self) -> list[dict]:
-        return self._state.get("orders", [])
+        return self._state.get("pending_orders", []) + self._state.get("orders", [])
 
     def update_prices(self, price_map: dict[str, float]):
         """ポジションの時価を更新（UI表示用）"""
@@ -134,6 +145,43 @@ class PaperBroker(BrokerBase):
             if ticker in self._state["positions"]:
                 self._state["positions"][ticker]["last_price"] = price
         self._save()
+
+    def _apply_fill(self, ticker: str, side: str, qty: int, exec_price: float,
+                    order_id: str, order_type: str, timestamp: str, reason: str = "") -> dict:
+        """実際にポジションを更新してログを記録する共通処理"""
+        if side == "buy":
+            cost = qty * exec_price
+            if self._state["cash"] < cost:
+                return {"order_id": order_id, "status": "rejected", "message": "現金不足"}
+            self._state["cash"] -= cost
+            pos = self._state["positions"].get(ticker, {"qty": 0, "avg_price": 0.0})
+            total_qty = pos["qty"] + qty
+            total_cost = pos["qty"] * pos["avg_price"] + cost
+            self._state["positions"][ticker] = {
+                "qty": total_qty,
+                "avg_price": total_cost / total_qty if total_qty > 0 else 0,
+                "last_price": exec_price,
+            }
+        elif side == "sell":
+            pos = self._state["positions"].get(ticker)
+            if not pos or pos["qty"] < qty:
+                return {"order_id": order_id, "status": "rejected", "message": "保有株数不足"}
+            proceeds = qty * exec_price
+            self._state["cash"] += proceeds
+            new_qty = pos["qty"] - qty
+            if new_qty == 0:
+                del self._state["positions"][ticker]
+            else:
+                self._state["positions"][ticker]["qty"] = new_qty
+
+        self._state["trade_log"].append({
+            "order_id": order_id, "ticker": ticker, "side": side, "qty": qty,
+            "price": exec_price, "order_type": order_type,
+            "timestamp": timestamp, "status": "filled", "reason": reason,
+        })
+        self._save()
+        return {"order_id": order_id, "status": "filled",
+                "message": f"約定: {side} {ticker} {qty}株 @ {exec_price:.2f}{' (' + reason + ')' if reason else ''}"}
 
     def place_order(
         self,
@@ -146,48 +194,69 @@ class PaperBroker(BrokerBase):
     ) -> dict:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         order_id = f"PAPER-{datetime.now().strftime('%Y%m%d%H%M%S')}-{ticker}"
+        ref_price = price or 0.0
 
-        exec_price = price if (order_type == "limit" and price) else price or 0.0
-
-        if side == "buy":
-            cost = qty * exec_price
-            if self._state["cash"] < cost:
-                return {"order_id": None, "status": "rejected", "message": "現金不足"}
-            self._state["cash"] -= cost
-            pos = self._state["positions"].get(ticker, {"qty": 0, "avg_price": 0.0})
-            total_qty = pos["qty"] + qty
-            total_cost = pos["qty"] * pos["avg_price"] + cost
-            self._state["positions"][ticker] = {
-                "qty": total_qty,
-                "avg_price": total_cost / total_qty if total_qty > 0 else 0,
-                "last_price": exec_price,
+        if order_type == "market":
+            # 成行: スリッページを加算して即時約定
+            slip = _SLIPPAGE_RATE * random.uniform(0.5, 1.5)
+            exec_price = ref_price * (1 + slip) if side == "buy" else ref_price * (1 - slip)
+            return self._apply_fill(ticker, side, qty, exec_price, order_id, order_type, now,
+                                    reason=f"成行(スリッページ {slip*100:.2f}%)")
+        else:
+            # 指値: 未約定キューに追加（現金は拘束しない）
+            expires = (datetime.now() + timedelta(days=_PENDING_EXPIRY_DAYS)).strftime("%Y-%m-%d")
+            pending = {
+                "order_id": order_id, "ticker": ticker, "side": side, "qty": qty,
+                "limit_price": ref_price, "placed_at": now, "expires": expires,
             }
+            self._state["pending_orders"].append(pending)
+            self._save()
+            return {"order_id": order_id, "status": "pending",
+                    "message": f"指値注文受付（未約定）: {side} {ticker} {qty}株 @ {ref_price:.2f} 有効期限:{expires}"}
 
-        elif side == "sell":
-            pos = self._state["positions"].get(ticker)
-            if not pos or pos["qty"] < qty:
-                return {"order_id": None, "status": "rejected", "message": "保有株数不足"}
-            proceeds = qty * exec_price
-            self._state["cash"] += proceeds
-            new_qty = pos["qty"] - qty
-            if new_qty == 0:
-                del self._state["positions"][ticker]
-            else:
-                self._state["positions"][ticker]["qty"] = new_qty
+    def process_pending_orders(self, ohlcv_map: dict[str, dict]) -> list[dict]:
+        """
+        未約定の指値注文を OHLCV データで約定判定する。
+        ohlcv_map: {ticker: {"open": x, "high": x, "low": x, "close": x}}
+        約定・期限切れになった注文の結果リストを返す。
+        """
+        remaining = []
+        results = []
+        today = datetime.now().strftime("%Y-%m-%d")
 
-        self._state["trade_log"].append({
-            "order_id": order_id,
-            "ticker": ticker,
-            "side": side,
-            "qty": qty,
-            "price": exec_price,
-            "order_type": order_type,
-            "timestamp": now,
-            "status": "filled",
-        })
+        for order in self._state.get("pending_orders", []):
+            ticker = order["ticker"]
+            ohlcv = ohlcv_map.get(ticker)
+            filled = False
+
+            if ohlcv:
+                limit = order["limit_price"]
+                side = order["side"]
+                # 買い指値: 安値が指値以下 → 約定（始値 or 指値の低い方で約定）
+                if side == "buy" and ohlcv.get("low", 9999999) <= limit:
+                    exec_price = min(ohlcv.get("open", limit), limit)
+                    r = self._apply_fill(ticker, side, order["qty"], exec_price,
+                                         order["order_id"], "limit", today, reason="指値約定")
+                    results.append(r)
+                    filled = True
+                # 売り指値: 高値が指値以上 → 約定（始値 or 指値の高い方で約定）
+                elif side == "sell" and ohlcv.get("high", 0) >= limit:
+                    exec_price = max(ohlcv.get("open", limit), limit)
+                    r = self._apply_fill(ticker, side, order["qty"], exec_price,
+                                         order["order_id"], "limit", today, reason="指値約定")
+                    results.append(r)
+                    filled = True
+
+            if not filled:
+                if order.get("expires", "9999-99-99") < today:
+                    results.append({"order_id": order["order_id"], "status": "cancelled",
+                                    "message": f"期限切れキャンセル: {ticker}"})
+                else:
+                    remaining.append(order)
+
+        self._state["pending_orders"] = remaining
         self._save()
-
-        return {"order_id": order_id, "status": "filled", "message": f"約定: {side} {ticker} {qty}株 @ {exec_price}"}
+        return results
 
     def cancel_order(self, order_id: str) -> bool:
         return False
