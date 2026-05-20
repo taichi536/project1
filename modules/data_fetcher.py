@@ -42,14 +42,15 @@ def fetch_current_price(ticker: str) -> dict:
         return {"ticker": ticker, "price": None, "error": str(e)}
 
 
-# ── J-Quants API（日本株リアルタイム・無料登録必須） ────────────────────────
+# ── J-Quants API（日本株・v2対応） ───────────────────────────────────────────
 class JQuantsClient:
-    BASE = "https://api.jquants.com/v1"
+    BASE_V2 = "https://api.jquants.com/v2"
+    BASE_V1 = "https://api.jquants.com/v1"
 
     def __init__(self, api_key: str | None = None,
                  refresh_token: str | None = None,
                  email: str | None = None, password: str | None = None):
-        self._api_key = api_key          # 新方式: ダッシュボードのAPIキーをそのまま使う
+        self._api_key = api_key
         self._init_refresh_token = refresh_token
         self.email = email
         self.password = password
@@ -57,10 +58,17 @@ class JQuantsClient:
         self._id_token: str | None = None
         self._token_expiry: datetime | None = None
 
+    def _headers(self) -> dict:
+        if self._api_key:
+            return {"x-api-key": self._api_key}
+        if not self._id_token or datetime.now() > (self._token_expiry or datetime.min):
+            self._get_id_token()
+        return {"Authorization": f"Bearer {self._id_token}"}
+
     def _get_refresh_token(self) -> str:
         if self._init_refresh_token:
             return self._init_refresh_token
-        resp = requests.post(f"{self.BASE}/token/auth_user",
+        resp = requests.post(f"{self.BASE_V1}/token/auth_user",
                              json={"mailaddress": self.email, "password": self.password},
                              timeout=10)
         resp.raise_for_status()
@@ -69,7 +77,7 @@ class JQuantsClient:
     def _get_id_token(self) -> str:
         if not self._refresh_token:
             self._refresh_token = self._get_refresh_token()
-        resp = requests.post(f"{self.BASE}/token/auth_refresh",
+        resp = requests.post(f"{self.BASE_V1}/token/auth_refresh",
                              params={"refreshtoken": self._refresh_token},
                              timeout=10)
         resp.raise_for_status()
@@ -78,30 +86,33 @@ class JQuantsClient:
         self._token_expiry = datetime.now() + timedelta(hours=23)
         return token
 
-    def _headers(self) -> dict:
-        # APIキー方式（新方式）: そのままBearerトークンとして使う
-        if self._api_key:
-            return {"Authorization": f"Bearer {self._api_key}"}
-        # リフレッシュトークン → IDトークン交換方式（旧方式）
-        if not self._id_token or datetime.now() > (self._token_expiry or datetime.min):
-            self._get_id_token()
-        return {"Authorization": f"Bearer {self._id_token}"}
-
-    def get_daily_quotes(self, code: str, date: str | None = None) -> pd.DataFrame:
-        """日次株価（コード: '7203' 形式）"""
-        params = {"code": code}
-        if date:
-            params["date"] = date
-        resp = requests.get(f"{self.BASE}/prices/daily_quotes",
-                            headers=self._headers(), params=params, timeout=15)
-        resp.raise_for_status()
-        data = resp.json().get("daily_quotes", [])
-        return pd.DataFrame(data)
-
     def get_price_range(self, code: str, date_from: str, date_to: str) -> pd.DataFrame:
-        """期間指定で株価取得"""
+        """期間指定で株価取得（v2: /equities/bars/daily, v1: /prices/daily_quotes）"""
+        if self._api_key:
+            return self._get_price_range_v2(code, date_from, date_to)
+        return self._get_price_range_v1(code, date_from, date_to)
+
+    def _get_price_range_v2(self, code: str, date_from: str, date_to: str) -> pd.DataFrame:
         params = {"code": code, "date_from": date_from, "date_to": date_to}
-        resp = requests.get(f"{self.BASE}/prices/daily_quotes",
+        resp = requests.get(f"{self.BASE_V2}/equities/bars/daily",
+                            headers=self._headers(), params=params, timeout=20)
+        resp.raise_for_status()
+        data = resp.json().get("bars", [])
+        df = pd.DataFrame(data)
+        if not df.empty:
+            df["Date"] = pd.to_datetime(df["date"])
+            df = df.set_index("Date").sort_index()
+            df = df.rename(columns={
+                "open": "Open", "high": "High", "low": "Low",
+                "close": "Close", "volume": "Volume"
+            })
+            cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in df.columns]
+            df = df[cols]
+        return df
+
+    def _get_price_range_v1(self, code: str, date_from: str, date_to: str) -> pd.DataFrame:
+        params = {"code": code, "date_from": date_from, "date_to": date_to}
+        resp = requests.get(f"{self.BASE_V1}/prices/daily_quotes",
                             headers=self._headers(), params=params, timeout=20)
         resp.raise_for_status()
         data = resp.json().get("daily_quotes", [])
@@ -109,10 +120,8 @@ class JQuantsClient:
         if not df.empty:
             df["Date"] = pd.to_datetime(df["Date"])
             df = df.set_index("Date").sort_index()
-            df = df.rename(columns={
-                "Open": "Open", "High": "High", "Low": "Low",
-                "Close": "Close", "Volume": "Volume"
-            })
+            cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in df.columns]
+            df = df[cols]
         return df
 
 
