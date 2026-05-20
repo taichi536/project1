@@ -46,9 +46,11 @@ def fetch_current_price(ticker: str) -> dict:
 class JQuantsClient:
     BASE = "https://api.jquants.com/v1"
 
-    def __init__(self, refresh_token: str | None = None,
+    def __init__(self, api_key: str | None = None,
+                 refresh_token: str | None = None,
                  email: str | None = None, password: str | None = None):
-        self._init_refresh_token = refresh_token  # ダッシュボードから取得したトークン
+        self._api_key = api_key          # 新方式: ダッシュボードのAPIキーをそのまま使う
+        self._init_refresh_token = refresh_token
         self.email = email
         self.password = password
         self._refresh_token: str | None = refresh_token
@@ -56,10 +58,8 @@ class JQuantsClient:
         self._token_expiry: datetime | None = None
 
     def _get_refresh_token(self) -> str:
-        # リフレッシュトークンが直接指定されている場合はそのまま使う
         if self._init_refresh_token:
             return self._init_refresh_token
-        # メール＋パスワード方式（旧来の認証）
         resp = requests.post(f"{self.BASE}/token/auth_user",
                              json={"mailaddress": self.email, "password": self.password},
                              timeout=10)
@@ -79,6 +79,10 @@ class JQuantsClient:
         return token
 
     def _headers(self) -> dict:
+        # APIキー方式（新方式）: そのままBearerトークンとして使う
+        if self._api_key:
+            return {"Authorization": f"Bearer {self._api_key}"}
+        # リフレッシュトークン → IDトークン交換方式（旧方式）
         if not self._id_token or datetime.now() > (self._token_expiry or datetime.min):
             self._get_id_token()
         return {"Authorization": f"Bearer {self._id_token}"}
@@ -113,11 +117,15 @@ class JQuantsClient:
 
 
 def _get_jquants_client() -> JQuantsClient | None:
-    # 方法1: リフレッシュトークン直接指定（推奨・新方式）
+    # 方法1: APIキー（最新方式・ダッシュボードの「API Key」）
+    api_key = os.getenv("JQUANTS_API_KEY")
+    if api_key:
+        return JQuantsClient(api_key=api_key)
+    # 方法2: リフレッシュトークン
     refresh_token = os.getenv("JQUANTS_REFRESH_TOKEN")
     if refresh_token:
         return JQuantsClient(refresh_token=refresh_token)
-    # 方法2: メール＋パスワード（旧方式）
+    # 方法3: メール＋パスワード（旧方式）
     email = os.getenv("JQUANTS_EMAIL")
     password = os.getenv("JQUANTS_PASSWORD")
     if email and password:
