@@ -46,14 +46,20 @@ def fetch_current_price(ticker: str) -> dict:
 class JQuantsClient:
     BASE = "https://api.jquants.com/v1"
 
-    def __init__(self, email: str, password: str):
+    def __init__(self, refresh_token: str | None = None,
+                 email: str | None = None, password: str | None = None):
+        self._init_refresh_token = refresh_token  # ダッシュボードから取得したトークン
         self.email = email
         self.password = password
-        self._refresh_token: str | None = None
+        self._refresh_token: str | None = refresh_token
         self._id_token: str | None = None
         self._token_expiry: datetime | None = None
 
     def _get_refresh_token(self) -> str:
+        # リフレッシュトークンが直接指定されている場合はそのまま使う
+        if self._init_refresh_token:
+            return self._init_refresh_token
+        # メール＋パスワード方式（旧来の認証）
         resp = requests.post(f"{self.BASE}/token/auth_user",
                              json={"mailaddress": self.email, "password": self.password},
                              timeout=10)
@@ -107,10 +113,15 @@ class JQuantsClient:
 
 
 def _get_jquants_client() -> JQuantsClient | None:
+    # 方法1: リフレッシュトークン直接指定（推奨・新方式）
+    refresh_token = os.getenv("JQUANTS_REFRESH_TOKEN")
+    if refresh_token:
+        return JQuantsClient(refresh_token=refresh_token)
+    # 方法2: メール＋パスワード（旧方式）
     email = os.getenv("JQUANTS_EMAIL")
     password = os.getenv("JQUANTS_PASSWORD")
     if email and password:
-        return JQuantsClient(email, password)
+        return JQuantsClient(email=email, password=password)
     return None
 
 
