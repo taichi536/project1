@@ -93,18 +93,19 @@ class JQuantsClient:
         return self._get_price_range_v1(code, date_from, date_to)
 
     def _get_price_range_v2(self, code: str, date_from: str, date_to: str) -> pd.DataFrame:
-        params = {"code": code, "date_from": date_from, "date_to": date_to}
+        params = {"code": code, "from": date_from, "to": date_to}
         resp = requests.get(f"{self.BASE_V2}/equities/bars/daily",
                             headers=self._headers(), params=params, timeout=20)
         resp.raise_for_status()
-        data = resp.json().get("bars", [])
+        data = resp.json().get("data", [])
         df = pd.DataFrame(data)
         if not df.empty:
-            df["Date"] = pd.to_datetime(df["date"])
+            df["Date"] = pd.to_datetime(df["Date"])
             df = df.set_index("Date").sort_index()
+            # 調整済み価格を優先使用（株式分割等に対応）
             df = df.rename(columns={
-                "open": "Open", "high": "High", "low": "Low",
-                "close": "Close", "volume": "Volume"
+                "AdjO": "Open", "AdjH": "High", "AdjL": "Low",
+                "AdjC": "Close", "AdjVo": "Volume",
             })
             cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in df.columns]
             df = df[cols]
