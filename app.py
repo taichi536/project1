@@ -20,7 +20,7 @@ from modules.diary import add_trade, get_trades, add_review, get_reviews, trade_
 from modules.ai_analysis import analyze_five_forces, analyze_chart_ai
 from modules.news_fetcher import fetch_market_news, score_macro_relevance
 from modules.macro_analysis import get_macro_context, analyze_news_sentiment, quick_market_sentiment, fetch_live_market_data, get_market_sentiment_rule, get_sector_impact
-from modules.backtest import run_backtest, STRATEGIES
+from modules.backtest import run_backtest, run_batch_backtest, STRATEGIES
 from modules.portfolio import build_portfolio_summary
 from modules.charts import build_backtest_chart, build_correlation_heatmap, build_portfolio_pie
 from modules.notifier import send_signal_alert, send_screening_alert, send_stop_loss_alert, send_strong_buy_alert
@@ -1666,96 +1666,195 @@ elif page == "🔬 バックテスト":
     st.title("🔬 バックテスト")
     st.markdown("過去データで売買戦略の有効性を検証します")
 
-    bt_ticker = st.session_state.get("current_ticker", "7203")
-    st.success(f"📌 検証銘柄: **{bt_ticker}**　← サイドバーで変更できます")
-    _btc1, _btc2, _btc3 = st.columns([2, 1, 1])
-    with _btc1:
-        st.markdown("")  # spacer
-    c2, c3 = _btc2, _btc3
-    with c2:
+    bt_tab_single, bt_tab_batch = st.tabs(["📈 単一銘柄", "📊 一括バックテスト"])
+
+    # ── 共通パラメータ（両タブで使う）──────────────────────────────────────
+    with st.sidebar.expander("⚙️ バックテスト設定", expanded=False):
         bt_period = st.selectbox("検証期間", ["1y", "2y", "5y"], index=1,
                                  format_func=lambda x: {"1y": "1年", "2y": "2年", "5y": "5年"}[x])
-    with c3:
         bt_strategy_label = st.selectbox("戦略", list(STRATEGIES.keys()))
-
-    with st.expander("⚙️ 詳細パラメータ"):
-        pc1, pc2, pc3, pc4 = st.columns(4)
-        bt_short = pc1.number_input("短期MA", value=25, min_value=5, max_value=50)
-        bt_long = pc2.number_input("長期MA", value=75, min_value=20, max_value=200)
-        bt_rsi_buy = pc3.number_input("RSI買いライン", value=35, min_value=10, max_value=50)
-        bt_rsi_sell = pc4.number_input("RSI売りライン", value=65, min_value=50, max_value=90)
+        bt_short = st.number_input("短期MA", value=25, min_value=5, max_value=50)
+        bt_long = st.number_input("長期MA", value=75, min_value=20, max_value=200)
+        bt_rsi_buy = st.number_input("RSI買いライン", value=35, min_value=10, max_value=50)
+        bt_rsi_sell = st.number_input("RSI売りライン", value=65, min_value=50, max_value=90)
         bt_cash = st.number_input("初期資金 (円)", value=1_000_000, min_value=100_000, step=100_000)
         bt_stop_atr = st.slider("損切り幅 (ATR倍)", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
 
-    bt_btn = st.button("▶ バックテスト実行", type="primary", use_container_width=True)
+    strategy_key = STRATEGIES[bt_strategy_label]
 
-    if bt_btn and bt_ticker:
-        with st.spinner("データ取得・バックテスト実行中..."):
-            try:
-                df_raw = fetch_ohlcv(bt_ticker, period=bt_period)
-                strategy_key = STRATEGIES[bt_strategy_label]
-                result = run_backtest(
-                    df_raw,
-                    strategy=strategy_key,
-                    sma_short=bt_short,
-                    sma_long=bt_long,
-                    rsi_buy=bt_rsi_buy,
-                    rsi_sell=bt_rsi_sell,
-                    initial_cash=bt_cash,
-                    stop_loss_atr=bt_stop_atr,
+    # ── 単一銘柄タブ ──────────────────────────────────────────────────────────
+    with bt_tab_single:
+        bt_ticker = st.session_state.get("current_ticker", "7203")
+        st.success(f"📌 検証銘柄: **{bt_ticker}**　← サイドバーで変更できます")
+
+        bt_btn = st.button("▶ バックテスト実行", type="primary", use_container_width=True, key="bt_single_btn")
+
+        if bt_btn and bt_ticker:
+            with st.spinner("データ取得・バックテスト実行中..."):
+                try:
+                    df_raw = fetch_ohlcv(bt_ticker, period=bt_period)
+                    result = run_backtest(
+                        df_raw,
+                        strategy=strategy_key,
+                        sma_short=bt_short,
+                        sma_long=bt_long,
+                        rsi_buy=bt_rsi_buy,
+                        rsi_sell=bt_rsi_sell,
+                        initial_cash=bt_cash,
+                        stop_loss_atr=bt_stop_atr,
+                    )
+                    st.session_state["bt_single_result"] = result
+                    st.session_state["bt_single_ticker"] = bt_ticker
+                    st.session_state["bt_single_label"] = bt_strategy_label
+                except Exception as e:
+                    st.error(f"エラー: {e}")
+
+        result = st.session_state.get("bt_single_result")
+        if result:
+            _label = st.session_state.get("bt_single_label", bt_strategy_label)
+            _ticker = st.session_state.get("bt_single_ticker", bt_ticker)
+            m = result["metrics"]
+            st.markdown("### 📊 パフォーマンス指標")
+            cols = st.columns(7)
+            metrics_list = [
+                ("最終資産", f"¥{m['最終資産']:,.0f}", None),
+                ("総リターン", f"{m['総リターン(%)']:+.1f}%",
+                 f"B&H: {m['B&Hリターン(%)']:+.1f}%"),
+                ("最大DD", f"{m['最大ドローダウン(%)']:.1f}%", None),
+                ("シャープ", f"{m['シャープレシオ']:.2f}", None),
+                ("取引回数", f"{m['総取引回数']}回", None),
+                ("勝率", f"{m['勝率(%)']}%", None),
+                ("戦略 vs B&H", "優位" if m['総リターン(%)'] > m['B&Hリターン(%)'] else "劣後", None),
+            ]
+            for col, (label, val, delta) in zip(cols, metrics_list):
+                col.metric(label, val, delta)
+
+            fig_bt = build_backtest_chart(result["portfolio"], result["trades"], _ticker)
+            st.plotly_chart(fig_bt, use_container_width=True, config={"scrollZoom": True})
+
+            if not result["trades"].empty:
+                st.markdown("### 📋 取引履歴")
+                trades_display = result["trades"].copy()
+                trades_display["損益"] = trades_display["損益"].apply(
+                    lambda x: f"¥{x:+,.0f}" if x != 0 else "-"
                 )
-            except Exception as e:
-                st.error(f"エラー: {e}")
-                st.stop()
+                st.dataframe(trades_display, use_container_width=True, hide_index=True)
 
-        m = result["metrics"]
-        st.markdown("### 📊 パフォーマンス指標")
-        cols = st.columns(7)
-        metrics = [
-            ("最終資産", f"¥{m['最終資産']:,.0f}", None),
-            ("総リターン", f"{m['総リターン(%)']:+.1f}%",
-             f"B&H: {m['B&Hリターン(%)']:+.1f}%"),
-            ("最大DD", f"{m['最大ドローダウン(%)']:.1f}%", None),
-            ("シャープ", f"{m['シャープレシオ']:.2f}", None),
-            ("取引回数", f"{m['総取引回数']}回", None),
-            ("勝率", f"{m['勝率(%)']}%", None),
-            ("戦略 vs B&H", "優位" if m['総リターン(%)'] > m['B&Hリターン(%)'] else "劣後", None),
-        ]
-        for col, (label, val, delta) in zip(cols, metrics):
-            col.metric(label, val, delta)
-
-        fig_bt = build_backtest_chart(result["portfolio"], result["trades"], bt_ticker)
-        st.plotly_chart(fig_bt, use_container_width=True, config={"scrollZoom": True})
-
-        if not result["trades"].empty:
-            st.markdown("### 📋 取引履歴")
-            trades_display = result["trades"].copy()
-            trades_display["損益"] = trades_display["損益"].apply(
-                lambda x: f"¥{x:+,.0f}" if x != 0 else "-"
-            )
-            st.dataframe(trades_display, use_container_width=True, hide_index=True)
-
-            st.markdown("### 💡 AIによる戦略評価")
-            if st.session_state.get("ai_enabled") and os.getenv("ANTHROPIC_API_KEY"):
-                with st.spinner("AIが戦略を評価中..."):
-                    try:
-                        from modules.ai_analysis import _get_client
-                        prompt = f"""バックテスト結果を評価してください。
-銘柄: {bt_ticker} / 戦略: {bt_strategy_label} / 期間: {bt_period}
+                st.markdown("### 💡 AIによる戦略評価")
+                if st.session_state.get("ai_enabled") and os.getenv("ANTHROPIC_API_KEY"):
+                    with st.spinner("AIが戦略を評価中..."):
+                        try:
+                            from modules.ai_analysis import _get_client
+                            prompt = f"""バックテスト結果を評価してください。
+銘柄: {_ticker} / 戦略: {_label} / 期間: {bt_period}
 総リターン: {m['総リターン(%)']:+.1f}% (B&H: {m['B&Hリターン(%)']:+.1f}%)
 最大ドローダウン: {m['最大ドローダウン(%)']:.1f}% / シャープレシオ: {m['シャープレシオ']:.2f}
 勝率: {m['勝率(%)']}% / 取引回数: {m['総取引回数']}回
 
 この戦略の強み・弱み・改善提案を200字以内で日本語で述べてください。"""
-                        client = _get_client()
-                        resp = client.messages.create(
-                            model="claude-sonnet-4-6",
-                            max_tokens=400,
-                            messages=[{"role": "user", "content": prompt}],
-                        )
-                        st.info(resp.content[0].text)
-                    except Exception as e:
-                        st.warning(f"AI評価エラー: {e}")
+                            client = _get_client()
+                            resp = client.messages.create(
+                                model="claude-sonnet-4-6",
+                                max_tokens=400,
+                                messages=[{"role": "user", "content": prompt}],
+                            )
+                            st.info(resp.content[0].text)
+                        except Exception as e:
+                            st.warning(f"AI評価エラー: {e}")
+
+    # ── 一括バックテストタブ ──────────────────────────────────────────────────
+    with bt_tab_batch:
+        st.markdown("ウォッチリストまたは指定銘柄をまとめてバックテストし、戦略の統計的有効性を検証します。")
+
+        from modules.dashboard import load_watchlist as _load_wl
+        _wl = _load_wl()
+        _batch_default = "\n".join(_wl[:20]) if _wl else "7203\n9984\n6758\nAAPL\nMSFT"
+        batch_tickers_raw = st.text_area(
+            "対象銘柄（1行1銘柄）",
+            value=_batch_default,
+            height=150,
+            help="ウォッチリストが自動で入力されます。編集可能です。",
+        )
+        _bcol1, _bcol2 = st.columns([3, 1])
+        with _bcol2:
+            batch_workers = st.number_input("並列数", value=4, min_value=1, max_value=8,
+                                            help="同時に処理する銘柄数。多いほど速いが負荷が上がります")
+        with _bcol1:
+            st.caption(f"戦略: {bt_strategy_label} / 期間: {bt_period} / 初期資金: ¥{bt_cash:,.0f}　（左サイドバーで変更）")
+
+        bt_batch_btn = st.button("▶ 一括バックテスト実行", type="primary", use_container_width=True, key="bt_batch_btn")
+
+        if bt_batch_btn:
+            batch_tickers = [t.strip() for t in batch_tickers_raw.strip().splitlines() if t.strip()]
+            if not batch_tickers:
+                st.error("銘柄を1つ以上入力してください")
+            else:
+                progress_bar = st.progress(0, text=f"0/{len(batch_tickers)}銘柄処理中...")
+                status_text = st.empty()
+                completed = [0]
+
+                def _fetch_with_progress(ticker, period):
+                    df = fetch_ohlcv(ticker, period=period)
+                    completed[0] += 1
+                    progress_bar.progress(
+                        min(completed[0] / len(batch_tickers), 1.0),
+                        text=f"{completed[0]}/{len(batch_tickers)}銘柄処理中..."
+                    )
+                    return df
+
+                with st.spinner(f"{len(batch_tickers)}銘柄を並列バックテスト中..."):
+                    batch_result = run_batch_backtest(
+                        tickers=batch_tickers,
+                        fetch_fn=_fetch_with_progress,
+                        strategy=strategy_key,
+                        period=bt_period,
+                        sma_short=bt_short,
+                        sma_long=bt_long,
+                        rsi_buy=bt_rsi_buy,
+                        rsi_sell=bt_rsi_sell,
+                        initial_cash=bt_cash,
+                        stop_loss_atr=bt_stop_atr,
+                        max_workers=int(batch_workers),
+                    )
+                progress_bar.empty()
+                st.session_state["bt_batch_result"] = batch_result
+
+        batch_result = st.session_state.get("bt_batch_result")
+        if batch_result and not batch_result["rows"].empty:
+            sm = batch_result["summary"]
+            st.markdown("### 📊 集計サマリー")
+            _sc1, _sc2, _sc3, _sc4, _sc5 = st.columns(5)
+            _sc1.metric("対象銘柄", f"{sm['対象銘柄数']}銘柄")
+            _avg_ret = sm['平均リターン(%)']
+            _avg_bh = sm['平均B&Hリターン(%)']
+            _sc2.metric("平均リターン", f"{_avg_ret:+.1f}%", f"B&H: {_avg_bh:+.1f}%")
+            _sc3.metric("平均最大DD", f"{sm['平均最大DD(%)']:.1f}%")
+            _sc4.metric("平均シャープ", f"{sm['平均シャープ']:.2f}")
+            _sc5.metric("戦略優位率", f"{sm['戦略優位率(%)']}%",
+                        f"{sm['戦略優位銘柄数']}/{sm['対象銘柄数']}銘柄")
+
+            _avg_wr = sm['平均勝率(%)']
+            _med_ret = sm['中央値リターン(%)']
+            st.markdown(f"平均勝率 **{_avg_wr:.1f}%** ／ リターン中央値 **{_med_ret:+.1f}%**")
+
+            st.markdown("### 📋 銘柄別結果")
+
+            def _color_return(val):
+                color = "#1e3a2f" if val > 0 else "#3a1e1e" if val < 0 else ""
+                return f"background-color: {color}" if color else ""
+
+            df_rows = batch_result["rows"].copy()
+            df_rows["総リターン(%)"] = df_rows["総リターン(%)"].apply(lambda x: f"{x:+.1f}%")
+            df_rows["B&Hリターン(%)"] = df_rows["B&Hリターン(%)"].apply(lambda x: f"{x:+.1f}%")
+            df_rows["最大DD(%)"] = df_rows["最大DD(%)"].apply(lambda x: f"{x:.1f}%")
+            df_rows["勝率(%)"] = df_rows["勝率(%)"].apply(lambda x: f"{x:.1f}%")
+            df_rows["戦略優位"] = df_rows["戦略優位"].apply(lambda x: "✅" if x else "❌")
+            st.dataframe(df_rows, use_container_width=True, hide_index=True)
+
+            if batch_result["errors"]:
+                with st.expander(f"⚠️ エラー {len(batch_result['errors'])}件"):
+                    for ticker, err in batch_result["errors"]:
+                        st.text(f"{ticker}: {err}")
 
 
 # ─── ポートフォリオ最適化 ─────────────────────────────────────────────────────

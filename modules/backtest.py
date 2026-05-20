@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from modules.technical import compute_all
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def _sma_crossover_signals(df: pd.DataFrame, short: int, long: int) -> pd.Series:
@@ -197,3 +198,79 @@ def run_backtest(
             "初期資産": initial_cash,
         },
     }
+
+
+def run_batch_backtest(
+    tickers: list[str],
+    fetch_fn,
+    strategy: str = "combined",
+    period: str = "2y",
+    sma_short: int = 25,
+    sma_long: int = 75,
+    rsi_buy: float = 35,
+    rsi_sell: float = 65,
+    initial_cash: float = 1_000_000,
+    stop_loss_atr: float = 2.0,
+    max_workers: int = 4,
+) -> dict:
+    """
+    複数銘柄を並列でバックテストし集計結果を返す。
+    fetch_fn(ticker, period) -> DataFrame
+    """
+    rows = []
+    errors = []
+
+    def _run_one(ticker):
+        try:
+            df_raw = fetch_fn(ticker, period=period)
+            result = run_backtest(
+                df_raw,
+                strategy=strategy,
+                sma_short=sma_short,
+                sma_long=sma_long,
+                rsi_buy=rsi_buy,
+                rsi_sell=rsi_sell,
+                initial_cash=initial_cash,
+                stop_loss_atr=stop_loss_atr,
+            )
+            m = result["metrics"]
+            return {
+                "銘柄": ticker,
+                "総リターン(%)": m["総リターン(%)"],
+                "B&Hリターン(%)": m["B&Hリターン(%)"],
+                "最大DD(%)": m["最大ドローダウン(%)"],
+                "シャープ": m["シャープレシオ"],
+                "取引回数": m["総取引回数"],
+                "勝率(%)": m["勝率(%)"],
+                "戦略優位": m["総リターン(%)"] > m["B&Hリターン(%)"],
+            }, None
+        except Exception as e:
+            return None, (ticker, str(e))
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_run_one, t): t for t in tickers}
+        for fut in as_completed(futures):
+            row, err = fut.result()
+            if row:
+                rows.append(row)
+            if err:
+                errors.append(err)
+
+    if not rows:
+        return {"summary": pd.DataFrame(), "rows": pd.DataFrame(), "errors": errors}
+
+    df_rows = pd.DataFrame(rows).sort_values("総リターン(%)", ascending=False).reset_index(drop=True)
+
+    summary = {
+        "対象銘柄数": len(rows),
+        "平均リターン(%)": round(df_rows["総リターン(%)"].mean(), 2),
+        "中央値リターン(%)": round(df_rows["総リターン(%)"].median(), 2),
+        "平均B&Hリターン(%)": round(df_rows["B&Hリターン(%)"].mean(), 2),
+        "平均最大DD(%)": round(df_rows["最大DD(%)"].mean(), 2),
+        "平均シャープ": round(df_rows["シャープ"].mean(), 2),
+        "平均勝率(%)": round(df_rows["勝率(%)"].mean(), 1),
+        "戦略優位銘柄数": int(df_rows["戦略優位"].sum()),
+        "戦略優位率(%)": round(df_rows["戦略優位"].mean() * 100, 1),
+    }
+
+    return {"summary": summary, "rows": df_rows, "errors": errors}
