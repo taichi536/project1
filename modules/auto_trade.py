@@ -23,8 +23,10 @@ _DEFAULT_SETTINGS = {
     "enabled": False,           # 自動売買の有効/無効
     "risk_pct": 2.0,            # 1取引の許容損失（資金の%）
     "max_position_pct": 10.0,   # 1銘柄への最大投資比率（%）
+    "max_positions": 5,         # 同時保有銘柄数の上限
+    "max_invested_pct": 70.0,   # 総資産に対する最大投資比率（%）。残りはキャッシュ確保
     "min_score": 4,             # 自動買いに必要な最低スコア
-    "sell_score": -2,           # 自動売りに必要な最大スコア（緩和: -4→-2）
+    "sell_score": -2,           # 自動売りに必要な最大スコア
     "use_limit_order": True,    # True=指値, False=成行
     "limit_offset_pct": 0.3,   # 指値: 現在値+X%で買い注文
     "stop_loss_atr_mult": 2.0,  # ATR×倍数で損切りライン設定
@@ -112,6 +114,20 @@ class AutoTrader:
 
         # 買いシグナル（未保有 or 追加余地あり）
         if verdict == "買い" and score >= s["min_score"]:
+            # 同時保有銘柄数チェック
+            max_pos = s.get("max_positions", 5)
+            if not pos and len(positions) >= max_pos:
+                return {"status": "skipped", "message": f"同時保有上限({max_pos}銘柄)に達しています"}
+
+            # 総投資比率チェック
+            max_inv = s.get("max_invested_pct", 70.0)
+            balance = self.broker.get_balance()
+            cash = balance["buying_power"]
+            total_assets = cash + sum(p.get("market_value", p["qty"] * p["avg_price"]) for p in positions)
+            invested = total_assets - cash
+            if total_assets > 0 and (invested / total_assets * 100) >= max_inv:
+                return {"status": "skipped", "message": f"総投資比率({max_inv}%)上限に達しています"}
+
             return self._execute_buy(ticker, price, atr, stop_loss, positions)
 
         # 売りシグナル

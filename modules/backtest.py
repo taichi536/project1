@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from modules.technical import compute_all
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from modules.signals import evaluate_signals, overall_signal
 
 
 def _sma_crossover_signals(df: pd.DataFrame, short: int, long: int) -> pd.Series:
@@ -58,11 +59,36 @@ def _combined_signals(df: pd.DataFrame, short: int, long: int) -> pd.Series:
     return signal
 
 
+def _actual_signals(df: pd.DataFrame, sma_short: int, sma_long: int) -> pd.Series:
+    """
+    実際の自動売買ロジック（overall_signal）と同じシグナルでバックテスト。
+    各時点で「その日までのデータのみ」を使ってシグナルを計算する。
+    インジケーターはrolling/ewmなので先読みなし。
+    """
+    result = pd.Series(0, index=df.index)
+    min_rows = sma_long + 10  # 長期MAが安定するまでの最低行数
+    for i in range(len(df)):
+        if i < min_rows:
+            continue
+        slice_df = df.iloc[: i + 1]
+        try:
+            sigs = evaluate_signals(slice_df, sma_short=sma_short, sma_long=sma_long)
+            verdict, _ = overall_signal(sigs, df=slice_df, sma_long=sma_long)
+            if verdict == "買い":
+                result.iloc[i] = 1
+            elif verdict == "売り":
+                result.iloc[i] = -1
+        except Exception:
+            pass
+    return result
+
+
 STRATEGIES = {
+    "実際のシグナル（overall_signal）": "actual",
+    "複合シグナル（推奨）": "combined",
     "ゴールデンクロス（移動平均）": "sma",
     "RSI逆張り": "rsi",
     "MACDクロス": "macd",
-    "複合シグナル（推奨）": "combined",
 }
 
 
@@ -79,7 +105,9 @@ def run_backtest(
     df = compute_all(df_raw.copy(), sma_short=sma_short, sma_long=sma_long)
     df = df.dropna()
 
-    if strategy == "sma":
+    if strategy == "actual":
+        raw_signals = _actual_signals(df, sma_short, sma_long)
+    elif strategy == "sma":
         raw_signals = _sma_crossover_signals(df, sma_short, sma_long)
     elif strategy == "rsi":
         raw_signals = _rsi_signals(df, rsi_buy, rsi_sell)

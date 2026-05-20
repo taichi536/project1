@@ -2,6 +2,8 @@
   "enabled": true,
   "risk_pct": 2.0,
   "max_position_pct": 10.0,
+  "max_positions": 5,
+  "max_invested_pct": 70.0,
   "min_score": 4,
   "sell_score": -2,
   "use_limit_order": true,

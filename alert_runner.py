@@ -21,7 +21,7 @@ import json
 import time
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, date
 from dotenv import load_dotenv
 load_dotenv()
 from modules.data_fetcher import fetch_ohlcv, fetch_earnings_date
@@ -35,6 +35,31 @@ from modules.auto_trade import AutoTrader
 from modules.auto_watchlist import run_auto_watchlist
 
 _trader = AutoTrader()
+
+
+def is_trading_day(check_date: date | None = None) -> bool:
+    """
+    日本株の取引日かどうかを判定する。
+    土日は確実にFalse。祝日は fetch_ohlcv で直近データの日付を確認して判定。
+    """
+    d = check_date or date.today()
+    if d.weekday() >= 5:  # 土(5)・日(6)
+        return False
+    # 直近の取引日付を確認（祝日・年末年始は直近データが古い）
+    try:
+        from modules.data_fetcher import fetch_ohlcv
+        df = fetch_ohlcv("7203", period="5d")  # トヨタで代表確認
+        if df.empty:
+            return False
+        last_date = df.index[-1].date() if hasattr(df.index[-1], "date") else df.index[-1]
+        # 直近データが2営業日以上前なら今日は休場
+        from pandas.tseries.offsets import BDay
+        import pandas as pd
+        cutoff = (pd.Timestamp(d) - BDay(2)).date()
+        return last_date >= cutoff
+    except Exception:
+        return True  # 確認できない場合は実行する
+
 
 # ── 設定 ──────────────────────────────────────────────────────────────────────
 # 環境変数 WATCH_TICKERS が未設定なら watchlist.json を使う
@@ -297,6 +322,11 @@ def main():
         if not tg and not sl:
             print("⚠️ 警告: TELEGRAM_BOT_TOKEN または SLACK_WEBHOOK_URL が設定されていません。")
             print("   通知は届きません。環境変数を設定してください。")
+
+        # 休場日チェック（watchlistモード以外）
+        if args.mode != "watchlist" and not is_trading_day():
+            print("📅 本日は市場休場日のためシグナルチェックをスキップします")
+            return
 
         # 月曜の朝9時だけ自動ウォッチリスト更新（週1回）
         if args.mode in ("all", "watchlist"):
