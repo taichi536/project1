@@ -45,7 +45,7 @@ def get_usdjpy_rate() -> float:
     if _fx_cache.get("rate") and now - _fx_cache.get("fetched_at", 0) < _FX_CACHE_TTL:
         return _fx_cache["rate"]
 
-    # yfinance で取得（複数シンボルを試す）
+    # 方法1: yfinance fast_info
     for sym in ["USDJPY=X", "JPY=X"]:
         try:
             tk = yf.Ticker(sym)
@@ -58,11 +58,25 @@ def get_usdjpy_rate() -> float:
         except Exception:
             continue
 
-    # ファイルキャッシュから復元（古くても使う）
+    # 方法2: yfinance download（1日分）
+    try:
+        df = yf.download("USDJPY=X", period="2d", auto_adjust=True, progress=False)
+        if not df.empty:
+            close = df["Close"]
+            rate = float(close.iloc[-1]) if hasattr(close, "iloc") else float(close)
+            if 80 < rate < 200:
+                _fx_cache["rate"] = rate
+                _fx_cache["fetched_at"] = now
+                _save_fx_file_cache(rate)
+                return rate
+    except Exception:
+        pass
+
+    # 方法3: ファイルキャッシュから復元（古くても使う）
     file_cache = _load_fx_file_cache()
     if file_cache.get("rate") and 80 < file_cache["rate"] < 200:
         _fx_cache["rate"] = file_cache["rate"]
-        _fx_cache["fetched_at"] = now  # 再取得を抑制（TTL内は試みない）
+        _fx_cache["fetched_at"] = now
         return _fx_cache["rate"]
 
     return _FX_DEFAULT
