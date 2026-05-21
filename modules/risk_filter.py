@@ -91,7 +91,9 @@ def assess_signal_risk(
     # ── リスクレベル判定 ──────────────────────────────────────────
     risk_score = min(risk_score, 10)
 
-    if force_skip or risk_score >= 5:
+    if force_skip:
+        risk_score = max(risk_score, 5)  # force_skipはスコアも HIGH 水準に揃える
+    if risk_score >= 5:
         risk_level = "HIGH"
         should_skip = True
         entry_limit_pct = 0.0

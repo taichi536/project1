@@ -91,11 +91,11 @@ def build_main_chart(df: pd.DataFrame, ticker: str, sma_short: int = 25, sma_lon
     colors_vol = [COLORS["up"] if c >= o else COLORS["down"] for c, o in zip(df["Close"], df["Open"])]
     fig.add_trace(go.Bar(x=df.index, y=df["Volume"], marker_color=colors_vol, name="出来高", showlegend=False), row=2, col=1)
 
-    # OBV
+    # OBV（出来高と同じrow2に右側y軸で表示）
     if "OBV" in df.columns:
         fig.add_trace(go.Scatter(
             x=df.index, y=df["OBV"], line=dict(color=COLORS["obv"], width=1.5),
-            name="OBV", yaxis="y5",
+            name="OBV",
         ), row=2, col=1)
 
     # MACD
@@ -292,7 +292,12 @@ def build_backtest_chart(pv: pd.DataFrame, trades_df: pd.DataFrame, ticker: str)
         ]:
             if not subset.empty:
                 dates = pd.to_datetime(subset["日付"])
-                vals = [pv.loc[pv.index.asof(d), "総資産"] if d in pv.index else None for d in dates]
+                # asof で最近傍の日付に合わせて資産額を取得（日付が完全一致しない場合も対応）
+                pv_idx = pd.DatetimeIndex(pv.index)
+                vals = []
+                for d in dates:
+                    nearest = pv_idx.asof(d)
+                    vals.append(float(pv.loc[nearest, "総資産"]) if nearest is not pd.NaT else None)
                 fig.add_trace(go.Scatter(
                     x=dates, y=vals,
                     mode="markers",

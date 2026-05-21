@@ -147,6 +147,7 @@ def calc_pnl(df: pd.DataFrame) -> dict:
         elif action in ("売り", "損切り"):
             remaining = qty
             cost_total = 0.0
+            filled_qty = 0  # 実際に約定できた株数
             while remaining > 0 and queues.get(ticker):
                 lot = queues[ticker][0]
                 lot_date, lot_price, lot_qty = lot
@@ -154,17 +155,23 @@ def calc_pnl(df: pd.DataFrame) -> dict:
                 cost_total += take * lot_price
                 lot[2] -= take
                 remaining -= take
+                filled_qty += take
                 if lot[2] == 0:
                     queues[ticker].pop(0)
 
-            proceeds = qty * price - fee
+            if filled_qty == 0:
+                continue  # 保有なし・売却不可はスキップ
+
+            # 超過売り（保有より多い株数を売ろうとした）は約定できた分だけで計算
+            actual_qty = filled_qty
+            proceeds = actual_qty * price - fee
             pnl = proceeds - cost_total
             realized.append({
                 "日付": date,
                 "銘柄": ticker,
                 "種別": action,
                 "売価": price,
-                "株数": qty,
+                "株数": actual_qty,
                 "取得原価": round(cost_total, 0),
                 "売却額": round(proceeds, 0),
                 "実現損益": round(pnl, 0),

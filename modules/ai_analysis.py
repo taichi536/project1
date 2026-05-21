@@ -1,5 +1,6 @@
 import anthropic
 import json
+import math
 import hashlib
 import time
 from pathlib import Path
@@ -142,8 +143,9 @@ def analyze_chart_ai(
     rsi: float | None,
     atr: float | None,
 ) -> str:
-    # 価格は±1%以内なら同じキャッシュを使う（細かい変動で再取得しない）
-    price_bucket = round(current_price / (current_price * 0.01)) if current_price else 0
+    # 価格を1%単位でバケット化（±1%以内の変動では同じキャッシュを使う）
+    # log(P)/log(1.01) により価格が1%変化するごとに異なる整数になる
+    price_bucket = int(math.log(current_price) / math.log(1.01)) if current_price > 0 else 0
     key = _cache_key("chart", ticker, overall, score, price_bucket)
     cached = _get_cached(key)
     if cached:

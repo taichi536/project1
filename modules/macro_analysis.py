@@ -40,7 +40,7 @@ def fetch_live_market_data() -> list[dict]:
             price = fi.get("last_price") or fi.get("regularMarketPrice")
             prev = fi.get("previous_close") or fi.get("regularMarketPreviousClose")
             if price is None:
-                hist = tk.history(period="2d")
+                hist = tk.history(period="5d")
                 if not hist.empty:
                     price = float(hist["Close"].iloc[-1])
                     prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else price
@@ -228,7 +228,6 @@ def analyze_news_sentiment(
     if not news_items:
         news_text = "ニュースを取得できませんでした。"
     else:
-        from modules.news_fetcher import score_macro_relevance
         scored = sorted(
             news_items,
             key=lambda n: score_macro_relevance(n["title"], n.get("summary", "")),
@@ -268,12 +267,15 @@ def analyze_news_sentiment(
 日本語で、投資家が実際に判断に使える具体的な内容にしてください。"""
 
     client = anthropic.Anthropic()
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=800,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return message.content[0].text
+    try:
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return message.content[0].text
+    except Exception as e:
+        return f"AI分析エラー: {e}"
 
 
 def quick_market_sentiment(news_items: list[dict]) -> str:
