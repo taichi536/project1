@@ -10,7 +10,7 @@ from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from modules.universe import UNIVERSE
-from modules.dashboard import load_watchlist, save_watchlist
+from modules.dashboard import load_watchlist, save_watchlist, _batch_fetch_ohlcv
 from modules.data_fetcher import fetch_ohlcv
 from modules.technical import compute_all
 from modules.signals import evaluate_signals, overall_signal
@@ -112,9 +112,18 @@ def run_auto_watchlist(verbose: bool = True) -> dict:
     scores = {}  # ticker → score の記録
 
     if verbose:
-        print(f"[自動ウォッチリスト] {len(universe_tickers)}銘柄を並列スキャン中...")
+        print(f"[自動ウォッチリスト] {len(universe_tickers)}銘柄をバッチ取得中...")
 
-    def _scan_one(ticker):
+    # バッチ一括取得（1リクエスト）
+    batch = _batch_fetch_ohlcv(universe_tickers, period="3mo")
+
+    def _compute_one(ticker, df):
+        df = compute_all(df)
+        sigs = evaluate_signals(df)
+        verdict, score = overall_signal(sigs, df=df)
+        return ticker, verdict, score
+
+    def _fetch_and_compute(ticker):
         df = fetch_ohlcv(ticker, period="3mo")
         df = compute_all(df)
         sigs = evaluate_signals(df)
@@ -122,8 +131,13 @@ def run_auto_watchlist(verbose: bool = True) -> dict:
         return ticker, verdict, score
 
     scan_results = {}
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = {executor.submit(_scan_one, t): t for t in universe_tickers}
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        futures = {}
+        for t in universe_tickers:
+            if t in batch:
+                futures[executor.submit(_compute_one, t, batch[t])] = t
+            else:
+                futures[executor.submit(_fetch_and_compute, t)] = t
         for future in as_completed(futures):
             t = futures[future]
             try:
