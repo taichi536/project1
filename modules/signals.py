@@ -281,7 +281,7 @@ def _calc_weighted_context(
     if df is not None:
         sma_col = f"SMA{sma_long}"
         _sma = df[sma_col].dropna() if sma_col in df.columns else pd.Series(dtype=float)
-        if len(_sma) > 0:
+        if len(_sma) > 0 and _sma.iloc[-1] != 0:
             _gap = (df["Close"].iloc[-1] - _sma.iloc[-1]) / _sma.iloc[-1]
             if _gap < -0.07:
                 weighted_total -= 3.0
@@ -664,7 +664,7 @@ def evaluate_watch_signal(df: pd.DataFrame, sma_long: int = 75) -> dict:
         conditions_missing.append("⏳ OBV（出来高）は上昇していない: 大口の買いがまだ入っていない")
 
     # 7. 直近安値からの距離（二番底チェック）
-    dist_from_support = (close - support_60) / support_60 * 100
+    dist_from_support = (close - support_60) / support_60 * 100 if support_60 != 0 else 0
     if abs(dist_from_support) < 3:
         conditions_met.append(f"✅ 直近安値（{support_60:,.0f}）付近: 二番底の可能性あり")
         watch_score += 1

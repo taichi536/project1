@@ -122,6 +122,7 @@ def run_backtest(
     shares = 0
     entry_price = 0.0
     stop_price = 0.0
+    entry_cost = 0.0  # 買い時の手数料込みコスト（損益計算用）
 
     portfolio_values = []
     trades = []
@@ -135,7 +136,8 @@ def run_backtest(
         # 損切りチェック
         if position == 1 and price <= stop_price:
             proceeds = shares * price * (1 - fee_rate)
-            pnl = proceeds - shares * entry_price
+            # 損益 = 売却額 - 取得コスト（手数料込み）
+            pnl = proceeds - entry_cost
             trades.append({
                 "日付": date, "種別": "損切り売",
                 "価格": round(price, 2), "株数": shares,
@@ -149,10 +151,10 @@ def run_backtest(
         if sig == 1 and position == 0 and cash > price:
             shares = int(cash * 0.95 / (price * (1 + fee_rate)))
             if shares > 0:
-                cost = shares * price * (1 + fee_rate)
+                entry_cost = shares * price * (1 + fee_rate)  # 手数料込み取得コスト
                 entry_price = price
                 stop_price = price - stop_loss_atr * atr
-                cash -= cost
+                cash -= entry_cost
                 trades.append({
                     "日付": date, "種別": "買い",
                     "価格": round(price, 2), "株数": shares,
@@ -163,7 +165,8 @@ def run_backtest(
         # 売りシグナル
         elif sig == -1 and position == 1:
             proceeds = shares * price * (1 - fee_rate)
-            pnl = proceeds - shares * entry_price
+            # 損益 = 売却額 - 取得コスト（手数料込み）
+            pnl = proceeds - entry_cost
             trades.append({
                 "日付": date, "種別": "売り",
                 "価格": round(price, 2), "株数": shares,
@@ -183,9 +186,12 @@ def run_backtest(
     final_value = pv["総資産"].iloc[-1]
     total_return = (final_value - initial_cash) / initial_cash * 100
 
-    # Buy & Hold比較
-    bh_shares = int(initial_cash / df["Close"].iloc[0])
-    bh_final = bh_shares * df["Close"].iloc[-1] + (initial_cash - bh_shares * df["Close"].iloc[0])
+    # Buy & Hold比較（初期購入手数料を考慮）
+    bh_buy_price = df["Close"].iloc[0] * (1 + fee_rate)
+    bh_shares = int(initial_cash / bh_buy_price)
+    bh_proceeds = bh_shares * df["Close"].iloc[-1] * (1 - fee_rate)
+    bh_remaining_cash = initial_cash - bh_shares * bh_buy_price
+    bh_final = bh_proceeds + bh_remaining_cash
     bh_return = (bh_final - initial_cash) / initial_cash * 100
 
     # ドローダウン

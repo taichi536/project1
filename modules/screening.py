@@ -39,6 +39,8 @@ def _piotroski_score(info: dict, tk: yf.Ticker) -> int:
             score += 1
 
         # ROA改善
+        total_assets_prev = None  # 以降で参照するため先に初期化
+        net_income_prev = None
         if len(fs.columns) >= 2 and net_income is not None and total_assets:
             net_income_prev = fs.loc["Net Income"].iloc[1] if "Net Income" in fs.index else None
             total_assets_prev = bs.loc["Total Assets"].iloc[1] if len(bs.columns) >= 2 and "Total Assets" in bs.index else None

@@ -1,3 +1,4 @@
+import re
 import requests
 import os
 from datetime import datetime
@@ -67,7 +68,7 @@ def send_signal_alert(
     sw = slack_webhook or os.getenv("SLACK_WEBHOOK_URL")
     if sw:
         # Slackはプレーンテキスト
-        plain = message.replace("<b>", "*").replace("</b>", "*").replace("<br>", "\n")
+        plain = re.sub(r"<b>(.*?)</b>", r"*\1*", message).replace("<br>", "\n")
         results["slack"] = _slack(sw, plain)
 
     return results
@@ -105,7 +106,7 @@ def send_screening_alert(
 
     sw = slack_webhook or os.getenv("SLACK_WEBHOOK_URL")
     if sw:
-        plain = message.replace("<b>", "*").replace("</b>", "*")
+        plain = re.sub(r"<b>(.*?)</b>", r"*\1*", message)
         results["slack"] = _slack(sw, plain)
 
     return results
@@ -156,7 +157,7 @@ def send_strong_buy_alert(
         results["telegram"] = _telegram(tg_token, tg_chat, message)
     sw = slack_webhook or os.getenv("SLACK_WEBHOOK_URL")
     if sw:
-        plain = message.replace("<b>", "*").replace("</b>", "*")
+        plain = re.sub(r"<b>(.*?)</b>", r"*\1*", message)
         results["slack"] = _slack(sw, plain)
     return results
 
@@ -203,7 +204,7 @@ def send_strong_sell_alert(
         results["telegram"] = _telegram(tg_token, tg_chat, message)
     sw = slack_webhook or os.getenv("SLACK_WEBHOOK_URL")
     if sw:
-        plain = message.replace("<b>", "*").replace("</b>", "*")
+        plain = re.sub(r"<b>(.*?)</b>", r"*\1*", message)
         results["slack"] = _slack(sw, plain)
     return results
 
@@ -238,7 +239,7 @@ def send_breakout_alert(
         results["telegram"] = _telegram(tg_token, tg_chat, message)
     sw = slack_webhook or os.getenv("SLACK_WEBHOOK_URL")
     if sw:
-        plain = message.replace("<b>", "*").replace("</b>", "*")
+        plain = re.sub(r"<b>(.*?)</b>", r"*\1*", message)
         results["slack"] = _slack(sw, plain)
     return results
 
@@ -271,7 +272,7 @@ def send_stop_loss_alert(
 
     sw = slack_webhook or os.getenv("SLACK_WEBHOOK_URL")
     if sw:
-        plain = message.replace("<b>", "*").replace("</b>", "*")
+        plain = re.sub(r"<b>(.*?)</b>", r"*\1*", message)
         results["slack"] = _slack(sw, plain)
 
     return results

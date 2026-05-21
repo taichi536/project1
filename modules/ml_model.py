@@ -21,7 +21,7 @@ def _build_features(df: pd.DataFrame) -> pd.DataFrame:
     # トレンド系
     for col in ["SMA25", "SMA75"]:
         if col in df.columns:
-            feat[f"{col}_ratio"] = df["Close"] / df[col] - 1  # 乖離率
+            feat[f"{col}_ratio"] = df["Close"] / df[col].replace(0, np.nan) - 1  # 乖離率
 
     # MACD
     if "MACD_hist" in df.columns:
@@ -34,11 +34,12 @@ def _build_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # ボラティリティ
     if "ATR" in df.columns:
-        feat["atr_ratio"] = df["ATR"] / df["Close"]  # ATR÷価格
+        feat["atr_ratio"] = df["ATR"] / df["Close"].replace(0, np.nan)  # ATR÷価格
 
     # 出来高変化
     if "Volume" in df.columns:
-        feat["volume_ratio"] = df["Volume"] / df["Volume"].rolling(20).mean()
+        vol_mean = df["Volume"].rolling(20).mean().replace(0, np.nan)
+        feat["volume_ratio"] = df["Volume"] / vol_mean
 
     # 価格モメンタム（1/3/5日リターン）
     for d in [1, 3, 5]:
@@ -69,12 +70,13 @@ def _build_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # VWAP乖離率
     if "VWAP" in df.columns:
-        feat["vwap_dev_pct"] = (df["Close"] - df["VWAP"]) / df["VWAP"] * 100
+        feat["vwap_dev_pct"] = (df["Close"] - df["VWAP"]) / df["VWAP"].replace(0, np.nan) * 100
     elif "Volume" in df.columns:
         # VWAP近似（直近20日のVolume-weighted価格）
         typical = (df["Close"] + df.get("High", df["Close"]) + df.get("Low", df["Close"])) / 3
-        vwap_approx = (typical * df["Volume"]).rolling(20).sum() / df["Volume"].rolling(20).sum()
-        feat["vwap_dev_pct"] = (df["Close"] - vwap_approx) / vwap_approx * 100
+        vol_sum = df["Volume"].rolling(20).sum().replace(0, np.nan)
+        vwap_approx = (typical * df["Volume"]).rolling(20).sum() / vol_sum
+        feat["vwap_dev_pct"] = (df["Close"] - vwap_approx) / vwap_approx.replace(0, np.nan) * 100
 
     # RSI-価格ダイバージェンス（5日間のRSI方向 vs 価格方向）
     if "RSI" in df.columns:
