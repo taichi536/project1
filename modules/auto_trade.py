@@ -26,7 +26,7 @@ _DEFAULT_SETTINGS = {
     "max_positions": 5,         # 同時保有銘柄数の上限
     "max_invested_pct": 70.0,   # 総資産に対する最大投資比率（%）。残りはキャッシュ確保
     "min_score": 4,             # 自動買いに必要な最低スコア
-    "sell_score": -2,           # 自動売りに必要な最大スコア
+    "sell_score": -4,           # 自動売りに必要な最大スコア
     "use_limit_order": False,   # True=指値, False=成行（ペーパーでは成行推奨）
     "limit_offset_pct": 0.3,   # 指値: 現在値+X%で買い注文
     "stop_loss_atr_mult": 2.0,  # ATR×倍数で損切りライン設定
@@ -157,10 +157,11 @@ class AutoTrader:
         if existing_value >= total_assets * s["max_position_pct"] / 100:
             return {"status": "skipped", "message": f"{ticker}は既に上限({s['max_position_pct']}%)保有中"}
 
+        # 損切りライン: ATRベース と 固定%の両方を計算し、より高い（損失が少ない）方を採用
+        # 例: ATR損切り=950円, 固定5%損切り=975円 → 975円を採用（より早く損切り）
         sl_price = stop_loss
         if sl_price is None and atr:
             sl_price = price - atr * s["stop_loss_atr_mult"]
-        # 固定損切り%が設定されていればATRより優先して使う
         sl_pct = s.get("stop_loss_pct", 0)
         if sl_pct > 0:
             sl_price_fixed = price * (1 - sl_pct / 100)

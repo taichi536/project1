@@ -73,8 +73,14 @@ class BrokerBase:
 _PAPER_STATE_FILE = Path(__file__).parent.parent / ".paper_trade_state.json"
 
 
-_SLIPPAGE_RATE = 0.002   # 成行注文のスリッページ: 0.2%
+_SLIPPAGE_JP = 0.003     # 日本株スリッページ: 0.3%（流動性が米国株より低め）
+_SLIPPAGE_US = 0.001     # 米国株スリッページ: 0.1%（流動性が高い）
 _PENDING_EXPIRY_DAYS = 3  # 指値注文が未約定のまま失効するまでの日数
+
+
+def _slippage_rate(ticker: str) -> float:
+    """銘柄コードが数字のみ（日本株）か英字（米国株）かでスリッページを切り替える"""
+    return _SLIPPAGE_JP if ticker.isdigit() or ticker.endswith(".T") else _SLIPPAGE_US
 
 
 class PaperBroker(BrokerBase):
@@ -194,16 +200,23 @@ class PaperBroker(BrokerBase):
     ) -> dict:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         order_id = f"PAPER-{datetime.now().strftime('%Y%m%d%H%M%S')}-{ticker}"
-        ref_price = price or 0.0
+        ref_price = price if price is not None else 0.0
 
         if order_type == "market":
             # 成行: スリッページを加算して即時約定
-            slip = _SLIPPAGE_RATE * random.uniform(0.5, 1.5)
+            slip = _slippage_rate(ticker) * random.uniform(0.5, 1.5)
             exec_price = ref_price * (1 + slip) if side == "buy" else ref_price * (1 - slip)
+            if exec_price <= 0:
+                return {"order_id": order_id, "status": "rejected", "message": f"価格が0円です。price={price}"}
+
             return self._apply_fill(ticker, side, qty, exec_price, order_id, order_type, now,
                                     reason=f"成行(スリッページ {slip*100:.2f}%)")
         else:
-            # 指値: 未約定キューに追加（現金は拘束しない）
+            # 指値: 同一銘柄・同一売買方向の既存注文はキャンセルして上書き
+            self._state["pending_orders"] = [
+                o for o in self._state.get("pending_orders", [])
+                if not (o["ticker"] == ticker and o["side"] == side)
+            ]
             expires = (datetime.now() + timedelta(days=_PENDING_EXPIRY_DAYS)).strftime("%Y-%m-%d")
             pending = {
                 "order_id": order_id, "ticker": ticker, "side": side, "qty": qty,

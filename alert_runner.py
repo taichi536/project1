@@ -33,6 +33,7 @@ from modules.diary import get_trades, calc_pnl
 from modules.dashboard import load_watchlist
 from modules.auto_trade import AutoTrader
 from modules.auto_watchlist import run_auto_watchlist
+from modules.signal_tracker import record_signal, update_results
 
 _trader = AutoTrader()
 
@@ -121,23 +122,34 @@ def run_signal_alerts(tickers: list[str] | None = None):
 
             should_notify = False
             today = datetime.now().strftime("%Y-%m-%d")
+            prev_score = signals_state.get(ticker, {}).get("score", 0)
+            score_delta = abs(score - prev_score)
+
             # 1) シグナルが変わって「買い」or「売り」になった
             if changed and verdict in ("買い", "売り"):
                 should_notify = True
-            # 2) 強い買いシグナル（スコア+4以上）は1日1回制限で通知
+            # 2) 強い買いシグナル（スコア+4以上）は1日1回制限。ただしスコアが2以上悪化→改善した場合は再通知
             elif verdict == "買い" and score >= 4:
                 last_strong = signals_state.get(ticker, {}).get("last_strong_buy_date")
-                if last_strong != today:
+                last_notified_score = signals_state.get(ticker, {}).get("last_notified_score", 0)
+                if last_strong != today or abs(score - last_notified_score) >= 2:
                     should_notify = True
                     signals_state.setdefault(ticker, {})["last_strong_buy_date"] = today
-            # 3) 強い売りシグナル（スコア-4以下）は1日1回制限で通知
+                    signals_state.setdefault(ticker, {})["last_notified_score"] = score
+            # 3) 強い売りシグナル（スコア-4以下）は1日1回制限。ただしスコアが2以上急落した場合は再通知
             elif verdict == "売り" and score <= -4:
                 last_strong_sell = signals_state.get(ticker, {}).get("last_strong_sell_date")
-                if last_strong_sell != today:
+                last_notified_score = signals_state.get(ticker, {}).get("last_notified_score", 0)
+                if last_strong_sell != today or abs(score - last_notified_score) >= 2:
                     should_notify = True
                     signals_state.setdefault(ticker, {})["last_strong_sell_date"] = today
+                    signals_state.setdefault(ticker, {})["last_notified_score"] = score
 
             if should_notify:
+                # シグナル精度トラッキングに記録
+                if verdict in ("買い", "売り"):
+                    record_signal(ticker, verdict, score, price)
+
                 if verdict == "買い" and score >= 4:
                     reasons = [s["判定"] for s in sorted(sigs, key=lambda x: abs(x["スコア"]), reverse=True)[:3]]
                     ed_days = None
@@ -349,6 +361,12 @@ def main():
                 fill_results = _trader.broker.process_pending_orders(ohlcv_map)
                 for r in fill_results:
                     print(f"  → {r['message']}")
+
+        # シグナル精度の後追い更新（3日後・5日後の結果を記録）
+        try:
+            update_results()
+        except Exception:
+            pass
 
         # 月曜の朝9時だけ自動ウォッチリスト更新（週1回）
         if args.mode in ("all", "watchlist"):

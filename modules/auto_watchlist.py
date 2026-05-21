@@ -10,7 +10,7 @@ from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from modules.universe import UNIVERSE
-from modules.dashboard import load_watchlist, save_watchlist, _batch_fetch_ohlcv
+from modules.dashboard import load_watchlist, save_watchlist, _batch_fetch_ohlcv, _load_cache, _CACHE_TTL_SECONDS
 from modules.data_fetcher import fetch_ohlcv
 from modules.technical import compute_all
 from modules.signals import evaluate_signals, overall_signal
@@ -111,43 +111,59 @@ def run_auto_watchlist(verbose: bool = True) -> dict:
     skipped = 0
     scores = {}  # ticker → score の記録
 
+    # キャッシュから取得できる銘柄を先に抽出
+    import time
+    cache = _load_cache()
+    now = time.time()
+    cached_scores = {}
+    uncached = []
+    for t in universe_tickers:
+        entry = cache.get(t)
+        if entry and now - entry.get("_cached_at", 0) < _CACHE_TTL_SECONDS:
+            # キャッシュにシグナル情報があれば再利用
+            cached_scores[t] = entry.get("シグナル", "様子見"), entry.get("スコア", 0)
+        else:
+            uncached.append(t)
+
     if verbose:
-        print(f"[自動ウォッチリスト] {len(universe_tickers)}銘柄をバッチ取得中...")
+        print(f"[自動ウォッチリスト] キャッシュ:{len(cached_scores)}件 / 新規取得:{len(uncached)}件")
 
-    # バッチ一括取得（1リクエスト）
-    batch = _batch_fetch_ohlcv(universe_tickers, period="3mo")
+    scan_results = dict(cached_scores)
 
-    def _compute_one(ticker, df):
-        df = compute_all(df)
-        sigs = evaluate_signals(df)
-        verdict, score = overall_signal(sigs, df=df)
-        return ticker, verdict, score
+    if uncached:
+        # バッチ一括取得（1リクエスト）
+        batch = _batch_fetch_ohlcv(uncached, period="3mo")
 
-    def _fetch_and_compute(ticker):
-        df = fetch_ohlcv(ticker, period="3mo")
-        df = compute_all(df)
-        sigs = evaluate_signals(df)
-        verdict, score = overall_signal(sigs, df=df)
-        return ticker, verdict, score
+        def _compute_one(ticker, df):
+            df = compute_all(df)
+            sigs = evaluate_signals(df)
+            verdict, score = overall_signal(sigs, df=df)
+            return ticker, verdict, score
 
-    scan_results = {}
-    with ThreadPoolExecutor(max_workers=20) as executor:
-        futures = {}
-        for t in universe_tickers:
-            if t in batch:
-                futures[executor.submit(_compute_one, t, batch[t])] = t
-            else:
-                futures[executor.submit(_fetch_and_compute, t)] = t
-        for future in as_completed(futures):
-            t = futures[future]
-            try:
-                ticker, verdict, score = future.result()
-                scan_results[ticker] = (verdict, score)
-                if verbose:
-                    print(f"  {ticker}: {verdict} score={score:+d}")
-            except Exception as e:
-                if verbose:
-                    print(f"  {t}: エラー - {e}")
+        def _fetch_and_compute(ticker):
+            df = fetch_ohlcv(ticker, period="3mo")
+            df = compute_all(df)
+            sigs = evaluate_signals(df)
+            verdict, score = overall_signal(sigs, df=df)
+            return ticker, verdict, score
+
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            futures = {}
+            for t in uncached:
+                if t in batch:
+                    futures[executor.submit(_compute_one, t, batch[t])] = t
+                else:
+                    futures[executor.submit(_fetch_and_compute, t)] = t
+            for future in as_completed(futures):
+                t = futures[future]
+                try:
+                    ticker, verdict, score = future.result()
+                    scan_results[ticker] = (verdict, score)
+                    if verbose:
+                        print(f"  {ticker}: {verdict} score={score:+d}")
+                except Exception as e:
+                    if verbose:
+                        print(f"  {t}: エラー - {e}")
 
     for ticker, (verdict, score) in scan_results.items():
         scores[ticker] = {"verdict": verdict, "score": score}
