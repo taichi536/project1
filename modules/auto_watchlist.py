@@ -71,9 +71,20 @@ def get_universe_tickers(categories: list[str]) -> list[str]:
     return tickers
 
 
+def _get_held_tickers() -> set[str]:
+    """ペーパートレードで保有中の銘柄を取得"""
+    try:
+        from modules.broker import PaperBroker
+        pb = PaperBroker()
+        return {p["ticker"] for p in pb.get_positions() if p["qty"] > 0}
+    except Exception:
+        return set()
+
+
 def run_auto_watchlist(verbose: bool = True) -> dict:
     """
     ユニバースをスキャンしてウォッチリストを自動更新する。
+    保有中の銘柄は常に含め、残り枠をスコア上位で自動補充する。
     Returns: {"added": [...], "removed": [...], "skipped": int, "scores": {ticker: score}}
     """
     settings = load_settings()
@@ -84,15 +95,16 @@ def run_auto_watchlist(verbose: bool = True) -> dict:
 
     watchlist = load_watchlist()
     state = _load_state()
-    weak_counts = state.get("weak_counts", {})  # ticker → 連続弱シグナル数
     today = datetime.now().strftime("%Y-%m-%d")
 
     universe_tickers = get_universe_tickers(settings["categories"])
-    add_threshold = settings["add_score_threshold"]
-    remove_threshold = settings["remove_score_threshold"]
-    remove_consecutive = settings["remove_consecutive_days"]
     max_size = settings["max_watchlist_size"]
-    protected = set(settings.get("protected_tickers", []))
+
+    # 保有中の銘柄は必ず保護（自動検出）
+    held_tickers = _get_held_tickers()
+    protected = held_tickers | set(settings.get("protected_tickers", []))
+    if verbose and held_tickers:
+        print(f"[自動ウォッチリスト] 保有中のため保護: {held_tickers}")
 
     added = []
     removed = []
@@ -126,9 +138,14 @@ def run_auto_watchlist(verbose: bool = True) -> dict:
     for ticker, (verdict, score) in scan_results.items():
         scores[ticker] = {"verdict": verdict, "score": score}
 
-    # スコア上位max_size銘柄を新ウォッチリストとして選出（protected銘柄は必ず含む）
+    # 1. 保有中の銘柄を優先確保（ユニバース外でも含める）
+    new_watchlist = []
+    for t in protected:
+        if len(new_watchlist) < max_size:
+            new_watchlist.append(t)
+
+    # 2. 残り枠をスコア上位で補充
     ranked = sorted(scan_results.items(), key=lambda x: x[1][1], reverse=True)
-    new_watchlist = list(protected & set(scan_results.keys()))
     for ticker, (verdict, score) in ranked:
         if len(new_watchlist) >= max_size:
             break
@@ -143,6 +160,8 @@ def run_auto_watchlist(verbose: bool = True) -> dict:
     watchlist = new_watchlist
 
     if verbose:
+        if held_tickers:
+            print(f"  保有株（保護）: {sorted(held_tickers)}")
         for t in added:
             s = scan_results.get(t, (None, 0))[1]
             print(f"    ✅ {t} 追加（score={s:+d}）")
@@ -151,7 +170,7 @@ def run_auto_watchlist(verbose: bool = True) -> dict:
             print(f"    ❌ {t} 除外（score={s:+d}）")
 
     save_watchlist(watchlist)
-    _save_state({"weak_counts": weak_counts, "last_run": today})
+    _save_state({"last_run": today})
 
     result = {
         "added": added,
