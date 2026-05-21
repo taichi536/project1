@@ -144,11 +144,17 @@ class AutoTrader:
         stop_loss: float | None,
         positions: list[dict],
     ) -> dict:
+        from modules.data_fetcher import get_usdjpy_rate, is_us_ticker
         s = self.settings
         balance = self.broker.get_balance()
         cash = balance["buying_power"]
 
-        # 総資産と既存保有額を計算
+        # 米国株は価格をUSD→JPYに換算してから数量計算・比率チェックを行う
+        is_us = is_us_ticker(ticker)
+        fx_rate = get_usdjpy_rate() if is_us else 1.0
+        price_jpy = price * fx_rate
+
+        # 総資産と既存保有額を計算（すべて円建て）
         total_assets = cash + sum(p.get("market_value", p["qty"] * p["avg_price"]) for p in positions)
         existing = next((p for p in positions if p["ticker"] == ticker), None)
         existing_value = existing.get("market_value", existing["qty"] * existing["avg_price"]) if existing else 0.0
@@ -159,17 +165,19 @@ class AutoTrader:
 
         # 損切りライン: ATRベース と 固定%の両方を計算し、より高い（損失が少ない）方を採用
         # 例: ATR損切り=950円, 固定5%損切り=975円 → 975円を採用（より早く損切り）
-        sl_price = stop_loss
-        if sl_price is None and atr:
-            sl_price = price - atr * s["stop_loss_atr_mult"]
+        # stop_loss/atrはUSD建てのため円換算
+        sl_price = stop_loss * fx_rate if stop_loss else None
+        atr_jpy = atr * fx_rate if atr else None
+        if sl_price is None and atr_jpy:
+            sl_price = price_jpy - atr_jpy * s["stop_loss_atr_mult"]
         sl_pct = s.get("stop_loss_pct", 0)
         if sl_pct > 0:
-            sl_price_fixed = price * (1 - sl_pct / 100)
+            sl_price_fixed = price_jpy * (1 - sl_pct / 100)
             sl_price = sl_price_fixed if sl_price is None else max(sl_price, sl_price_fixed)
 
         qty = calc_order_qty(
             cash=cash,
-            price=price,
+            price=price_jpy,
             risk_pct=s["risk_pct"],
             stop_loss_price=sl_price,
             max_position_pct=s["max_position_pct"],
@@ -181,7 +189,9 @@ class AutoTrader:
             return {"status": "skipped", "message": f"購入可能株数が0（現金: {cash:,.0f}円）"}
 
         order_type = "limit" if s["use_limit_order"] else "market"
+        # place_order にはUSD価格をそのまま渡す（broker内で円換算する）
         order_price = round(price * (1 + s["limit_offset_pct"] / 100), 1) if order_type == "limit" else price
+        order_price_jpy = order_price * fx_rate
 
         result = self.broker.place_order(
             ticker=ticker,
@@ -196,14 +206,15 @@ class AutoTrader:
             "ticker": ticker,
             "side": "buy",
             "qty": qty,
-            "exec_price": order_price,
+            "exec_price": order_price_jpy,
             "stop_loss": sl_price,
-            "estimated_cost": qty * order_price,
+            "estimated_cost": qty * order_price_jpy,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         })
         return result
 
     def _execute_sell(self, ticker: str, price: float, reason: str = "") -> dict:
+        from modules.data_fetcher import get_usdjpy_rate, is_us_ticker
         positions = self.broker.get_positions()
         pos = next((p for p in positions if p["ticker"] == ticker), None)
         if not pos or pos["qty"] <= 0:
@@ -213,6 +224,10 @@ class AutoTrader:
         s = self.settings
         order_type = "limit" if s["use_limit_order"] else "market"
         order_price = round(price * (1 - s["limit_offset_pct"] / 100), 1) if order_type == "limit" else price
+
+        # 表示用に円換算価格を計算
+        fx_rate = get_usdjpy_rate() if is_us_ticker(ticker) else 1.0
+        order_price_jpy = order_price * fx_rate
 
         result = self.broker.place_order(
             ticker=ticker,
@@ -226,7 +241,7 @@ class AutoTrader:
             "ticker": ticker,
             "side": "sell",
             "qty": qty,
-            "exec_price": order_price,
+            "exec_price": order_price_jpy,
             "reason": reason,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         })

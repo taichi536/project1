@@ -1,9 +1,77 @@
 import yfinance as yf
 import pandas as pd
 import requests
+import json
 import os
 import time
+from pathlib import Path
 from datetime import datetime, timedelta
+
+
+# ── USD/JPY 為替レートキャッシュ ─────────────────────────────────────────────
+_fx_cache: dict = {}
+_FX_CACHE_TTL = 300   # 5分
+_FX_FILE_CACHE = Path(__file__).parent.parent / ".fx_rate_cache.json"
+_FX_DEFAULT = 150.0   # APIが全て失敗した場合のデフォルト
+
+
+def _load_fx_file_cache() -> dict:
+    try:
+        if _FX_FILE_CACHE.exists():
+            return json.loads(_FX_FILE_CACHE.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def _save_fx_file_cache(rate: float):
+    try:
+        _FX_FILE_CACHE.write_text(json.dumps({"rate": rate, "saved_at": time.time()}, ensure_ascii=False))
+    except Exception:
+        pass
+
+
+def set_usdjpy_rate(rate: float):
+    """UIから手動でUSD/JPYレートを設定する"""
+    if 80 < rate < 200:
+        _fx_cache["rate"] = rate
+        _fx_cache["fetched_at"] = time.time()
+        _save_fx_file_cache(rate)
+
+
+def get_usdjpy_rate() -> float:
+    """USD/JPY レートを返す（5分キャッシュ）。取得失敗時はファイルキャッシュ→デフォルト150円。"""
+    now = time.time()
+    if _fx_cache.get("rate") and now - _fx_cache.get("fetched_at", 0) < _FX_CACHE_TTL:
+        return _fx_cache["rate"]
+
+    # yfinance で取得（複数シンボルを試す）
+    for sym in ["USDJPY=X", "JPY=X"]:
+        try:
+            tk = yf.Ticker(sym)
+            rate = tk.fast_info.get("last_price") or tk.fast_info.get("regularMarketPrice")
+            if rate and 80 < rate < 200:
+                _fx_cache["rate"] = float(rate)
+                _fx_cache["fetched_at"] = now
+                _save_fx_file_cache(float(rate))
+                return _fx_cache["rate"]
+        except Exception:
+            continue
+
+    # ファイルキャッシュから復元（古くても使う）
+    file_cache = _load_fx_file_cache()
+    if file_cache.get("rate") and 80 < file_cache["rate"] < 200:
+        _fx_cache["rate"] = file_cache["rate"]
+        _fx_cache["fetched_at"] = now  # 再取得を抑制（TTL内は試みない）
+        return _fx_cache["rate"]
+
+    return _FX_DEFAULT
+
+
+def is_us_ticker(ticker: str) -> bool:
+    """米国株かどうか判定（数字のみ or .T 末尾は日本株）"""
+    t = ticker.strip().upper()
+    return not (t.isdigit() or t.endswith(".T"))
 
 
 def normalize_ticker(ticker: str) -> str:

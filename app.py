@@ -2647,6 +2647,27 @@ elif page == "🤖 自動売買":
         broker_choice = "paper"
         st.info("💡 現在はペーパートレード（仮想取引）モードで動作しています。実口座への切り替えはSBI証券のAPI対応後に対応予定です。")
 
+        # ── 為替レート設定 ────────────────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("#### 💱 USD/JPY 為替レート")
+        from modules.data_fetcher import get_usdjpy_rate, set_usdjpy_rate
+        current_fx = get_usdjpy_rate()
+        fx_col1, fx_col2 = st.columns([2, 1])
+        with fx_col1:
+            new_fx = st.number_input(
+                "USD/JPY レート（米国株取引の円換算に使用）",
+                min_value=80.0, max_value=200.0, step=0.5,
+                value=float(round(current_fx, 1)),
+                help="yfinanceから自動取得します。取得できない場合は手動で入力してください。"
+            )
+        with fx_col2:
+            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+            if st.button("レートを更新", use_container_width=True):
+                set_usdjpy_rate(new_fx)
+                st.success(f"USD/JPY = {new_fx:.1f}円 に設定しました")
+                st.rerun()
+        st.caption(f"現在のレート: **{current_fx:.1f}円**（自動取得 or 手動設定）")
+
         st.markdown("---")
         st.markdown("#### 取引ルール")
         col_a, col_b = st.columns(2)

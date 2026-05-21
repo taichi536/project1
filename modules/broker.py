@@ -131,14 +131,25 @@ class PaperBroker(BrokerBase):
         }
 
     def get_positions(self) -> list[dict]:
+        from modules.data_fetcher import get_usdjpy_rate, is_us_ticker
         result = []
         for ticker, pos in self._state["positions"].items():
+            # last_priceはすでに円建て（_apply_fill で換算済み）
+            last_price_jpy = pos.get("last_price", pos["avg_price"])
+            # 念のため: 旧データ（円換算前）が残っている場合は再換算
+            if is_us_ticker(ticker) and pos.get("currency") != "USD" and last_price_jpy < 500:
+                fx = get_usdjpy_rate()
+                last_price_jpy = last_price_jpy * fx
+            market_value = pos["qty"] * last_price_jpy
+            unrealized_pnl = pos["qty"] * (last_price_jpy - pos["avg_price"])
             result.append({
                 "ticker": ticker,
                 "qty": pos["qty"],
-                "avg_price": pos["avg_price"],
-                "market_value": pos["qty"] * pos.get("last_price", pos["avg_price"]),
-                "unrealized_pnl": pos["qty"] * (pos.get("last_price", pos["avg_price"]) - pos["avg_price"]),
+                "avg_price": pos["avg_price"],          # 円建て
+                "market_value": market_value,            # 円建て
+                "unrealized_pnl": unrealized_pnl,        # 円建て
+                "currency": pos.get("currency", "JPY"),
+                "fx_rate": pos.get("fx_rate"),
             })
         return result
 
@@ -146,48 +157,71 @@ class PaperBroker(BrokerBase):
         return self._state.get("pending_orders", []) + self._state.get("orders", [])
 
     def update_prices(self, price_map: dict[str, float]):
-        """ポジションの時価を更新（UI表示用）"""
+        """ポジションの時価を更新（UI表示用）。米国株はUSD→JPY換算して保存。"""
+        from modules.data_fetcher import get_usdjpy_rate, is_us_ticker
+        fx = None
         for ticker, price in price_map.items():
             if ticker in self._state["positions"]:
-                self._state["positions"][ticker]["last_price"] = price
+                if is_us_ticker(ticker):
+                    if fx is None:
+                        fx = get_usdjpy_rate()
+                    self._state["positions"][ticker]["last_price"] = price * fx
+                    self._state["positions"][ticker]["fx_rate"] = fx
+                    self._state["positions"][ticker]["currency"] = "USD"
+                else:
+                    self._state["positions"][ticker]["last_price"] = price
         self._save()
 
     def _apply_fill(self, ticker: str, side: str, qty: int, exec_price: float,
                     order_id: str, order_type: str, timestamp: str, reason: str = "") -> dict:
-        """実際にポジションを更新してログを記録する共通処理"""
+        """実際にポジションを更新してログを記録する共通処理。現金はすべて円建て。"""
+        from modules.data_fetcher import get_usdjpy_rate, is_us_ticker
+        is_us = is_us_ticker(ticker)
+        fx_rate = get_usdjpy_rate() if is_us else 1.0
+        # 現金操作は円建て。米国株はUSD価格×為替レートで換算。
+        exec_price_jpy = exec_price * fx_rate
+
         if side == "buy":
-            cost = qty * exec_price
-            if self._state["cash"] < cost:
+            cost_jpy = qty * exec_price_jpy
+            if self._state["cash"] < cost_jpy:
                 return {"order_id": order_id, "status": "rejected", "message": "現金不足"}
-            self._state["cash"] -= cost
+            self._state["cash"] -= cost_jpy
             pos = self._state["positions"].get(ticker, {"qty": 0, "avg_price": 0.0})
             total_qty = pos["qty"] + qty
-            total_cost = pos["qty"] * pos["avg_price"] + cost
+            # avg_priceは円建てで管理
+            total_cost_jpy = pos["qty"] * pos["avg_price"] + cost_jpy
             self._state["positions"][ticker] = {
                 "qty": total_qty,
-                "avg_price": total_cost / total_qty if total_qty > 0 else 0,
-                "last_price": exec_price,
+                "avg_price": total_cost_jpy / total_qty if total_qty > 0 else 0,
+                "last_price": exec_price_jpy,
+                "currency": "USD" if is_us else "JPY",
+                "fx_rate": fx_rate,
             }
         elif side == "sell":
             pos = self._state["positions"].get(ticker)
             if not pos or pos["qty"] < qty:
                 return {"order_id": order_id, "status": "rejected", "message": "保有株数不足"}
-            proceeds = qty * exec_price
-            self._state["cash"] += proceeds
+            proceeds_jpy = qty * exec_price_jpy
+            self._state["cash"] += proceeds_jpy
             new_qty = pos["qty"] - qty
             if new_qty == 0:
                 del self._state["positions"][ticker]
             else:
                 self._state["positions"][ticker]["qty"] = new_qty
 
+        price_str = f"${exec_price:.2f}(¥{exec_price_jpy:.0f})" if is_us else f"¥{exec_price:.2f}"
         self._state["trade_log"].append({
             "order_id": order_id, "ticker": ticker, "side": side, "qty": qty,
-            "price": exec_price, "order_type": order_type,
+            "price": exec_price_jpy,       # 円建て価格（損益計算・表示用）
+            "price_usd": exec_price if is_us else None,
+            "fx_rate": fx_rate if is_us else None,
+            "currency": "USD" if is_us else "JPY",
+            "order_type": order_type,
             "timestamp": timestamp, "status": "filled", "reason": reason,
         })
         self._save()
         return {"order_id": order_id, "status": "filled",
-                "message": f"約定: {side} {ticker} {qty}株 @ {exec_price:.2f}{' (' + reason + ')' if reason else ''}"}
+                "message": f"約定: {side} {ticker} {qty}株 @ {price_str}{' (' + reason + ')' if reason else ''}"}
 
     def place_order(
         self,
