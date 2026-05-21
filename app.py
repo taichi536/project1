@@ -78,13 +78,22 @@ with st.sidebar:
 
     # ── グローバル銘柄選択（全ページ共通） ───────────────────────────────
     _wl = load_watchlist()
+    from modules.company_names import get_company_name as _gcn
     st.markdown("**📌 分析銘柄**")
-    _ticker_options = _wl + ["✏️ 直接入力"]
+    # 表示ラベル「社名 (コード)」→ 実際のtickerに戻す辞書
+    _label_map = {}
+    for _t in _wl:
+        _name = _gcn(_t, use_api=False)
+        _label = f"{_name} ({_t})" if _name != _t.upper().replace(".T", "") else _t
+        _label_map[_label] = _t
+    _display_options = list(_label_map.keys()) + ["✏️ 直接入力"]
     _cur = st.session_state.get("current_ticker", _wl[0] if _wl else "")
-    _def_idx = _wl.index(_cur) if _cur in _wl else len(_wl)
+    # 現在選択中のtickerに対応するラベルを探す
+    _cur_label = next((lb for lb, tk in _label_map.items() if tk == _cur), None)
+    _def_idx = list(_label_map.keys()).index(_cur_label) if _cur_label in _label_map else len(_label_map)
     _sel = st.selectbox(
         "銘柄を選択",
-        _ticker_options,
+        _display_options,
         index=_def_idx,
         label_visibility="collapsed",
         key="sidebar_ticker_select",
@@ -99,11 +108,13 @@ with st.sidebar:
         if _manual:
             st.session_state["current_ticker"] = _manual.strip().upper()
     else:
-        st.session_state["current_ticker"] = _sel
+        st.session_state["current_ticker"] = _label_map[_sel]
 
     _ct = st.session_state.get("current_ticker", "")
     if _ct:
-        st.caption(f"選択中: **{_ct}**　← 全ページで共通")
+        _ct_name = _gcn(_ct, use_api=False)
+        _ct_display = f"{_ct_name} ({_ct})" if _ct_name != _ct.upper().replace(".T", "") else _ct
+        st.caption(f"選択中: **{_ct_display}**　← 全ページで共通")
     st.markdown("---")
 
     _PAGES = ["🏠 ダッシュボード", "🔭 銘柄スキャン", "📊 テクニカル分析", "🔍 スクリーニング", "📋 ファンダメンタル分析", "🌐 マクロ・ニュース", "🔬 バックテスト", "📐 ポートフォリオ", "📔 投資日記", "🔔 通知設定", "🤖 自動売買", "📖 トレードガイド"]
