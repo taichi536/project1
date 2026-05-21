@@ -3,13 +3,14 @@ import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
-from modules.data_fetcher import fetch_ohlcv, fetch_info, normalize_ticker, fetch_realtime_price
+import yfinance as yf
+from modules.data_fetcher import fetch_ohlcv, normalize_ticker, fetch_realtime_price
 from modules.technical import compute_all
 from modules.signals import evaluate_signals, overall_signal
 
 WATCHLIST_PATH = Path(__file__).parent.parent / "watchlist.json"
 _SCAN_CACHE_FILE = Path(__file__).parent.parent / ".scan_cache.json"
-_CACHE_TTL_SECONDS = 300  # 5分間キャッシュ
+_CACHE_TTL_SECONDS = 1800  # 30分間キャッシュ
 
 
 def load_watchlist() -> list[str]:
@@ -36,6 +37,59 @@ def _save_cache(cache: dict):
         _SCAN_CACHE_FILE.write_text(json.dumps(cache, ensure_ascii=False))
     except Exception:
         pass
+
+
+def _batch_fetch_ohlcv(tickers: list[str], period: str = "3mo") -> dict[str, pd.DataFrame]:
+    """複数銘柄を1回のAPIリクエストで一括取得（yfinance batch）"""
+    norm_map = {t: normalize_ticker(t) for t in tickers}
+    norm_list = list(set(norm_map.values()))
+    result = {}
+    try:
+        raw = yf.download(
+            norm_list, period=period, auto_adjust=True,
+            progress=False, group_by="ticker", threads=True,
+        )
+        for t, nt in norm_map.items():
+            try:
+                df = raw[nt] if len(norm_list) > 1 else raw
+                if df is None or df.empty:
+                    continue
+                df = df.copy()
+                df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+                cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in df.columns]
+                df = df[cols].dropna()
+                if not df.empty:
+                    result[t] = df
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return result
+
+
+def _process_ticker_from_df(ticker: str, df: pd.DataFrame) -> dict:
+    """取得済みDataFrameからシグナルを計算（ネットワーク不要）"""
+    try:
+        df = compute_all(df)
+        signals = evaluate_signals(df)
+        verdict, score = overall_signal(signals, df=df)
+        close = float(df["Close"].iloc[-1])
+        prev_close = float(df["Close"].iloc[-2]) if len(df) >= 2 else close
+        change_pct = (close - prev_close) / prev_close * 100
+        rsi = df["RSI"].dropna().iloc[-1] if "RSI" in df.columns else None
+        macd_hist = df["MACD_hist"].dropna().iloc[-1] if "MACD_hist" in df.columns else None
+        reasons = [s["判定"] for s in sorted(signals, key=lambda x: abs(x["スコア"]), reverse=True)[:2]
+                   if abs(s["スコア"]) >= 1]
+        return {
+            "ticker": ticker, "現在値": round(close, 2),
+            "前日比(%)": round(change_pct, 2), "シグナル": verdict, "スコア": score,
+            "RSI": round(float(rsi), 1) if rsi is not None else None,
+            "MACD方向": "↑" if macd_hist and macd_hist > 0 else "↓",
+            "理由": " / ".join(reasons) if reasons else "-", "エラー": None,
+        }
+    except Exception as e:
+        return {"ticker": ticker, "現在値": None, "前日比(%)": None, "シグナル": "エラー",
+                "スコア": 0, "RSI": None, "MACD方向": "-", "理由": str(e)[:40], "エラー": str(e)}
 
 
 def scan_ticker(ticker: str, use_cache: bool = True) -> dict:
@@ -106,20 +160,54 @@ def scan_ticker(ticker: str, use_cache: bool = True) -> dict:
         }
 
 
-def scan_all(tickers: list[str], max_workers: int = 6) -> list[dict]:
-    """並列スキャン（最大6銘柄同時取得）"""
-    results = {}
+def scan_all(tickers: list[str], max_workers: int = 20) -> list[dict]:
+    """
+    高速スキャン:
+    1. yfinance batch APIで全銘柄を1リクエストで一括取得
+    2. 取得できた銘柄は並列でシグナル計算（ネットワーク不要）
+    3. 取得失敗銘柄は個別フォールバック
+    """
+    # キャッシュから取得済みの銘柄を除く
+    cache = _load_cache()
+    now = time.time()
+    cached = {}
+    uncached = []
+    for t in tickers:
+        entry = cache.get(t)
+        if entry and now - entry.get("_cached_at", 0) < _CACHE_TTL_SECONDS:
+            cached[t] = {k: v for k, v in entry.items() if k != "_cached_at"}
+        else:
+            uncached.append(t)
+
+    if not uncached:
+        return [cached[t] for t in tickers if t in cached]
+
+    # Step1: バッチ一括取得（1リクエスト）
+    batch = _batch_fetch_ohlcv(uncached)
+
+    # Step2: 取得成功 → 並列でシグナル計算（ネットワーク不要、高速）
+    # 取得失敗 → 個別フォールバック
+    results = dict(cached)
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_ticker = {executor.submit(scan_ticker, t): t for t in tickers}
-        for future in as_completed(future_to_ticker):
-            ticker = future_to_ticker[future]
+        futures = {}
+        for t in uncached:
+            if t in batch:
+                futures[executor.submit(_process_ticker_from_df, t, batch[t])] = t
+            else:
+                futures[executor.submit(scan_ticker, t, False)] = t  # キャッシュ未使用で個別取得
+
+        for future in as_completed(futures):
+            t = futures[future]
             try:
-                results[ticker] = future.result()
+                r = future.result()
+                results[t] = r
+                # キャッシュ更新
+                cache[t] = {**r, "_cached_at": now}
             except Exception as e:
-                results[ticker] = {
-                    "ticker": ticker, "現在値": None, "前日比(%)": None,
-                    "シグナル": "エラー", "スコア": 0, "RSI": None,
-                    "MACD方向": "-", "理由": str(e)[:40], "エラー": str(e),
-                }
-    # 元の順序を維持
+                results[t] = {"ticker": t, "現在値": None, "前日比(%)": None,
+                               "シグナル": "エラー", "スコア": 0, "RSI": None,
+                               "MACD方向": "-", "理由": str(e)[:40], "エラー": str(e)}
+
+    _save_cache(cache)
     return [results[t] for t in tickers if t in results]
