@@ -287,6 +287,7 @@ if page == "🏠 ダッシュボード":
         st.markdown("### 銘柄別シグナル一覧")
         st.caption("行をクリックした銘柄はテクニカル分析で詳細確認できます")
 
+        from modules.company_names import get_company_name, display_name as _dn
         # シグナル変化があれば先にまとめて表示
         changed = [r for r in rows if r.get("シグナル変化")]
         if changed:
@@ -294,7 +295,7 @@ if page == "🏠 ダッシュボード":
             for r in changed:
                 arrow = {"買い": "🟢", "売り": "🔴", "様子見": "🟡"}.get(r["シグナル"], "⚪")
                 prev = {"買い": "🟢", "売り": "🔴", "様子見": "🟡"}.get(r["前回シグナル"], "⚪")
-                st.warning(f"**{r['ticker']}**　{prev} {r['前回シグナル']} → {arrow} **{r['シグナル']}**　（{r['理由']}）")
+                st.warning(f"**{_dn(r['ticker'])}**　{prev} {r['前回シグナル']} → {arrow} **{r['シグナル']}**　（{r['理由']}）")
             st.markdown("---")
 
         for r in rows:
@@ -311,10 +312,12 @@ if page == "🏠 ダッシュボード":
             rsi_str = f"{rsi:.0f}" if rsi else "-"
             changed_badge = " 🔔NEW" if r.get("シグナル変化") else ""
             sig_bg = {"買い": "#1e3a2f", "売り": "#3a1e1e", "様子見": "#2e2a14"}.get(sig, "#1a1d23")
+            _cname = get_company_name(r["ticker"], use_api=False)
+            _show_name = f"**{_cname}**  \n<small style='color:#666'>{r['ticker']}</small>" if _cname != r["ticker"].upper().replace(".T","") else f"**{r['ticker']}**"
 
             with st.container():
                 c1, c2, c3, c4, c5, c6, c7 = st.columns([1.5, 1.5, 1.5, 1.5, 1, 2.5, 1])
-                c1.markdown(f"**{r['ticker']}**{changed_badge}")
+                c1.markdown(f"{_show_name}{changed_badge}", unsafe_allow_html=True)
                 c2.markdown(f"**{price_str}**")
                 c3.markdown(f"<span style='{chg_color}'>{chg_str}</span>", unsafe_allow_html=True)
                 c4.markdown(
@@ -2706,8 +2709,9 @@ elif page == "🤖 自動売買":
                             price=price_now, atr=atr_now,
                             stop_loss=price_now * 0.95 if verdict == "買い" else None,
                         )
+                        from modules.company_names import display_name as _dn2
                         results_log.append({
-                            "銘柄": tk_item, "シグナル": verdict, "スコア": score,
+                            "銘柄": _dn2(tk_item), "シグナル": verdict, "スコア": score,
                             "結果": trade_result.get("message", "スキップ") if trade_result else "条件未達",
                         })
                     except Exception as e:
@@ -2737,8 +2741,9 @@ elif page == "🤖 自動売買":
                     current_price = p["avg_price"]
                 market_val = p["qty"] * current_price
                 unrealized = market_val - p["qty"] * p["avg_price"]
+                from modules.company_names import display_name as _dn3
                 updated_positions.append({
-                    "銘柄": p["ticker"],
+                    "銘柄": _dn3(p["ticker"]),
                     "保有株数": int(p["qty"]),
                     "平均取得価格": f"{p['avg_price']:,.1f}",
                     "現在値": f"{current_price:,.1f}",
