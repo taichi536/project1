@@ -165,10 +165,14 @@ if page == "🏠 ダッシュボード":
     # ウォッチリスト編集
     watchlist = load_watchlist()
     with st.expander("⚙️ 監視銘柄を編集", expanded=False):
+        from modules.company_names import get_company_name as _gcn
+        if watchlist:
+            _wl_rows = [{"社名": _gcn(t, use_api=False), "コード": t} for t in watchlist]
+            st.dataframe(pd.DataFrame(_wl_rows), use_container_width=True, hide_index=True)
         wl_input = st.text_area(
-            "1行1銘柄（日本株は4桁、米国株はティッカー）",
+            "銘柄コードを編集（1行1銘柄・日本株は4桁・米国株はティッカー）",
             value="\n".join(watchlist),
-            height=150,
+            height=120,
             key="wl_edit",
         )
         if st.button("💾 保存", key="wl_save"):
