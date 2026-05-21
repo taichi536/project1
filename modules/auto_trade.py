@@ -180,14 +180,14 @@ class AutoTrader:
             return {"status": "skipped", "message": f"購入可能株数が0（現金: {cash:,.0f}円）"}
 
         order_type = "limit" if s["use_limit_order"] else "market"
-        limit_price = round(price * (1 + s["limit_offset_pct"] / 100), 1) if order_type == "limit" else None
+        order_price = round(price * (1 + s["limit_offset_pct"] / 100), 1) if order_type == "limit" else price
 
         result = self.broker.place_order(
             ticker=ticker,
             side="buy",
             qty=qty,
             order_type=order_type,
-            price=limit_price,
+            price=order_price,
             stop_price=None,
         )
 
@@ -195,9 +195,9 @@ class AutoTrader:
             "ticker": ticker,
             "side": "buy",
             "qty": qty,
-            "exec_price": limit_price or price,
+            "exec_price": order_price,
             "stop_loss": sl_price,
-            "estimated_cost": qty * (limit_price or price),
+            "estimated_cost": qty * order_price,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         })
         return result
@@ -211,21 +211,21 @@ class AutoTrader:
         qty = int(pos["qty"])
         s = self.settings
         order_type = "limit" if s["use_limit_order"] else "market"
-        limit_price = round(price * (1 - s["limit_offset_pct"] / 100), 1) if order_type == "limit" else None
+        order_price = round(price * (1 - s["limit_offset_pct"] / 100), 1) if order_type == "limit" else price
 
         result = self.broker.place_order(
             ticker=ticker,
             side="sell",
             qty=qty,
             order_type=order_type,
-            price=limit_price,
+            price=order_price,
         )
 
         result.update({
             "ticker": ticker,
             "side": "sell",
             "qty": qty,
-            "exec_price": limit_price or price,
+            "exec_price": order_price,
             "reason": reason,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         })
