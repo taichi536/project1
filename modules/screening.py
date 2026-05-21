@@ -179,8 +179,9 @@ def screen_single(ticker: str) -> dict:
         "合否": f_score >= 7,
     }
 
-    # 総合合否（必須6条件）
-    must_pass = ["PBR", "PER", "自己資本比率", "配当利回り", "営業利益率", "売上成長率"]
-    result["合否"] = all(result["詳細"][k]["合否"] for k in must_pass)
+    # 総合合否: NAGOCHOU_CRITERIAのキー + 個別計算項目のうち result["詳細"] に存在するものを全通過で判定
+    _extra_must = ["営業利益率", "売上成長率"]
+    must_pass = list(NAGOCHOU_CRITERIA.keys()) + [k for k in _extra_must if k in result["詳細"]]
+    result["合否"] = all(result["詳細"][k]["合否"] for k in must_pass if k in result["詳細"])
 
     return result

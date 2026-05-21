@@ -92,7 +92,7 @@ def monte_carlo(
     S0 = float(df["Close"].iloc[-1])
 
     # GBM: S(t+1) = S(t) * exp((μ - σ²/2)*dt + σ*ε*√dt)
-    rng = np.random.default_rng(seed=42)  # 再現性のためシード固定
+    rng = np.random.default_rng()  # シードなし（毎回異なる結果）
     z = rng.standard_normal((n_simulations, horizon))
     log_returns = (mu - 0.5 * sigma ** 2) + sigma * z
     paths = S0 * np.exp(np.cumsum(log_returns, axis=1))
