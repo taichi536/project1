@@ -179,7 +179,7 @@ if page == "🏠 ダッシュボード":
         from modules.company_names import get_company_name as _gcn
         if watchlist:
             _wl_rows = [{"社名": _gcn(t, use_api=False), "コード": t} for t in watchlist]
-            st.dataframe(pd.DataFrame(_wl_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(_wl_rows), width="stretch", hide_index=True)
         wl_input = st.text_area(
             "銘柄コードを編集（1行1銘柄・日本株は4桁・米国株はティッカー）",
             value="\n".join(watchlist),
@@ -222,7 +222,7 @@ if page == "🏠 ダッシュボード":
             st.info("💤 現在は市場閉場中です。価格データは変動しません（次の開場まで更新不要）")
 
     # スキャン実行
-    if st.button("🔍 今すぐ更新", type="primary", use_container_width=True) or \
+    if st.button("🔍 今すぐ更新", type="primary", width="stretch") or \
        "dashboard_data" not in st.session_state:
         prev_data = {r["ticker"]: r["シグナル"]
                      for r in st.session_state.get("dashboard_data", [])}
@@ -469,7 +469,7 @@ elif page == "🔭 銘柄スキャン":
     cat_info = UNIVERSE[selected_cat]
     st.info(f"📋 {cat_info['説明']}　（{len(cat_info['tickers'])}銘柄）")
 
-    scan_btn = st.button("🔍 スキャン実行", type="primary", use_container_width=True)
+    scan_btn = st.button("🔍 スキャン実行", type="primary", width="stretch")
 
     if scan_btn or f"scan_result_{selected_cat}" in st.session_state:
         if scan_btn:
@@ -627,7 +627,7 @@ elif page == "📊 テクニカル分析":
         sma_short = c3.number_input("短期MA", value=cfg["sma_default"][0], min_value=3, max_value=100, step=1)
         sma_long = c4.number_input("長期MA", value=cfg["sma_default"][1], min_value=5, max_value=300, step=1)
 
-    analyze_btn = st.button("🔍 分析する", type="primary", use_container_width=True)
+    analyze_btn = st.button("🔍 分析する", type="primary", width="stretch")
 
     if analyze_btn and ticker:
         with st.spinner("データ取得中..."):
@@ -729,7 +729,7 @@ elif page == "📊 テクニカル分析":
 
         # チャート（マウスホイール・ピンチでズーム可能）
         fig = build_main_chart(df, ticker, sma_short=sma_short, sma_long=sma_long)
-        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
+        st.plotly_chart(fig, width="stretch", config={"scrollZoom": True})
 
         # ── チャートの見方ガイド ──────────────────────────────
         with st.expander("📖 チャートの見方（各線・指標の説明）", expanded=False):
@@ -1158,7 +1158,7 @@ elif page == "📊 テクニカル分析":
 
         if st.session_state.get("beginner_mode", True):
             with st.expander("📊 各指標の詳細データ（上級者向け）", expanded=False):
-                st.dataframe(_make_sig_df(signals), use_container_width=True, hide_index=True)
+                st.dataframe(_make_sig_df(signals), width="stretch", hide_index=True)
                 st.caption("★★★=最重要(×3)　★★☆=重要(×2)　★☆☆=補助(×1)")
                 if atr_val:
                     st.markdown("**損切りラインの詳細（ATRベース）**")
@@ -1172,7 +1172,7 @@ elif page == "📊 テクニカル分析":
                     r4.metric("ATR", f"{risk['ATR']:.2f}")
         else:
             st.markdown("### 指標別シグナル一覧")
-            st.dataframe(_make_sig_df(signals), use_container_width=True, hide_index=True)
+            st.dataframe(_make_sig_df(signals), width="stretch", hide_index=True)
             st.caption("★★★=最重要(×3)　★★☆=重要(×2)　★☆☆=補助(×1)")
             if atr_val:
                 st.markdown("### 損切りライン（ATRベース）")
@@ -1225,7 +1225,7 @@ elif page == "📊 テクニカル分析":
             with st.expander("📊 ボラティリティ推移チャートを見る", expanded=False):
                 st.caption("白点線を境に低・高ボラ圏を区分。現在位置（●）がどのゾーンにあるか確認してください。")
                 fig_vol = build_volatility_chart(_vol)
-                st.plotly_chart(fig_vol, use_container_width=True, config={"scrollZoom": True})
+                st.plotly_chart(fig_vol, width="stretch", config={"scrollZoom": True})
 
         # VaR
         if _var:
@@ -1292,7 +1292,7 @@ elif page == "📊 テクニカル分析":
                        help="30日後に現在より高い値を付ける確率（過去のドリフトに基づく推定）")
 
             fig_mc = build_montecarlo_chart(_mc, ticker)
-            st.plotly_chart(fig_mc, use_container_width=True, config={"scrollZoom": True})
+            st.plotly_chart(fig_mc, width="stretch", config={"scrollZoom": True})
 
             with st.expander("💡 モンテカルロシミュレーションの使い方（初心者向け）"):
                 st.markdown(f"""
@@ -1392,7 +1392,7 @@ elif page == "📊 テクニカル分析":
                           font=dict(color="#fafafa"), height=300,
                           showlegend=False, coloraxis_showscale=False,
                       )
-                      st.plotly_chart(fig_fi, use_container_width=True, config={"scrollZoom": True})
+                      st.plotly_chart(fig_fi, width="stretch", config={"scrollZoom": True})
 
         st.markdown("---")
         ai_tab1, ai_tab2 = st.tabs(["🤖 テクニカルAI解説", "🌐 マクロ・ニュース影響"])
@@ -1482,7 +1482,7 @@ elif page == "🔍 スクリーニング":
                             "基準": detail["基準"],
                             "判定": "✅" if detail["合否"] else "❌",
                         })
-                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
 
 # ─── ファンダメンタル分析 ─────────────────────────────────────────────────────
@@ -1615,7 +1615,7 @@ elif page == "🌐 マクロ・ニュース":
             impacts = get_sector_impact(live_data)
             if impacts:
                 df_impact = pd.DataFrame(impacts)
-                st.dataframe(df_impact, use_container_width=True, hide_index=True)
+                st.dataframe(df_impact, width="stretch", hide_index=True)
                 st.caption("⚠️ これは機械的なルールによる参考情報です。最終判断は自己責任でお願いします。")
             else:
                 st.info("現在のデータでは特筆すべきセクター影響はありません（市場が落ち着いている状態）")
@@ -1711,7 +1711,7 @@ elif page == "🌐 マクロ・ニュース":
                     "投資への影響": data["投資影響"],
                 })
             df_macro = pd.DataFrame(rows)
-            st.dataframe(df_macro, use_container_width=True, hide_index=True)
+            st.dataframe(df_macro, width="stretch", hide_index=True)
 
         st.markdown("---")
         st.markdown("#### 📌 今後の主要イベントカレンダー")
@@ -1723,7 +1723,7 @@ elif page == "🌐 マクロ・ニュース":
             {"タイミング": "随時", "イベント": "地政学リスク（中東・台湾海峡等）", "注目度": "★★☆", "影響": "リスクオフ・原油・防衛株"},
             {"タイミング": "随時", "イベント": "米中貿易摩擦・関税動向", "注目度": "★★☆", "影響": "製造業・半導体・自動車に逆風"},
         ]
-        st.dataframe(pd.DataFrame(events), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(events), width="stretch", hide_index=True)
 
 
 # ─── バックテスト ─────────────────────────────────────────────────────────────
@@ -1752,7 +1752,7 @@ elif page == "🔬 バックテスト":
         bt_ticker = st.session_state.get("current_ticker", "7203")
         st.success(f"📌 検証銘柄: **{bt_ticker}**　← サイドバーで変更できます")
 
-        bt_btn = st.button("▶ バックテスト実行", type="primary", use_container_width=True, key="bt_single_btn")
+        bt_btn = st.button("▶ バックテスト実行", type="primary", width="stretch", key="bt_single_btn")
 
         if bt_btn and bt_ticker:
             with st.spinner("データ取得・バックテスト実行中..."):
@@ -1795,7 +1795,7 @@ elif page == "🔬 バックテスト":
                 col.metric(label, val, delta)
 
             fig_bt = build_backtest_chart(result["portfolio"], result["trades"], _ticker)
-            st.plotly_chart(fig_bt, use_container_width=True, config={"scrollZoom": True})
+            st.plotly_chart(fig_bt, width="stretch", config={"scrollZoom": True})
 
             if not result["trades"].empty:
                 st.markdown("### 📋 取引履歴")
@@ -1803,7 +1803,7 @@ elif page == "🔬 バックテスト":
                 trades_display["損益"] = trades_display["損益"].apply(
                     lambda x: f"¥{x:+,.0f}" if x != 0 else "-"
                 )
-                st.dataframe(trades_display, use_container_width=True, hide_index=True)
+                st.dataframe(trades_display, width="stretch", hide_index=True)
 
                 st.markdown("### 💡 AIによる戦略評価")
                 if st.session_state.get("ai_enabled") and os.getenv("ANTHROPIC_API_KEY"):
@@ -1847,7 +1847,7 @@ elif page == "🔬 バックテスト":
         with _bcol1:
             st.caption(f"戦略: {bt_strategy_label} / 期間: {bt_period} / 初期資金: ¥{bt_cash:,.0f}　（左サイドバーで変更）")
 
-        bt_batch_btn = st.button("▶ 一括バックテスト実行", type="primary", use_container_width=True, key="bt_batch_btn")
+        bt_batch_btn = st.button("▶ 一括バックテスト実行", type="primary", width="stretch", key="bt_batch_btn")
 
         if bt_batch_btn:
             batch_tickers = [t.strip() for t in batch_tickers_raw.strip().splitlines() if t.strip()]
@@ -1914,7 +1914,7 @@ elif page == "🔬 バックテスト":
             df_rows["最大DD(%)"] = df_rows["最大DD(%)"].apply(lambda x: f"{x:.1f}%")
             df_rows["勝率(%)"] = df_rows["勝率(%)"].apply(lambda x: f"{x:.1f}%")
             df_rows["戦略優位"] = df_rows["戦略優位"].apply(lambda x: "✅" if x else "❌")
-            st.dataframe(df_rows, use_container_width=True, hide_index=True)
+            st.dataframe(df_rows, width="stretch", hide_index=True)
 
             if batch_result["errors"]:
                 with st.expander(f"⚠️ エラー {len(batch_result['errors'])}件"):
@@ -1934,7 +1934,7 @@ elif page == "📐 ポートフォリオ":
     )
     pf_period = st.selectbox("分析期間", ["1y", "2y"], index=0,
                               format_func=lambda x: {"1y": "1年", "2y": "2年"}[x])
-    pf_btn = st.button("📐 最適化実行", type="primary", use_container_width=True)
+    pf_btn = st.button("📐 最適化実行", type="primary", width="stretch")
 
     if pf_btn:
         tickers = [t.strip() for t in tickers_input.strip().split("\n") if t.strip()]
@@ -1961,7 +1961,7 @@ elif page == "📐 ポートフォリオ":
                     st.markdown("### 🔗 相関係数マトリクス")
                     st.caption("値が低い（青）ほど分散効果が高い。0.7以上（赤）は集中リスク")
                     fig_corr = build_correlation_heatmap(pf_result["corr"])
-                    st.plotly_chart(fig_corr, use_container_width=True)
+                    st.plotly_chart(fig_corr, width="stretch")
 
                     st.markdown("### ⚖️ 最適ウェイト比較")
                     col_mv, col_eq = st.columns(2)
@@ -1969,7 +1969,7 @@ elif page == "📐 ポートフォリオ":
                         st.markdown("**最小分散ポートフォリオ**")
                         st.caption("リスクを最小化する配分")
                         fig_mv = build_portfolio_pie(pf_result["weights_min_var"], "最小分散")
-                        st.plotly_chart(fig_mv, use_container_width=True)
+                        st.plotly_chart(fig_mv, width="stretch")
                         s = pf_result["stats_min_var"]
                         st.metric("期待リターン", f"{s['期待リターン(%)']:+.1f}%")
                         st.metric("リスク（年率）", f"{s['リスク（年率ボラ%）']:.1f}%")
@@ -1979,7 +1979,7 @@ elif page == "📐 ポートフォリオ":
                         st.markdown("**均等配分**")
                         st.caption("単純均等割り（参考）")
                         fig_eq = build_portfolio_pie(pf_result["weights_equal"], "均等配分")
-                        st.plotly_chart(fig_eq, use_container_width=True)
+                        st.plotly_chart(fig_eq, width="stretch")
                         s = pf_result["stats_equal"]
                         st.metric("期待リターン", f"{s['期待リターン(%)']:+.1f}%")
                         st.metric("リスク（年率）", f"{s['リスク（年率ボラ%）']:.1f}%")
@@ -1994,7 +1994,7 @@ elif page == "📐 ポートフォリオ":
                              "ハーフケリー（安全版）": f"{v*50:.1f}%"}
                             for t, v in pf_result["kelly"].items()
                         ]
-                        st.dataframe(pd.DataFrame(kelly_data), use_container_width=True, hide_index=True)
+                        st.dataframe(pd.DataFrame(kelly_data), width="stretch", hide_index=True)
                         st.caption("※ ハーフケリー（推奨比率の半分）が実用的とされています")
                     else:
                         st.info("投資日記に取引履歴を記録するとケリー基準が計算されます")
@@ -2014,7 +2014,7 @@ elif page == "📐 ポートフォリオ":
                         paper_bgcolor="#0e1117", plot_bgcolor="#1a1d23",
                         font=dict(color="#fafafa"), height=400,
                     )
-                    st.plotly_chart(fig_ret, use_container_width=True)
+                    st.plotly_chart(fig_ret, width="stretch")
 
 
 # ─── 投資日記 ─────────────────────────────────────────────────────────────────
@@ -2071,7 +2071,7 @@ elif page == "📔 投資日記":
         if not trades_df.empty:
             display_cols = ["created_at", "ticker", "action", "price", "quantity",
                             "technical_reason", "emotion_score", "stop_loss"]
-            st.dataframe(trades_df[display_cols], use_container_width=True, hide_index=True)
+            st.dataframe(trades_df[display_cols], width="stretch", hide_index=True)
         else:
             st.info("まだ取引記録がありません。")
 
@@ -2129,7 +2129,7 @@ elif page == "📔 投資日記":
                     font=dict(color="#fafafa"), height=350,
                     yaxis_title="損益 (円)",
                 )
-                st.plotly_chart(fig_monthly, use_container_width=True)
+                st.plotly_chart(fig_monthly, width="stretch")
 
             col_a, col_b = st.columns(2)
 
@@ -2148,7 +2148,7 @@ elif page == "📔 投資日記":
                         for t, s in sorted(summary_by_ticker.items(),
                                            key=lambda x: x[1]["実現損益合計"], reverse=True)
                     ]
-                    st.dataframe(pd.DataFrame(ticker_rows), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(ticker_rows), width="stretch", hide_index=True)
 
                     # 銘柄別損益バー
                     tickers_sorted = sorted(summary_by_ticker.keys(),
@@ -2163,7 +2163,7 @@ elif page == "📔 投資日記":
                         font=dict(color="#fafafa"), height=300,
                         xaxis_title="損益 (円)",
                     )
-                    st.plotly_chart(fig_tk, use_container_width=True)
+                    st.plotly_chart(fig_tk, width="stretch")
 
             # ─ 含み損益（保有中） ─
             with col_b:
@@ -2185,7 +2185,7 @@ elif page == "📔 投資日記":
                         )
                         st.metric("含み損益合計", f"¥{ur_total:+,.0f}")
                         ur_df = pd.DataFrame(unrealized)
-                        st.dataframe(ur_df, use_container_width=True, hide_index=True)
+                        st.dataframe(ur_df, width="stretch", hide_index=True)
                 else:
                     st.info("現在保有中のポジションはありません")
 
@@ -2199,7 +2199,7 @@ elif page == "📔 投資日記":
                 realized_df["損益率(%)"] = realized_df["損益率(%)"].apply(
                     lambda x: f"{x:+.2f}%"
                 )
-                st.dataframe(realized_df, use_container_width=True, hide_index=True)
+                st.dataframe(realized_df, width="stretch", hide_index=True)
 
                 # 損益推移（累積）
                 st.markdown("#### 📈 確定損益の累積推移")
@@ -2224,7 +2224,7 @@ elif page == "📔 投資日記":
                     font=dict(color="#fafafa"), height=320,
                     yaxis_title="累積損益 (円)",
                 )
-                st.plotly_chart(fig_cum, use_container_width=True)
+                st.plotly_chart(fig_cum, width="stretch")
 
     with tab3:
         st.markdown("### パフォーマンス統計")
@@ -2247,7 +2247,7 @@ elif page == "📔 投資日記":
                     color_discrete_sequence=["#7e57c2"],
                 )
                 fig_e.update_layout(paper_bgcolor="#0e1117", plot_bgcolor="#1a1d23", font=dict(color="#fafafa"))
-                st.plotly_chart(fig_e, use_container_width=True)
+                st.plotly_chart(fig_e, width="stretch")
                 st.caption("スコア5（興奮・FOMO）での取引は損失リスクが高い傾向があります（プロスペクト理論）")
         else:
             st.info("取引データが不足しています。")
@@ -2497,7 +2497,7 @@ export JQUANTS_PASSWORD="your_password"
              "遅延": "リアルタイム",
              "状態": "✅ 設定済み" if alp_active else "❌ 未設定"},
         ]
-        st.dataframe(pd.DataFrame(status_data), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(status_data), width="stretch", hide_index=True)
 
     with ntab4:
         st.markdown("### 手動でアラートを送信")
@@ -2513,7 +2513,7 @@ export JQUANTS_PASSWORD="your_password"
 
         col_a, col_b = st.columns(2)
         with col_a:
-            if st.button("📊 シグナルアラートを送信", type="primary", use_container_width=True):
+            if st.button("📊 シグナルアラートを送信", type="primary", width="stretch"):
                 with st.spinner(f"{test_ticker} を分析して送信中..."):
                     try:
                         df = fetch_ohlcv(test_ticker, period="3mo")
@@ -2547,7 +2547,7 @@ export JQUANTS_PASSWORD="your_password"
                         st.error(f"エラー: {e}")
 
         with col_b:
-            if st.button("🔍 スクリーニング結果を送信", use_container_width=True):
+            if st.button("🔍 スクリーニング結果を送信", width="stretch"):
                 with st.spinner("スクリーニング中..."):
                     try:
                         result = screen_single(test_ticker)
@@ -2662,7 +2662,7 @@ elif page == "🤖 自動売買":
             )
         with fx_col2:
             st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-            if st.button("レートを更新", use_container_width=True):
+            if st.button("レートを更新", width="stretch"):
                 set_usdjpy_rate(new_fx)
                 st.success(f"USD/JPY = {new_fx:.1f}円 に設定しました")
                 st.rerun()
@@ -2766,7 +2766,7 @@ elif page == "🤖 自動売買":
                         results_log.append({"銘柄": tk_item, "シグナル": "エラー", "スコア": 0, "結果": str(e)})
                 progress.empty()
                 if results_log:
-                    st.dataframe(pd.DataFrame(results_log), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(results_log), width="stretch", hide_index=True)
                 st.rerun()
 
         if not status["enabled"]:
@@ -2798,7 +2798,7 @@ elif page == "🤖 自動売買":
                     "時価評価額": f"{market_val:,.0f}",
                     "含み損益": f"{'+' if unrealized>=0 else ''}{unrealized:,.0f}",
                 })
-            st.dataframe(pd.DataFrame(updated_positions), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(updated_positions), width="stretch", hide_index=True)
 
             total_val = sum(p["qty"] * (fetch_realtime_price(p["ticker"]).get("price") or p["avg_price"])
                            for p in positions)
@@ -2823,7 +2823,7 @@ elif page == "🤖 自動売買":
             st.dataframe(pd.DataFrame([{
                 "銘柄": o["ticker"], "売買": o["side"], "株数": o["qty"],
                 "指値": f"{o['limit_price']:,.1f}", "発注日時": o["placed_at"], "有効期限": o["expires"],
-            } for o in pending_orders]), use_container_width=True, hide_index=True)
+            } for o in pending_orders]), width="stretch", hide_index=True)
             if st.button("📋 指値注文を処理する（OHLCVで約定判定）"):
                 from modules.data_fetcher import fetch_ohlcv as _fo
                 ohlcv_map = {}
@@ -2854,7 +2854,7 @@ elif page == "🤖 自動売買":
                 log_df = log_df[["timestamp", "ticker", "side", "qty", "price", "order_type", "status"]]
                 log_df.columns = ["日時", "銘柄", "売買", "株数", "価格", "注文種別", "状態"]
                 log_df["売買"] = log_df["売買"].map({"buy": "買い", "sell": "売り"})
-                st.dataframe(log_df[::-1], use_container_width=True, hide_index=True)
+                st.dataframe(log_df[::-1], width="stretch", hide_index=True)
             else:
                 st.info("まだ取引履歴がありません。")
         else:
@@ -2995,7 +2995,7 @@ elif page == "🤖 自動売買":
                 yaxis=dict(gridcolor="#2a2d35", tickformat=",.0f"),
                 showlegend=False,
             )
-            st.plotly_chart(fig_curve, use_container_width=True)
+            st.plotly_chart(fig_curve, width="stretch")
 
             # ── 銘柄別成績 ────────────────────────────────────────────────
             if trades_closed:
@@ -3025,7 +3025,7 @@ elif page == "🤖 自動売買":
                     xaxis=dict(gridcolor="#2a2d35"),
                     showlegend=False,
                 )
-                st.plotly_chart(fig_tk, use_container_width=True)
+                st.plotly_chart(fig_tk, width="stretch")
 
                 # ── 決済済みトレード一覧 ──────────────────────────────────
                 st.markdown("---")
@@ -3035,7 +3035,7 @@ elif page == "🤖 自動売買":
                     lambda x: f"+{x:,.0f}" if x >= 0 else f"{x:,.0f}"
                 )
                 closed_df = closed_df[["決済日時", "銘柄", "買値", "売値", "株数", "損益", "保有日数", "勝敗"]]
-                st.dataframe(closed_df[::-1], use_container_width=True, hide_index=True)
+                st.dataframe(closed_df[::-1], width="stretch", hide_index=True)
 
     with tab_watchlist:
         st.markdown("#### 🔍 自動ウォッチリスト管理")
@@ -3164,7 +3164,7 @@ elif page == "🤖 自動売買":
                     {"銘柄": t, "シグナル": v["verdict"], "スコア": f"{v['score']:+d}"}
                     for t, v in score_rows
                 ])
-                st.dataframe(score_df, use_container_width=True, hide_index=True, height=300)
+                st.dataframe(score_df, width="stretch", hide_index=True, height=300)
 
 
 # ─── トレードガイド ───────────────────────────────────────────────────────────
@@ -3221,7 +3221,7 @@ elif page == "📖 トレードガイド":
             {"時間帯": "週末（15〜30分）", "やること": "週次振り返り・ポートフォリオ確認",
              "ページ": "📔 投資日記 → 📐 ポートフォリオ"},
         ]
-        st.dataframe(pd.DataFrame(time_table), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(time_table), width="stretch", hide_index=True)
 
     with guide_tab2:
         st.markdown("### 📋 各ステップの詳細")
