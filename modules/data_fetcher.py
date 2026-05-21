@@ -39,11 +39,46 @@ def set_usdjpy_rate(rate: float):
         _save_fx_file_cache(rate)
 
 
+def _fetch_usdjpy_from_api() -> float | None:
+    """複数の無料APIを順番に試してUSD/JPYレートを取得する"""
+    import urllib.request
+    apis = [
+        # frankfurter.app（ECBデータ、無料・APIキー不要）
+        ("https://api.frankfurter.app/latest?from=USD&to=JPY",
+         lambda d: d["rates"]["JPY"]),
+        # exchangerate-api.com（無料枠あり）
+        ("https://api.exchangerate-api.com/v4/latest/USD",
+         lambda d: d["rates"]["JPY"]),
+        # open.er-api.com（無料・APIキー不要）
+        ("https://open.er-api.com/v6/latest/USD",
+         lambda d: d["rates"]["JPY"]),
+    ]
+    for url, extractor in apis:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                data = json.loads(r.read())
+                rate = float(extractor(data))
+                if 80 < rate < 200:
+                    return rate
+        except Exception:
+            continue
+    return None
+
+
 def get_usdjpy_rate() -> float:
-    """USD/JPY レートを返す（5分キャッシュ）。取得失敗時はファイルキャッシュ→デフォルト150円。"""
+    """USD/JPY レートを返す（5分キャッシュ）。
+    取得順: yfinance → 無料FX API → ファイルキャッシュ → デフォルト150円
+    """
     now = time.time()
     if _fx_cache.get("rate") and now - _fx_cache.get("fetched_at", 0) < _FX_CACHE_TTL:
         return _fx_cache["rate"]
+
+    def _store(rate: float) -> float:
+        _fx_cache["rate"] = rate
+        _fx_cache["fetched_at"] = now
+        _save_fx_file_cache(rate)
+        return rate
 
     # 方法1: yfinance fast_info
     for sym in ["USDJPY=X", "JPY=X"]:
@@ -51,28 +86,27 @@ def get_usdjpy_rate() -> float:
             tk = yf.Ticker(sym)
             rate = tk.fast_info.get("last_price") or tk.fast_info.get("regularMarketPrice")
             if rate and 80 < rate < 200:
-                _fx_cache["rate"] = float(rate)
-                _fx_cache["fetched_at"] = now
-                _save_fx_file_cache(float(rate))
-                return _fx_cache["rate"]
+                return _store(float(rate))
         except Exception:
             continue
 
-    # 方法2: yfinance download（1日分）
+    # 方法2: yfinance download
     try:
         df = yf.download("USDJPY=X", period="2d", auto_adjust=True, progress=False)
         if not df.empty:
             close = df["Close"]
-            rate = float(close.iloc[-1]) if hasattr(close, "iloc") else float(close)
+            rate = float(close.iloc[-1] if hasattr(close.iloc[-1], "__float__") else close.iloc[-1].iloc[0])
             if 80 < rate < 200:
-                _fx_cache["rate"] = rate
-                _fx_cache["fetched_at"] = now
-                _save_fx_file_cache(rate)
-                return rate
+                return _store(rate)
     except Exception:
         pass
 
-    # 方法3: ファイルキャッシュから復元（古くても使う）
+    # 方法3: 無料FX API（frankfurter / exchangerate-api / open.er-api）
+    rate = _fetch_usdjpy_from_api()
+    if rate:
+        return _store(rate)
+
+    # 方法4: ファイルキャッシュから復元（古くても使う）
     file_cache = _load_fx_file_cache()
     if file_cache.get("rate") and 80 < file_cache["rate"] < 200:
         _fx_cache["rate"] = file_cache["rate"]
