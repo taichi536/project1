@@ -2610,9 +2610,9 @@ elif page == "🤖 自動売買":
                 help="1銘柄に資金の何%まで投入するか"
             )
             use_limit = st.checkbox(
-                "指値注文を使用（推奨）",
-                value=status["settings"].get("use_limit_order", True),
-                help="成行注文より不利な価格での約定を防ぐ"
+                "指値注文を使用",
+                value=status["settings"].get("use_limit_order", False),
+                help="成行はシグナル時に即時約定。指値はalert_runnerの次回実行まで保留されます。"
             )
 
         st.markdown("---")
@@ -2647,6 +2647,51 @@ elif page == "🤖 自動売買":
             st.rerun()
 
     with tab_positions:
+        # ── 手動シグナルチェック ────────────────────────────────────────────
+        st.markdown("#### シグナルチェックと手動実行")
+        st.caption("ウォッチリストのシグナルを今すぐ確認して取引を実行します（alert_runnerなしで動作）。")
+        if st.button("🔍 今すぐシグナルチェック＆取引実行", type="primary", disabled=not status["enabled"]):
+            if not status["enabled"]:
+                st.warning("自動売買が無効です。「設定」タブで有効にしてください。")
+            else:
+                from modules.data_fetcher import fetch_ohlcv
+                from modules.technical import compute_all
+                from modules.signals import evaluate_signals, overall_signal
+                from modules.dashboard import load_watchlist
+                tickers = load_watchlist()
+                progress = st.progress(0, text="シグナル確認中...")
+                results_log = []
+                for i, tk_item in enumerate(tickers):
+                    progress.progress((i+1)/max(len(tickers),1), text=f"{tk_item} 確認中...")
+                    try:
+                        df_tk = fetch_ohlcv(tk_item, period="2y")
+                        df_tk = compute_all(df_tk)
+                        sigs = evaluate_signals(df_tk)
+                        verdict, score = overall_signal(sigs, df=df_tk)
+                        price_now = float(df_tk["Close"].iloc[-1])
+                        atr_now = float(df_tk["ATR"].dropna().iloc[-1]) if "ATR" in df_tk.columns and len(df_tk["ATR"].dropna()) > 0 else None
+                        trade_result = trader.execute_signal(
+                            ticker=tk_item, verdict=verdict, score=score,
+                            price=price_now, atr=atr_now,
+                            stop_loss=price_now * 0.95 if verdict == "買い" else None,
+                        )
+                        results_log.append({
+                            "銘柄": tk_item, "シグナル": verdict, "スコア": score,
+                            "結果": trade_result.get("message", "スキップ") if trade_result else "条件未達",
+                        })
+                    except Exception as e:
+                        results_log.append({"銘柄": tk_item, "シグナル": "エラー", "スコア": 0, "結果": str(e)})
+                progress.empty()
+                if results_log:
+                    st.dataframe(pd.DataFrame(results_log), use_container_width=True, hide_index=True)
+                st.rerun()
+
+        if not status["enabled"]:
+            st.info("自動売買が無効です。「設定」タブで有効にして保存してください。")
+
+        st.markdown("---")
+
+        # ── 現在のポジション ──────────────────────────────────────────────
         st.markdown("#### 現在のポジション")
         positions = status["positions"]
         if positions:
@@ -2682,6 +2727,37 @@ elif page == "🤖 自動売買":
                       delta=f"{'+' if (status['cash']+total_val-1_000_000)>=0 else ''}{status['cash']+total_val-1_000_000:,.0f}円")
         else:
             st.info("現在保有中のポジションはありません。")
+
+        # ── 未約定の指値注文 ──────────────────────────────────────────────
+        from modules.broker import PaperBroker as _PB
+        _pb_pos = _PB()
+        pending_orders = _pb_pos._state.get("pending_orders", [])
+        if pending_orders:
+            st.markdown("---")
+            st.markdown("#### ⏳ 未約定の指値注文")
+            st.caption("以下の指値注文はまだ約定していません。「処理」ボタンで最新OHLCVを使って約定判定します。")
+            st.dataframe(pd.DataFrame([{
+                "銘柄": o["ticker"], "売買": o["side"], "株数": o["qty"],
+                "指値": f"{o['limit_price']:,.1f}", "発注日時": o["placed_at"], "有効期限": o["expires"],
+            } for o in pending_orders]), use_container_width=True, hide_index=True)
+            if st.button("📋 指値注文を処理する（OHLCVで約定判定）"):
+                from modules.data_fetcher import fetch_ohlcv as _fo
+                ohlcv_map = {}
+                for o in pending_orders:
+                    t = o["ticker"]
+                    if t not in ohlcv_map:
+                        try:
+                            df_o = _fo(t, period="3d")
+                            if not df_o.empty:
+                                row = df_o.iloc[-1]
+                                ohlcv_map[t] = {"open": float(row["Open"]), "high": float(row["High"]),
+                                                "low": float(row["Low"]), "close": float(row["Close"])}
+                        except Exception:
+                            pass
+                fill_results = _pb_pos.process_pending_orders(ohlcv_map)
+                for r in fill_results:
+                    st.write(r.get("message", r.get("status", "")))
+                st.rerun()
 
     with tab_log:
         st.markdown("#### 取引ログ（ペーパートレードのみ）")

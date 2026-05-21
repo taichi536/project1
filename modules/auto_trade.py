@@ -27,7 +27,7 @@ _DEFAULT_SETTINGS = {
     "max_invested_pct": 70.0,   # 総資産に対する最大投資比率（%）。残りはキャッシュ確保
     "min_score": 4,             # 自動買いに必要な最低スコア
     "sell_score": -2,           # 自動売りに必要な最大スコア
-    "use_limit_order": True,    # True=指値, False=成行
+    "use_limit_order": False,   # True=指値, False=成行（ペーパーでは成行推奨）
     "limit_offset_pct": 0.3,   # 指値: 現在値+X%で買い注文
     "stop_loss_atr_mult": 2.0,  # ATR×倍数で損切りライン設定
     "take_profit_pct": 10.0,    # 利確ライン: 買値から+X%で自動売却（0=無効）
