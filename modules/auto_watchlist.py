@@ -8,6 +8,7 @@
 import json
 from pathlib import Path
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from modules.universe import UNIVERSE
 from modules.dashboard import load_watchlist, save_watchlist
 from modules.data_fetcher import fetch_ohlcv
@@ -99,52 +100,62 @@ def run_auto_watchlist(verbose: bool = True) -> dict:
     scores = {}  # ticker → score の記録
 
     if verbose:
-        print(f"[自動ウォッチリスト] {len(universe_tickers)}銘柄をスキャン中...")
+        print(f"[自動ウォッチリスト] {len(universe_tickers)}銘柄を並列スキャン中...")
+
+    def _scan_one(ticker):
+        df = fetch_ohlcv(ticker, period="3mo")
+        df = compute_all(df)
+        sigs = evaluate_signals(df)
+        verdict, score = overall_signal(sigs, df=df)
+        return ticker, verdict, score
+
+    scan_results = {}
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(_scan_one, t): t for t in universe_tickers}
+        for future in as_completed(futures):
+            t = futures[future]
+            try:
+                ticker, verdict, score = future.result()
+                scan_results[ticker] = (verdict, score)
+                if verbose:
+                    print(f"  {ticker}: {verdict} score={score:+d}")
+            except Exception as e:
+                if verbose:
+                    print(f"  {t}: エラー - {e}")
 
     for ticker in universe_tickers:
-        try:
-            df = fetch_ohlcv(ticker, period="3mo")
-            df = compute_all(df)
-            sigs = evaluate_signals(df)
-            verdict, score = overall_signal(sigs, df=df)
+        if ticker not in scan_results:
+            continue
+        verdict, score = scan_results[ticker]
+        scores[ticker] = {"verdict": verdict, "score": score}
 
-            scores[ticker] = {"verdict": verdict, "score": score}
-            if verbose:
-                print(f"  {ticker}: {verdict} score={score:+d}")
-
-            # 強シグナル → ウォッチリストに追加
-            if score >= add_threshold and ticker not in watchlist:
-                if len(watchlist) < max_size:
-                    watchlist.append(ticker)
-                    added.append(ticker)
-                    weak_counts.pop(ticker, None)
-                    if verbose:
-                        print(f"    ✅ ウォッチリストに追加（score={score:+d}）")
-                else:
-                    skipped += 1
-                    if verbose:
-                        print(f"    ⚠️ 上限{max_size}銘柄のためスキップ")
-
-            # シグナルが強い → 弱カウントをリセット
-            elif score > remove_threshold:
+        # 強シグナル → ウォッチリストに追加
+        if score >= add_threshold and ticker not in watchlist:
+            if len(watchlist) < max_size:
+                watchlist.append(ticker)
+                added.append(ticker)
                 weak_counts.pop(ticker, None)
+                if verbose:
+                    print(f"    ✅ {ticker} ウォッチリストに追加（score={score:+d}）")
+            else:
+                skipped += 1
 
-            # 弱シグナルが続く → カウントアップして削除判定
-            elif score <= remove_threshold and ticker in watchlist and ticker not in protected:
-                weak_counts[ticker] = weak_counts.get(ticker, 0) + 1
-                if weak_counts[ticker] >= remove_consecutive:
-                    watchlist.remove(ticker)
-                    removed.append(ticker)
-                    weak_counts.pop(ticker, None)
-                    if verbose:
-                        print(f"    ❌ ウォッチリストから削除（{remove_consecutive}回連続弱シグナル）")
-                else:
-                    if verbose:
-                        print(f"    ⚠️ 弱シグナル {weak_counts[ticker]}/{remove_consecutive}回")
+        # シグナルが強い → 弱カウントをリセット
+        elif score > remove_threshold:
+            weak_counts.pop(ticker, None)
 
-        except Exception as e:
-            if verbose:
-                print(f"  {ticker}: エラー - {e}")
+        # 弱シグナルが続く → カウントアップして削除判定
+        elif score <= remove_threshold and ticker in watchlist and ticker not in protected:
+            weak_counts[ticker] = weak_counts.get(ticker, 0) + 1
+            if weak_counts[ticker] >= remove_consecutive:
+                watchlist.remove(ticker)
+                removed.append(ticker)
+                weak_counts.pop(ticker, None)
+                if verbose:
+                    print(f"    ❌ {ticker} ウォッチリストから削除（{remove_consecutive}回連続弱シグナル）")
+            else:
+                if verbose:
+                    print(f"    ⚠️ {ticker} 弱シグナル {weak_counts[ticker]}/{remove_consecutive}回")
 
     save_watchlist(watchlist)
     _save_state({"weak_counts": weak_counts, "last_run": today})
