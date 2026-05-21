@@ -473,16 +473,28 @@ elif page == "🔭 銘柄スキャン":
 
     if scan_btn or f"scan_result_{selected_cat}" in st.session_state:
         if scan_btn:
-            prog = st.progress(0, text="スキャン中...")
-            results = []
+            from modules.dashboard import scan_ticker, scan_all
+            from concurrent.futures import ThreadPoolExecutor, as_completed
             tickers = cat_info["tickers"]
-            for i, tk in enumerate(tickers):
-                prog.progress((i + 1) / len(tickers), text=f"スキャン中... {tk} ({i+1}/{len(tickers)})")
-                from modules.dashboard import scan_ticker
-                r = scan_ticker(tk)
-                r["企業名"] = get_ticker_name(selected_cat, tk)
-                results.append(r)
+            prog = st.progress(0, text=f"並列スキャン中... 0/{len(tickers)}")
+            results_map = {}
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                futures = {executor.submit(scan_ticker, tk): tk for tk in tickers}
+                done = 0
+                for future in as_completed(futures):
+                    tk = futures[future]
+                    done += 1
+                    prog.progress(done / len(tickers), text=f"並列スキャン中... {done}/{len(tickers)}")
+                    try:
+                        r = future.result()
+                        r["企業名"] = get_ticker_name(selected_cat, tk)
+                        results_map[tk] = r
+                    except Exception as e:
+                        results_map[tk] = {"ticker": tk, "企業名": tk, "シグナル": "エラー",
+                                           "スコア": 0, "現在値": None, "前日比(%)": None,
+                                           "RSI": None, "MACD方向": "-", "理由": str(e)[:40]}
             prog.empty()
+            results = [results_map[tk] for tk in tickers if tk in results_map]
             st.session_state[f"scan_result_{selected_cat}"] = results
 
         results = st.session_state.get(f"scan_result_{selected_cat}", [])
@@ -3080,7 +3092,10 @@ elif page == "🤖 自動売買":
         # ── 今すぐスキャン ────────────────────────────────────────────────
         st.markdown("##### 今すぐスキャンを実行")
         n_targets = len(get_universe_tickers(selected_cats))
-        st.caption(f"選択中のカテゴリ: {len(selected_cats)}カテゴリ / {n_targets}銘柄 ── 完了まで約{max(1, n_targets // 15)}〜{max(2, n_targets // 8)}分かかります")
+        est_sec = max(30, n_targets // 8 * 10)  # 8並列での概算
+        est_min = est_sec // 60
+        est_label = f"約{est_min}分" if est_min >= 1 else f"約{est_sec}秒"
+        st.caption(f"選択中のカテゴリ: {len(selected_cats)}カテゴリ / {n_targets}銘柄 ── 8並列スキャン・完了まで{est_label}")
         result_area = st.empty()
 
         if st.button("🔍 今すぐスキャン実行", type="secondary", key="aw_scan"):
