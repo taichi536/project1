@@ -31,6 +31,34 @@ from modules.market_utils import market_status
 
 init_db()
 
+# ─── ダッシュボード設定の永続化 ──────────────────────────────────────────────
+import json as _json
+from pathlib import Path as _Path
+
+_DASH_CONFIG_FILE = _Path(__file__).parent / ".dashboard_config.json"
+
+def _load_dash_config() -> dict:
+    if _DASH_CONFIG_FILE.exists():
+        try:
+            return _json.loads(_DASH_CONFIG_FILE.read_text())
+        except Exception:
+            pass
+    return {}
+
+def _save_dash_config(updates: dict):
+    cfg = _load_dash_config()
+    cfg.update(updates)
+    _DASH_CONFIG_FILE.write_text(_json.dumps(cfg, ensure_ascii=False))
+
+# セッション開始時にファイルからsession_stateへ復元（1回だけ）
+if "dash_config_loaded" not in st.session_state:
+    cfg = _load_dash_config()
+    if "auto_refresh" in cfg:
+        st.session_state["auto_refresh"] = cfg["auto_refresh"]
+    if "auto_refresh_interval_idx" in cfg:
+        st.session_state["auto_refresh_interval_idx"] = cfg["auto_refresh_interval_idx"]
+    st.session_state["dash_config_loaded"] = True
+
 # ─── サイドバー ───────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("📈 株式分析ツール")
@@ -168,7 +196,10 @@ if page == "🏠 ダッシュボード":
         )
     interval_map = {"1分": 60, "3分": 180, "5分": 300, "15分": 900}
     interval_sec = interval_map[interval_label]
-    st.session_state["auto_refresh_interval_idx"] = ["1分", "3分", "5分", "15分"].index(interval_label)
+    _interval_idx = ["1分", "3分", "5分", "15分"].index(interval_label)
+    st.session_state["auto_refresh_interval_idx"] = _interval_idx
+    # トグル状態をファイルに保存（ページ再読み込み後も維持）
+    _save_dash_config({"auto_refresh": auto_refresh, "auto_refresh_interval_idx": _interval_idx})
 
     if auto_refresh:
         st_autorefresh(interval=interval_sec * 1000, key="dashboard_refresh")
