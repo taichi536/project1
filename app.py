@@ -3053,7 +3053,7 @@ elif page == "🤖 自動売買":
             add_thresh = st.slider("追加スコア閾値", min_value=2, max_value=6, step=1,
                                    value=aw_settings.get("add_score_threshold", 3),
                                    help="このスコア以上の銘柄をウォッチリストに追加")
-            max_size = st.slider("ウォッチリスト最大件数", min_value=5, max_value=50, step=5,
+            max_size = st.slider("ウォッチリスト最大件数", min_value=5, max_value=100, step=5,
                                  value=aw_settings.get("max_watchlist_size", 20))
         with col_aw2:
             remove_thresh = st.slider("削除スコア閾値", min_value=-6, max_value=-1, step=1,
