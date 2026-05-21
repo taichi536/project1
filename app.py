@@ -230,7 +230,8 @@ if page == "🏠 ダッシュボード":
        "dashboard_data" not in st.session_state:
         prev_data = {r["ticker"]: r["シグナル"]
                      for r in st.session_state.get("dashboard_data", [])}
-        with st.spinner(f"{len(watchlist)}銘柄をスキャン中..."):
+        _dash_est = len(watchlist) // 4
+        with st.spinner(f"{len(watchlist)}銘柄をスキャン中... （推定 {_dash_est}〜{_dash_est*2}秒）"):
             new_data = scan_all(watchlist)
         # シグナル変化を検出 + 自動通知
         changed_for_notif = []
@@ -476,6 +477,8 @@ elif page == "🔭 銘柄スキャン":
     st.info(f"📋 {cat_info['説明']}　（{len(cat_info['tickers'])}銘柄）")
 
     scan_btn = st.button("🔍 スキャン実行", type="primary", width="stretch")
+    _est_sec = len(cat_info["tickers"]) // 4
+    st.caption(f"⏱ {len(cat_info['tickers'])}銘柄 — 推定 {_est_sec}〜{_est_sec*2}秒（並列処理）")
 
     if scan_btn or f"scan_result_{selected_cat}" in st.session_state:
         if scan_btn:
@@ -1003,6 +1006,7 @@ elif page == "📊 テクニカル分析":
         with st.expander("🕐 マルチタイムフレーム分析（週足・日足・1時間足の一致確認）", expanded=False):
             st.caption("3つのタイムフレームが「買い」で一致するほど信頼性が高い。日足だけで判断するのは危険。")
             if st.button("🔍 マルチタイムフレームを分析（数秒かかります）", key="mtf_btn"):
+                st.session_state[f"mtf_{ticker}_started"] = True
                 with st.spinner("3つの時間足でデータ取得・分析中..."):
                     st.session_state[f"mtf_{ticker}"] = multi_timeframe_signal(
                         ticker, sma_short=sma_short, sma_long=sma_long
@@ -1038,8 +1042,8 @@ elif page == "📊 テクニカル分析":
                     st.error("🔴 **全時間足が「売り」** → エントリーは見送りを強く推奨")
                 else:
                     st.warning("⚠️ **時間足間でシグナルが不一致** → エントリーは慎重に。一致するまで待つのが安全")
-            else:
-                st.info("上のボタンを押すとマルチタイムフレーム分析を実行します。")
+            elif not st.session_state.get(f"mtf_{ticker}_started"):
+                st.caption("「🔍 マルチタイムフレームを分析」ボタンを押すと週足・日足・1時間足の一致を確認できます。")
 
         # ── すでに保有している方向けの継続判定 ────────────────────
         st.markdown("---")
@@ -2731,19 +2735,32 @@ elif page == "🤖 自動売買":
         init_cash = st.number_input("初期資金（円）", min_value=100_000, max_value=100_000_000,
                                      value=1_000_000, step=100_000)
         if st.button("ペーパートレードをリセット", type="secondary"):
-            from modules.broker import PaperBroker
-            pb = PaperBroker(initial_cash=init_cash)
-            pb.reset(initial_cash=init_cash)
-            st.success(f"リセット完了。初期資金: {init_cash:,.0f}円")
-            st.rerun()
+            st.session_state["_reset_confirm"] = True
+        if st.session_state.get("_reset_confirm"):
+            st.warning(f"⚠️ 全ポジション・取引ログ・損益データが削除されます。初期資金 **{init_cash:,.0f}円** でリセットしますか？")
+            _rc1, _rc2 = st.columns(2)
+            with _rc1:
+                if st.button("✅ はい、リセットする", type="primary", key="reset_yes"):
+                    from modules.broker import PaperBroker
+                    pb = PaperBroker(initial_cash=init_cash)
+                    pb.reset(initial_cash=init_cash)
+                    st.session_state.pop("_reset_confirm", None)
+                    st.success(f"リセット完了。初期資金: {init_cash:,.0f}円")
+                    st.rerun()
+            with _rc2:
+                if st.button("❌ キャンセル", key="reset_no"):
+                    st.session_state.pop("_reset_confirm", None)
+                    st.rerun()
 
     with tab_positions:
         # ── 手動シグナルチェック ────────────────────────────────────────────
         st.markdown("#### シグナルチェックと手動実行")
         st.caption("ウォッチリストのシグナルを今すぐ確認して取引を実行します（alert_runnerなしで動作）。")
+        if not status["enabled"]:
+            st.warning("🔒 自動売買が**無効**です。「設定」タブで有効にして保存するとボタンが押せるようになります。")
         if st.button("🔍 今すぐシグナルチェック＆取引実行", type="primary", disabled=not status["enabled"]):
             if not status["enabled"]:
-                st.warning("自動売買が無効です。「設定」タブで有効にしてください。")
+                pass
             else:
                 from modules.data_fetcher import fetch_ohlcv
                 from modules.technical import compute_all
@@ -2777,9 +2794,6 @@ elif page == "🤖 自動売買":
                 if results_log:
                     st.dataframe(pd.DataFrame(results_log), width="stretch", hide_index=True)
                 st.rerun()
-
-        if not status["enabled"]:
-            st.info("自動売買が無効です。「設定」タブで有効にして保存してください。")
 
         st.markdown("---")
 
@@ -2834,23 +2848,34 @@ elif page == "🤖 自動売買":
                 "指値": f"{o['limit_price']:,.1f}", "発注日時": o["placed_at"], "有効期限": o["expires"],
             } for o in pending_orders]), width="stretch", hide_index=True)
             if st.button("📋 指値注文を処理する（OHLCVで約定判定）"):
-                from modules.data_fetcher import fetch_ohlcv as _fo
-                ohlcv_map = {}
-                for o in pending_orders:
-                    t = o["ticker"]
-                    if t not in ohlcv_map:
-                        try:
-                            df_o = _fo(t, period="3d")
-                            if not df_o.empty:
-                                row = df_o.iloc[-1]
-                                ohlcv_map[t] = {"open": float(row["Open"]), "high": float(row["High"]),
-                                                "low": float(row["Low"]), "close": float(row["Close"])}
-                        except Exception:
-                            pass
-                fill_results = _pb_pos.process_pending_orders(ohlcv_map)
-                for r in fill_results:
-                    st.write(r.get("message", r.get("status", "")))
-                st.rerun()
+                st.session_state["_pending_confirm"] = True
+            if st.session_state.get("_pending_confirm"):
+                st.warning(f"⚠️ {len(pending_orders)}件の指値注文を最新OHLCVで約定判定します。約定した注文はキャッシュから差し引かれます。実行しますか？")
+                _pc1, _pc2 = st.columns(2)
+                with _pc1:
+                    if st.button("✅ 実行する", type="primary", key="pending_yes"):
+                        from modules.data_fetcher import fetch_ohlcv as _fo
+                        ohlcv_map = {}
+                        for o in pending_orders:
+                            t = o["ticker"]
+                            if t not in ohlcv_map:
+                                try:
+                                    df_o = _fo(t, period="3d")
+                                    if not df_o.empty:
+                                        row = df_o.iloc[-1]
+                                        ohlcv_map[t] = {"open": float(row["Open"]), "high": float(row["High"]),
+                                                        "low": float(row["Low"]), "close": float(row["Close"])}
+                                except Exception:
+                                    pass
+                        fill_results = _pb_pos.process_pending_orders(ohlcv_map)
+                        st.session_state.pop("_pending_confirm", None)
+                        for r in fill_results:
+                            st.write(r.get("message", r.get("status", "")))
+                        st.rerun()
+                with _pc2:
+                    if st.button("❌ キャンセル", key="pending_no"):
+                        st.session_state.pop("_pending_confirm", None)
+                        st.rerun()
 
     with tab_log:
         st.markdown("#### 取引ログ（ペーパートレードのみ）")
