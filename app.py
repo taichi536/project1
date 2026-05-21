@@ -349,6 +349,7 @@ if page == "🏠 ダッシュボード":
                 c6.markdown(f"<small style='color:#999'>{r['理由']}</small>", unsafe_allow_html=True)
                 if c7.button("📊 分析", key=f"goto_{r['ticker']}", help=f"{r['ticker']}をテクニカル分析で開く"):
                     st.session_state["current_ticker"] = r["ticker"]
+                    st.session_state.pop("sidebar_ticker_select", None)
                     st.session_state["_nav_target"] = "📊 テクニカル分析"
                     st.session_state["auto_analyze"] = True
                     st.rerun()
@@ -450,6 +451,7 @@ if page == "🏠 ダッシュボード":
             )
             if st.button(f"📊 {_tk} を詳しく分析", key=f"sell_goto_{_tk}"):
                 st.session_state["current_ticker"] = _tk
+                st.session_state.pop("sidebar_ticker_select", None)
                 st.session_state["_nav_target"] = "📊 テクニカル分析"
                 st.session_state["auto_analyze"] = True
                 st.rerun()
@@ -565,6 +567,7 @@ elif page == "🔭 銘柄スキャン":
 
                 if col_btn.button("📊 分析", key=f"scan_goto_{r['ticker']}", help="テクニカル分析で詳細確認"):
                     st.session_state["current_ticker"] = r["ticker"]
+                    st.session_state.pop("sidebar_ticker_select", None)
                     st.session_state["_nav_target"] = "📊 テクニカル分析"
                     st.session_state["auto_analyze"] = True
                     st.rerun()
