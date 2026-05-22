@@ -31,6 +31,14 @@ from modules.market_utils import market_status
 
 init_db()
 
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_and_compute(ticker: str, period: str, sma_short: int, sma_long: int, interval: str = "1d") -> pd.DataFrame:
+    """fetch_ohlcv + compute_all をまとめてキャッシュ（5分TTL）"""
+    df = fetch_ohlcv(ticker, period=period, interval=interval)
+    return compute_all(df, sma_short=sma_short, sma_long=sma_long)
+
+
 # ─── ダッシュボード設定の永続化 ──────────────────────────────────────────────
 import json as _json
 from pathlib import Path as _Path
@@ -309,160 +317,161 @@ if page == "🏠 ダッシュボード":
         b3.metric("🟡 様子見", watch_count)
         b4.metric("🔴 売りシグナル", sell_count)
 
-        st.markdown("---")
-        st.markdown("### 銘柄別シグナル一覧")
-        st.caption("行をクリックした銘柄はテクニカル分析で詳細確認できます")
+    dash_tab1, dash_tab2 = st.tabs(["📋 シグナル一覧", "📊 保有銘柄の売り時チェック"])
 
-        from modules.company_names import get_company_name, display_name as _dn
-        # シグナル変化があれば先にまとめて表示
-        changed = [r for r in rows if r.get("シグナル変化")]
-        if changed:
-            st.markdown("### 🚨 シグナル変化あり")
-            for r in changed:
-                arrow = {"買い": "🟢", "売り": "🔴", "様子見": "🟡"}.get(r["シグナル"], "⚪")
-                prev = {"買い": "🟢", "売り": "🔴", "様子見": "🟡"}.get(r["前回シグナル"], "⚪")
-                st.warning(f"**{_dn(r['ticker'])}**　{prev} {r['前回シグナル']} → {arrow} **{r['シグナル']}**　（{r['理由']}）")
-            st.markdown("---")
+    with dash_tab1:
+        if not rows:
+            st.info("「今すぐ更新」ボタンを押してシグナルを取得してください。")
+        else:
+            st.caption("銘柄の「📊 分析」ボタンでテクニカル分析に移動できます")
+            from modules.company_names import get_company_name, display_name as _dn
+            # シグナル変化があれば先にまとめて表示
+            changed = [r for r in rows if r.get("シグナル変化")]
+            if changed:
+                st.markdown("### 🚨 シグナル変化あり")
+                for r in changed:
+                    arrow = {"買い": "🟢", "売り": "🔴", "様子見": "🟡"}.get(r["シグナル"], "⚪")
+                    prev = {"買い": "🟢", "売り": "🔴", "様子見": "🟡"}.get(r["前回シグナル"], "⚪")
+                    st.warning(f"**{_dn(r['ticker'])}**　{prev} {r['前回シグナル']} → {arrow} **{r['シグナル']}**　（{r['理由']}）")
+                st.markdown("---")
 
-        for r in rows:
-            sig = r["シグナル"]
-            emoji = {"買い": "🟢", "売り": "🔴", "様子見": "🟡", "エラー": "⚫"}.get(sig, "⚪")
-            score = r["スコア"]
-            price = r["現在値"]
-            chg = r["前日比(%)"]
-            rsi = r["RSI"]
+            for r in rows:
+                sig = r["シグナル"]
+                emoji = {"買い": "🟢", "売り": "🔴", "様子見": "🟡", "エラー": "⚫"}.get(sig, "⚪")
+                score = r["スコア"]
+                price = r["現在値"]
+                chg = r["前日比(%)"]
+                rsi = r["RSI"]
 
-            chg_str = f"{chg:+.2f}%" if chg is not None else "N/A"
-            chg_color = "color:#26a69a" if (chg is not None and chg >= 0) else "color:#ef5350"
-            price_str = f"{price:,.2f}" if price else "N/A"
-            rsi_str = f"{rsi:.0f}" if rsi else "-"
-            changed_badge = " 🔔NEW" if r.get("シグナル変化") else ""
-            sig_bg = {"買い": "#1e3a2f", "売り": "#3a1e1e", "様子見": "#2e2a14"}.get(sig, "#1a1d23")
-            _cname = get_company_name(r["ticker"], use_api=False)
-            _show_name = f"**{_cname}**  \n<small style='color:#666'>{r['ticker']}</small>" if _cname != r["ticker"].upper().replace(".T","") else f"**{r['ticker']}**"
+                chg_str = f"{chg:+.2f}%" if chg is not None else "N/A"
+                chg_color = "color:#26a69a" if (chg is not None and chg >= 0) else "color:#ef5350"
+                price_str = f"{price:,.2f}" if price else "N/A"
+                rsi_str = f"{rsi:.0f}" if rsi else "-"
+                changed_badge = " 🔔NEW" if r.get("シグナル変化") else ""
+                sig_bg = {"買い": "#1e3a2f", "売り": "#3a1e1e", "様子見": "#2e2a14"}.get(sig, "#1a1d23")
+                _cname = get_company_name(r["ticker"], use_api=False)
+                _show_name = f"**{_cname}**  \n<small style='color:#666'>{r['ticker']}</small>" if _cname != r["ticker"].upper().replace(".T","") else f"**{r['ticker']}**"
 
-            with st.container():
-                c1, c2, c3, c4, c5, c6, c7 = st.columns([1.5, 1.5, 1.5, 1.5, 1, 2.5, 1])
-                c1.markdown(f"{_show_name}{changed_badge}", unsafe_allow_html=True)
-                c2.markdown(f"**{price_str}**")
-                c3.markdown(f"<span style='{chg_color}'>{chg_str}</span>", unsafe_allow_html=True)
-                c4.markdown(
-                    f"<span style='background:{sig_bg};padding:2px 8px;border-radius:8px'>"
-                    f"{emoji} **{sig}**</span>",
+                with st.container():
+                    c1, c2, c3, c4, c5, c6, c7 = st.columns([1.5, 1.5, 1.5, 1.5, 1, 2.5, 1])
+                    c1.markdown(f"{_show_name}{changed_badge}", unsafe_allow_html=True)
+                    c2.markdown(f"**{price_str}**")
+                    c3.markdown(f"<span style='{chg_color}'>{chg_str}</span>", unsafe_allow_html=True)
+                    c4.markdown(
+                        f"<span style='background:{sig_bg};padding:2px 8px;border-radius:8px'>"
+                        f"{emoji} **{sig}**</span>",
+                        unsafe_allow_html=True,
+                    )
+                    c5.markdown(f"<small>RSI {rsi_str}</small>", unsafe_allow_html=True)
+                    c6.markdown(f"<small style='color:#999'>{r['理由']}</small>", unsafe_allow_html=True)
+                    if c7.button("📊 分析", key=f"goto_{r['ticker']}", help=f"{r['ticker']}をテクニカル分析で開く"):
+                        st.session_state["current_ticker"] = r["ticker"]
+                        st.session_state.pop("sidebar_ticker_select", None)
+                        st.session_state["_nav_target"] = "📊 テクニカル分析"
+                        st.session_state["auto_analyze"] = True
+                        st.rerun()
+
+                # スコアバー
+                bar_pct = min(max((score + 14) / 28 * 100, 0), 100)
+                bar_color = "#26a69a" if score > 0 else ("#ef5350" if score < 0 else "#ffd54f")
+                st.markdown(
+                    f"""<div style="background:#1a1d23;border-radius:4px;height:5px;margin-bottom:6px">
+                    <div style="width:{bar_pct}%;background:{bar_color};height:5px;border-radius:4px"></div>
+                    </div>""",
                     unsafe_allow_html=True,
                 )
-                c5.markdown(f"<small>RSI {rsi_str}</small>", unsafe_allow_html=True)
-                c6.markdown(f"<small style='color:#999'>{r['理由']}</small>", unsafe_allow_html=True)
-                if c7.button("📊 分析", key=f"goto_{r['ticker']}", help=f"{r['ticker']}をテクニカル分析で開く"):
-                    st.session_state["current_ticker"] = r["ticker"]
+
+    with dash_tab2:
+        st.caption("投資日記に記録した保有ポジションに対して、今売るべきかを自動判定します")
+
+        from modules.data_fetcher import fetch_realtime_price
+        _trades_df = get_trades(limit=10000)
+        _pnl_data = calc_pnl(_trades_df)
+        _positions = _pnl_data["positions"]
+
+        if not _positions:
+            st.info("📝 保有銘柄がありません。「📔 投資日記」タブで購入記録を入力すると、ここで売り時を自動チェックします。")
+        else:
+            for _tk, _lots in _positions.items():
+                _total_qty = sum(lot[2] for lot in _lots)
+                if _total_qty == 0:
+                    continue
+                _avg_price = sum(lot[1] * lot[2] for lot in _lots) / _total_qty
+
+                # 日記から損切り・目標価格を取得
+                _buys = _trades_df[(_trades_df["ticker"].str.upper() == _tk.upper()) & (_trades_df["action"] == "買い")]
+                _stop = _target = None
+                if not _buys.empty:
+                    _last_buy = _buys.iloc[0]
+                    _stop = _last_buy["stop_loss"] if pd.notna(_last_buy["stop_loss"]) and _last_buy["stop_loss"] > 0 else None
+                    _target = _last_buy["target_price"] if pd.notna(_last_buy["target_price"]) and _last_buy["target_price"] > 0 else None
+
+                # 現在価格を取得
+                try:
+                    _price_info = fetch_realtime_price(_tk)
+                    _cur_price = _price_info.get("price")
+                except Exception:
+                    _cur_price = None
+
+                _pnl_pct = (_cur_price - _avg_price) / _avg_price * 100 if (_cur_price is not None and _avg_price) else None
+                _pnl_yen = (_cur_price - _avg_price) * _total_qty if _cur_price is not None else None
+
+                # 売り時判定
+                _urgency = "🟡 様子見継続"
+                _urgency_detail = "現在のポジションを維持してください。"
+                _card_color = "#2e2a14"
+                _border_color = "#ffd54f"
+
+                if _cur_price and _stop and _cur_price <= _stop:
+                    _urgency = "🚨 損切りライン到達！今すぐ売ることを検討"
+                    _urgency_detail = f"損切りライン（{_stop:,.0f}円）を下回りました。ルール通り損切りを実行してください。"
+                    _card_color = "#3a1a1a"
+                    _border_color = "#ef5350"
+                elif _cur_price and _target and _cur_price >= _target:
+                    _urgency = "🎯 目標価格達成！利確を検討"
+                    _urgency_detail = f"目標価格（{_target:,.0f}円）に到達しました。利確のタイミングです。"
+                    _card_color = "#1a3a2a"
+                    _border_color = "#26a69a"
+                elif _pnl_pct and _pnl_pct <= -10:
+                    _urgency = "⚠️ 含み損 -10% 超 損切り要検討"
+                    _urgency_detail = f"含み損が{_pnl_pct:.1f}%に拡大。損切りラインを確認し、必要なら実行してください。"
+                    _card_color = "#3a2214"
+                    _border_color = "#ff7043"
+                elif _pnl_pct and _pnl_pct >= 20:
+                    _urgency = "💰 含み益 +20% 超 一部利確も選択肢"
+                    _urgency_detail = f"含み益が{_pnl_pct:.1f}%です。利益確保のため一部売却も検討できます。"
+                    _card_color = "#1a3a2a"
+                    _border_color = "#26a69a"
+
+                _pnl_str = f"¥{_pnl_yen:+,.0f}（{_pnl_pct:+.1f}%）" if _pnl_yen is not None else "取得中..."
+                _pnl_color = "#26a69a" if (_pnl_pct or 0) >= 0 else "#ef5350"
+                _price_str = f"{_cur_price:,.2f}" if _cur_price else "取得中..."
+
+                st.markdown(
+                    f"""<div style="background:{_card_color};border:1px solid {_border_color};
+                        border-radius:12px;padding:16px;margin-bottom:12px">
+                        <div style="display:flex;justify-content:space-between;align-items:center">
+                            <div>
+                                <span style="font-size:1.2em;font-weight:bold">{_tk}</span>
+                                <span style="color:#999;margin-left:12px;font-size:0.9em">
+                                    {_total_qty}株 @ 取得{_avg_price:,.0f}円 → 現在<b>{_price_str}</b>
+                                </span>
+                            </div>
+                            <span style="color:{_pnl_color};font-weight:bold">{_pnl_str}</span>
+                        </div>
+                        <div style="margin-top:10px;font-size:1.05em;font-weight:bold;color:{_border_color}">{_urgency}</div>
+                        <div style="color:#ccc;margin-top:4px;font-size:0.9em">{_urgency_detail}</div>
+                        {'<div style="color:#888;font-size:0.85em;margin-top:6px">損切ライン: ' + f'{_stop:,.0f}円' + '</div>' if _stop is not None else ''}
+                        {'<div style="color:#888;font-size:0.85em">目標価格: ' + f'{_target:,.0f}円' + '</div>' if _target is not None else ''}
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+                if st.button(f"📊 {_tk} を詳しく分析", key=f"sell_goto_{_tk}"):
+                    st.session_state["current_ticker"] = _tk
                     st.session_state.pop("sidebar_ticker_select", None)
                     st.session_state["_nav_target"] = "📊 テクニカル分析"
                     st.session_state["auto_analyze"] = True
                     st.rerun()
-
-            # スコアバー
-            bar_pct = min(max((score + 14) / 28 * 100, 0), 100)
-            bar_color = "#26a69a" if score > 0 else ("#ef5350" if score < 0 else "#ffd54f")
-            st.markdown(
-                f"""<div style="background:#1a1d23;border-radius:4px;height:5px;margin-bottom:6px">
-                <div style="width:{bar_pct}%;background:{bar_color};height:5px;border-radius:4px"></div>
-                </div>""",
-                unsafe_allow_html=True,
-            )
-
-    # ── 保有銘柄の売り時チェック ──────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("## 📊 保有銘柄の売り時チェック")
-    st.caption("投資日記に記録した保有ポジションに対して、今売るべきかを自動判定します")
-
-    from modules.data_fetcher import fetch_realtime_price
-    _trades_df = get_trades(limit=10000)
-    _pnl_data = calc_pnl(_trades_df)
-    _positions = _pnl_data["positions"]
-
-    if not _positions:
-        st.info("📝 保有銘柄がありません。「📔 投資日記」タブで購入記録を入力すると、ここで売り時を自動チェックします。")
-    else:
-        for _tk, _lots in _positions.items():
-            _total_qty = sum(lot[2] for lot in _lots)
-            if _total_qty == 0:
-                continue
-            _avg_price = sum(lot[1] * lot[2] for lot in _lots) / _total_qty
-
-            # 日記から損切り・目標価格を取得
-            _buys = _trades_df[(_trades_df["ticker"].str.upper() == _tk.upper()) & (_trades_df["action"] == "買い")]
-            _stop = _target = None
-            if not _buys.empty:
-                _last_buy = _buys.iloc[0]
-                _stop = _last_buy["stop_loss"] if pd.notna(_last_buy["stop_loss"]) and _last_buy["stop_loss"] > 0 else None
-                _target = _last_buy["target_price"] if pd.notna(_last_buy["target_price"]) and _last_buy["target_price"] > 0 else None
-
-            # 現在価格を取得
-            try:
-                _price_info = fetch_realtime_price(_tk)
-                _cur_price = _price_info.get("price")
-            except Exception:
-                _cur_price = None
-
-            _pnl_pct = (_cur_price - _avg_price) / _avg_price * 100 if (_cur_price is not None and _avg_price) else None
-            _pnl_yen = (_cur_price - _avg_price) * _total_qty if _cur_price is not None else None
-
-            # 売り時判定
-            _urgency = "🟡 様子見継続"
-            _urgency_detail = "現在のポジションを維持してください。"
-            _card_color = "#2e2a14"
-            _border_color = "#ffd54f"
-
-            if _cur_price and _stop and _cur_price <= _stop:
-                _urgency = "🚨 損切りライン到達！今すぐ売ることを検討"
-                _urgency_detail = f"損切りライン（{_stop:,.0f}円）を下回りました。ルール通り損切りを実行してください。"
-                _card_color = "#3a1a1a"
-                _border_color = "#ef5350"
-            elif _cur_price and _target and _cur_price >= _target:
-                _urgency = "🎯 目標価格達成！利確を検討"
-                _urgency_detail = f"目標価格（{_target:,.0f}円）に到達しました。利確のタイミングです。"
-                _card_color = "#1a3a2a"
-                _border_color = "#26a69a"
-            elif _pnl_pct and _pnl_pct <= -10:
-                _urgency = "⚠️ 含み損 -10% 超 損切り要検討"
-                _urgency_detail = f"含み損が{_pnl_pct:.1f}%に拡大。損切りラインを確認し、必要なら実行してください。"
-                _card_color = "#3a2214"
-                _border_color = "#ff7043"
-            elif _pnl_pct and _pnl_pct >= 20:
-                _urgency = "💰 含み益 +20% 超 一部利確も選択肢"
-                _urgency_detail = f"含み益が{_pnl_pct:.1f}%です。利益確保のため一部売却も検討できます。"
-                _card_color = "#1a3a2a"
-                _border_color = "#26a69a"
-
-            _pnl_str = f"¥{_pnl_yen:+,.0f}（{_pnl_pct:+.1f}%）" if _pnl_yen is not None else "取得中..."
-            _pnl_color = "#26a69a" if (_pnl_pct or 0) >= 0 else "#ef5350"
-            _price_str = f"{_cur_price:,.2f}" if _cur_price else "取得中..."
-
-            st.markdown(
-                f"""<div style="background:{_card_color};border:1px solid {_border_color};
-                    border-radius:12px;padding:16px;margin-bottom:12px">
-                    <div style="display:flex;justify-content:space-between;align-items:center">
-                        <div>
-                            <span style="font-size:1.2em;font-weight:bold">{_tk}</span>
-                            <span style="color:#999;margin-left:12px;font-size:0.9em">
-                                {_total_qty}株 @ 取得{_avg_price:,.0f}円 → 現在<b>{_price_str}</b>
-                            </span>
-                        </div>
-                        <span style="color:{_pnl_color};font-weight:bold">{_pnl_str}</span>
-                    </div>
-                    <div style="margin-top:10px;font-size:1.05em;font-weight:bold;color:{_border_color}">{_urgency}</div>
-                    <div style="color:#ccc;margin-top:4px;font-size:0.9em">{_urgency_detail}</div>
-                    {'<div style="color:#888;font-size:0.85em;margin-top:6px">損切ライン: ' + f'{_stop:,.0f}円' + '</div>' if _stop is not None else ''}
-                    {'<div style="color:#888;font-size:0.85em">目標価格: ' + f'{_target:,.0f}円' + '</div>' if _target is not None else ''}
-                </div>""",
-                unsafe_allow_html=True,
-            )
-            if st.button(f"📊 {_tk} を詳しく分析", key=f"sell_goto_{_tk}"):
-                st.session_state["current_ticker"] = _tk
-                st.session_state.pop("sidebar_ticker_select", None)
-                st.session_state["_nav_target"] = "📊 テクニカル分析"
-                st.session_state["auto_analyze"] = True
-                st.rerun()
 
 
 # ─── 銘柄スキャン ────────────────────────────────────────────────────────────
@@ -674,8 +683,7 @@ elif page == "📊 テクニカル分析":
     if analyze_btn and ticker:
         with st.spinner("データ取得・指標計算中..."):
             try:
-                df = fetch_ohlcv(ticker, period=period, interval=cfg["interval"])
-                df = compute_all(df, sma_short=sma_short, sma_long=sma_long)
+                df = fetch_and_compute(ticker, period, sma_short, sma_long, interval=cfg["interval"])
                 signals = evaluate_signals(df, sma_short=sma_short, sma_long=sma_long)
                 verdict, score = overall_signal(signals, df=df, sma_long=sma_long)
             except ValueError as e:
@@ -1897,6 +1905,31 @@ elif page == "🔬 バックテスト":
                 )
                 st.dataframe(trades_display, width="stretch", hide_index=True)
 
+            # CSV エクスポート
+            _exp_col1, _exp_col2 = st.columns(2)
+            with _exp_col1:
+                _metrics_df = pd.DataFrame([{
+                    "銘柄": _ticker, "戦略": _label, "期間": bt_period,
+                    **{k: v for k, v in m.items()}
+                }])
+                st.download_button(
+                    "📥 パフォーマンス指標 CSV",
+                    data=_metrics_df.to_csv(index=False, encoding="utf-8-sig"),
+                    file_name=f"backtest_{_ticker}_{bt_period}_metrics.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+            with _exp_col2:
+                if not result["trades"].empty:
+                    _trades_csv = result["trades"].to_csv(index=False, encoding="utf-8-sig")
+                    st.download_button(
+                        "📥 取引履歴 CSV",
+                        data=_trades_csv,
+                        file_name=f"backtest_{_ticker}_{bt_period}_trades.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+
                 st.markdown("### 💡 AIによる戦略評価")
                 if st.session_state.get("ai_enabled") and os.getenv("ANTHROPIC_API_KEY"):
                     with st.spinner("AIが戦略を評価中..."):
@@ -2007,6 +2040,14 @@ elif page == "🔬 バックテスト":
             df_rows["勝率(%)"] = df_rows["勝率(%)"].apply(lambda x: f"{x:.1f}%")
             df_rows["戦略優位"] = df_rows["戦略優位"].apply(lambda x: "✅" if x else "❌")
             st.dataframe(df_rows, width="stretch", hide_index=True)
+
+            st.download_button(
+                "📥 一括バックテスト結果 CSV",
+                data=batch_result["rows"].to_csv(index=False, encoding="utf-8-sig"),
+                file_name=f"batch_backtest_{bt_period}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
 
             if batch_result["errors"]:
                 with st.expander(f"⚠️ エラー {len(batch_result['errors'])}件"):
@@ -2608,8 +2649,7 @@ export JQUANTS_PASSWORD="your_password"
             if st.button("📊 シグナルアラートを送信", type="primary", width="stretch"):
                 with st.spinner(f"{test_ticker} を分析して送信中..."):
                     try:
-                        df = fetch_ohlcv(test_ticker, period="3mo")
-                        df = compute_all(df)
+                        df = fetch_and_compute(test_ticker, "3mo", 25, 75)
                         sigs = evaluate_signals(df)
                         verdict, score = overall_signal(sigs)
                         price = df["Close"].iloc[-1]
@@ -2841,8 +2881,6 @@ elif page == "🤖 自動売買":
             if not status["enabled"]:
                 pass
             else:
-                from modules.data_fetcher import fetch_ohlcv
-                from modules.technical import compute_all
                 from modules.signals import evaluate_signals, overall_signal
                 from modules.dashboard import load_watchlist
                 tickers = load_watchlist()
@@ -2851,8 +2889,7 @@ elif page == "🤖 自動売買":
                 for i, tk_item in enumerate(tickers):
                     progress.progress((i+1)/max(len(tickers),1), text=f"{tk_item} 確認中...")
                     try:
-                        df_tk = fetch_ohlcv(tk_item, period="2y")
-                        df_tk = compute_all(df_tk)
+                        df_tk = fetch_and_compute(tk_item, "2y", 25, 75)
                         sigs = evaluate_signals(df_tk)
                         verdict, score = overall_signal(sigs, df=df_tk)
                         price_now = float(df_tk["Close"].iloc[-1])
