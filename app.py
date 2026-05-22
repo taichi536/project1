@@ -1733,7 +1733,7 @@ elif page == "🌐 マクロ・ニュース":
         st.markdown("### 📰 最新市場ニュース")
         col_l, col_r = st.columns([1, 2])
         with col_l:
-            ticker_macro = st.text_input("個別銘柄への影響を分析（任意）", placeholder="7203 / AAPL", key="macro_ticker")
+            ticker_macro = st.text_input("個別銘柄への影響を分析（任意）", placeholder="7203 / AAPL", key="macro_ticker").strip()
         news_btn = st.button("📰 ニュース取得", type="primary")
 
         if news_btn:
@@ -2078,7 +2078,7 @@ elif page == "📐 ポートフォリオ":
                         st.metric("シャープレシオ", f"{s['シャープレシオ']:.2f}")
 
                     # ケリー基準
-                    if pf_result["kelly"]:
+                    if pf_result.get("kelly") and isinstance(pf_result["kelly"], dict):
                         st.markdown("### 🎯 ケリー基準（投資日記の取引実績より）")
                         st.caption("過去の勝率・損益比から算出した理論上の最適投資比率")
                         kelly_data = [
@@ -2197,7 +2197,7 @@ elif page == "📔 投資日記":
             m2.metric("勝率", f"{win_rate:.1f}%", f"{total_wins}勝 {total_loss_count}敗")
             m3.metric("平均利益", f"¥{avg_win:,.0f}")
             m4.metric("平均損失", f"¥{avg_loss:,.0f}")
-            rr = abs(avg_win / avg_loss) if avg_loss else 0
+            rr = abs(avg_win / avg_loss) if avg_loss != 0 else 0
             m5.metric("損益比 (RR比)", f"{rr:.2f}",
                       help="1以上が理想。勝率×RR比 > 1で期待値プラス")
 

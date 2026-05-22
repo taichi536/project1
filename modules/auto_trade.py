@@ -173,7 +173,10 @@ class AutoTrader:
         sl_pct = s.get("stop_loss_pct", 0)
         if sl_pct > 0:
             sl_price_fixed = price_jpy * (1 - sl_pct / 100)
-            sl_price = sl_price_fixed if sl_price is None else max(sl_price, sl_price_fixed)
+            if sl_price is not None:
+                sl_price = max(sl_price, sl_price_fixed)
+            else:
+                sl_price = sl_price_fixed
 
         qty = calc_order_qty(
             cash=cash,

@@ -35,12 +35,15 @@ def calc_var(df: pd.DataFrame) -> dict | None:
         return None
 
     price = df["Close"].iloc[-1]
+    daily_vol = returns.std()
 
     results = {}
     for cl, label in [(0.95, "95"), (0.99, "99")]:
         var_1d_pct = float(np.percentile(returns, (1 - cl) * 100))
-        var_5d_pct = var_1d_pct * np.sqrt(5)
-        var_20d_pct = var_1d_pct * np.sqrt(20)
+        var_5d_vol = daily_vol * np.sqrt(5)
+        var_20d_vol = daily_vol * np.sqrt(20)
+        var_5d_pct = np.percentile(returns, (1 - cl) * 100) * np.sqrt(5)
+        var_20d_pct = np.percentile(returns, (1 - cl) * 100) * np.sqrt(20)
         results[f"var_{label}_1d_pct"] = var_1d_pct
         results[f"var_{label}_5d_pct"] = var_5d_pct
         results[f"var_{label}_20d_pct"] = var_20d_pct

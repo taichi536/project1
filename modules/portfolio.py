@@ -53,7 +53,8 @@ def portfolio_stats(weights: np.ndarray, returns: pd.DataFrame) -> dict:
     cov = returns.cov() * 252
     port_return = weights @ ann_returns.values
     port_vol = np.sqrt(weights @ cov.values @ weights)
-    sharpe = port_return / port_vol if port_vol > 0 else 0
+    risk_free_rate = 0.007
+    sharpe = (port_return - risk_free_rate) / port_vol if port_vol > 0 else 0
     return {
         "期待リターン(%)": round(port_return * 100, 2),
         "リスク（年率ボラ%）": round(port_vol * 100, 2),
