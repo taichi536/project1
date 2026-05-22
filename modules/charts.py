@@ -25,28 +25,37 @@ def build_main_chart(df: pd.DataFrame, ticker: str, sma_short: int = 25, sma_lon
     fig = make_subplots(
         rows=4, cols=1,
         shared_xaxes=True,
-        row_heights=[0.5, 0.15, 0.2, 0.15],
-        vertical_spacing=0.02,
+        row_heights=[0.52, 0.14, 0.2, 0.14],
+        vertical_spacing=0.018,
         subplot_titles=("株価チャート", "出来高 / OBV", "MACD", "RSI / ストキャスティクス"),
     )
 
-    # ローソク足
+    # ローソク足（日本語hoverテンプレート）
     fig.add_trace(go.Candlestick(
         x=df.index, open=df["Open"], high=df["High"],
         low=df["Low"], close=df["Close"],
         increasing_line_color=COLORS["up"], decreasing_line_color=COLORS["down"],
         name="株価",
+        hovertext=[
+            f"<b>{str(i)[:10]}</b><br>"
+            f"始値: {o:,.2f}<br>高値: {h:,.2f}<br>安値: {l:,.2f}<br>終値: {c:,.2f}"
+            for i, o, h, l, c in zip(df.index, df["Open"], df["High"], df["Low"], df["Close"])
+        ],
+        hoverinfo="text",
     ), row=1, col=1)
 
     # ボリンジャーバンド
     if "BB_upper" in df.columns:
         fig.add_trace(go.Scatter(
-            x=df.index, y=df["BB_upper"], line=dict(color="rgba(100,181,246,0.5)", width=1),
-            name="BB上限", showlegend=False,
+            x=df.index, y=df["BB_upper"],
+            line=dict(color="rgba(100,181,246,0.4)", width=1),
+            name="BB上限", showlegend=False, hoverinfo="skip",
         ), row=1, col=1)
         fig.add_trace(go.Scatter(
-            x=df.index, y=df["BB_lower"], line=dict(color="rgba(100,181,246,0.5)", width=1),
-            fill="tonexty", fillcolor=COLORS["bb"], name="BB", showlegend=False,
+            x=df.index, y=df["BB_lower"],
+            line=dict(color="rgba(100,181,246,0.4)", width=1),
+            fill="tonexty", fillcolor=COLORS["bb"],
+            name="ボリンジャーバンド", showlegend=True, hoverinfo="skip",
         ), row=1, col=1)
 
     # 移動平均
@@ -56,81 +65,138 @@ def build_main_chart(df: pd.DataFrame, ticker: str, sma_short: int = 25, sma_lon
     ]:
         if col in df.columns:
             fig.add_trace(go.Scatter(
-                x=df.index, y=df[col], line=dict(color=color, width=1.5),
+                x=df.index, y=df[col],
+                line=dict(color=color, width=1.5),
                 name=name,
+                hovertemplate=f"{name}: %{{y:,.2f}}<extra></extra>",
             ), row=1, col=1)
 
     # VWAP
     if "VWAP" in df.columns:
         fig.add_trace(go.Scatter(
             x=df.index, y=df["VWAP"],
-            line=dict(color="rgba(255,255,255,0.7)", width=1.5, dash="dot"),
+            line=dict(color="rgba(255,255,255,0.6)", width=1.5, dash="dot"),
             name="VWAP",
+            hovertemplate="VWAP: %{y:,.2f}<extra></extra>",
         ), row=1, col=1)
 
-    # 一目均衡表（雲）
+    # 一目均衡表（雲）— デフォルト非表示（凡例クリックで表示可能）
     if "Ichimoku_senkou_a" in df.columns and "Ichimoku_senkou_b" in df.columns:
         senkou_a = df["Ichimoku_senkou_a"]
         senkou_b = df["Ichimoku_senkou_b"]
         bull = senkou_a >= senkou_b
+        _first = True
         for is_bull in [True, False]:
             mask = bull if is_bull else ~bull
             color = COLORS["ichimoku_bull"] if is_bull else COLORS["ichimoku_bear"]
             fig.add_trace(go.Scatter(
                 x=df.index[mask], y=senkou_a[mask],
-                line=dict(color="rgba(0,0,0,0)"), showlegend=False,
+                line=dict(color="rgba(0,0,0,0)"),
+                showlegend=False, hoverinfo="skip",
+                visible="legendonly",
             ), row=1, col=1)
             fig.add_trace(go.Scatter(
                 x=df.index[mask], y=senkou_b[mask],
                 fill="tonexty", fillcolor=color,
                 line=dict(color="rgba(0,0,0,0)"),
-                name="雲（一目）" if is_bull else None, showlegend=is_bull,
+                name="一目均衡表（雲）" if _first else None,
+                showlegend=_first, hoverinfo="skip",
+                visible="legendonly",
             ), row=1, col=1)
+            _first = False
 
     # 出来高
     colors_vol = [COLORS["up"] if c >= o else COLORS["down"] for c, o in zip(df["Close"], df["Open"])]
-    fig.add_trace(go.Bar(x=df.index, y=df["Volume"], marker_color=colors_vol, name="出来高", showlegend=False), row=2, col=1)
+    fig.add_trace(go.Bar(
+        x=df.index, y=df["Volume"],
+        marker_color=colors_vol, name="出来高", showlegend=False,
+        hovertemplate="出来高: %{y:,.0f}<extra></extra>",
+    ), row=2, col=1)
 
-    # OBV（出来高と同じrow2に右側y軸で表示）
+    # OBV
     if "OBV" in df.columns:
         fig.add_trace(go.Scatter(
-            x=df.index, y=df["OBV"], line=dict(color=COLORS["obv"], width=1.5),
+            x=df.index, y=df["OBV"],
+            line=dict(color=COLORS["obv"], width=1.5),
             name="OBV",
+            hovertemplate="OBV: %{y:,.0f}<extra></extra>",
         ), row=2, col=1)
 
     # MACD
     if "MACD" in df.columns:
         hist_colors = [COLORS["hist_pos"] if v >= 0 else COLORS["hist_neg"] for v in df["MACD_hist"].fillna(0)]
-        fig.add_trace(go.Bar(x=df.index, y=df["MACD_hist"], marker_color=hist_colors, name="ヒスト", showlegend=False), row=3, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df["MACD"], line=dict(color=COLORS["macd"], width=1.5), name="MACD"), row=3, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df["MACD_signal"], line=dict(color=COLORS["signal"], width=1.5, dash="dot"), name="シグナル"), row=3, col=1)
+        fig.add_trace(go.Bar(
+            x=df.index, y=df["MACD_hist"],
+            marker_color=hist_colors, name="MACDヒスト", showlegend=False,
+            hovertemplate="ヒスト: %{y:.4f}<extra></extra>",
+        ), row=3, col=1)
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["MACD"],
+            line=dict(color=COLORS["macd"], width=1.5), name="MACD",
+            hovertemplate="MACD: %{y:.4f}<extra></extra>",
+        ), row=3, col=1)
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["MACD_signal"],
+            line=dict(color=COLORS["signal"], width=1.5, dash="dot"), name="シグナル",
+            hovertemplate="シグナル: %{y:.4f}<extra></extra>",
+        ), row=3, col=1)
 
     # RSI
     if "RSI" in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df["RSI"], line=dict(color=COLORS["rsi"], width=1.5), name="RSI"), row=4, col=1)
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["RSI"],
+            line=dict(color=COLORS["rsi"], width=1.5), name="RSI",
+            hovertemplate="RSI: %{y:.1f}<extra></extra>",
+        ), row=4, col=1)
         fig.add_hline(y=70, line_dash="dash", line_color="rgba(255,100,100,0.5)", row=4, col=1)
         fig.add_hline(y=30, line_dash="dash", line_color="rgba(100,255,100,0.5)", row=4, col=1)
 
     # ストキャスティクス
     if "Stoch_K" in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df["Stoch_K"], line=dict(color="#e91e63", width=1, dash="dot"), name="%K"), row=4, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df["Stoch_D"], line=dict(color="#9c27b0", width=1, dash="dot"), name="%D"), row=4, col=1)
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["Stoch_K"],
+            line=dict(color="#e91e63", width=1, dash="dot"), name="%K",
+            hovertemplate="%%K: %{y:.1f}<extra></extra>",
+        ), row=4, col=1)
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["Stoch_D"],
+            line=dict(color="#9c27b0", width=1, dash="dot"), name="%D",
+            hovertemplate="%%D: %{y:.1f}<extra></extra>",
+        ), row=4, col=1)
 
-    # レンジセレクター（チャートズーム）
+    # 最新終値をチャート右端に注釈表示
+    last_close = df["Close"].iloc[-1]
+    last_date = df.index[-1]
+    fig.add_annotation(
+        x=last_date, y=last_close,
+        xref="x", yref="y",
+        text=f"  {last_close:,.2f}",
+        showarrow=False,
+        font=dict(color="#fafafa", size=11),
+        xanchor="left",
+        row=1, col=1,
+    )
+
     fig.update_layout(
-        title=f"{ticker} テクニカルチャート",
-        height=920,
+        title=dict(text=f"{ticker} テクニカルチャート", font=dict(size=15)),
+        height=900,
         paper_bgcolor="#0e1117",
         plot_bgcolor="#1a1d23",
-        font=dict(color="#fafafa"),
-        legend=dict(orientation="h", y=1.02, x=0),
+        font=dict(color="#fafafa", size=11),
+        legend=dict(
+            orientation="h",
+            y=1.01, x=0,
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(size=10),
+        ),
+        hovermode="x unified",
+        # スパイクライン（十字線）
         xaxis=dict(
-            rangeslider=dict(visible=True, thickness=0.04, bgcolor="#1a1d23"),
+            rangeslider=dict(visible=False),
             rangeselector=dict(
                 bgcolor="#1a1d23",
                 activecolor="#26a69a",
                 buttons=[
-                    dict(count=1,  label="1日",  step="day",   stepmode="backward"),
                     dict(count=5,  label="1週",  step="day",   stepmode="backward"),
                     dict(count=1,  label="1ヶ月", step="month", stepmode="backward"),
                     dict(count=3,  label="3ヶ月", step="month", stepmode="backward"),
@@ -142,12 +208,26 @@ def build_main_chart(df: pd.DataFrame, ticker: str, sma_short: int = 25, sma_lon
             ),
             type="date",
             gridcolor="rgba(255,255,255,0.05)",
+            showspikes=True,
+            spikemode="across",
+            spikesnap="cursor",
+            spikecolor="rgba(255,255,255,0.3)",
+            spikethickness=1,
         ),
     )
-    fig.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
-    fig.update_xaxes(gridcolor="rgba(255,255,255,0.05)", row=2, col=1)
-    fig.update_xaxes(gridcolor="rgba(255,255,255,0.05)", row=3, col=1)
-    fig.update_xaxes(gridcolor="rgba(255,255,255,0.05)", row=4, col=1)
+    fig.update_yaxes(
+        gridcolor="rgba(255,255,255,0.05)",
+        showspikes=True,
+        spikecolor="rgba(255,255,255,0.3)",
+        spikethickness=1,
+        spikesnap="cursor",
+    )
+    fig.update_xaxes(
+        gridcolor="rgba(255,255,255,0.05)",
+        showspikes=True,
+        spikecolor="rgba(255,255,255,0.3)",
+        spikethickness=1,
+    )
 
     return fig
 
