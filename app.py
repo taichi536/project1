@@ -728,13 +728,20 @@ elif page == "📊 テクニカル分析":
             "様子見": "⚠️ 今すぐ買わないでください。次のシグナルを待ちましょう",
         }.get(verdict, "")
 
-        # シンプルな理由（上位2つ）
-        top2 = sorted(signals, key=lambda x: abs(x["スコア"]), reverse=True)[:2]
+        # 判定方向に合った理由を優先表示（買い→ポジティブ上位2、売り→ネガティブ上位2、様子見→最強1つずつ）
         def _reason_span(s):
             bg = "#1e3a2f" if s["スコア"] > 0 else "#3a1e1e"
             icon = "✅" if s["スコア"] > 0 else "⚠️"
             name = s["指標"].split("(")[0].strip()
             return f"<span style='background:{bg};padding:2px 8px;border-radius:12px;font-size:0.85em'>{icon} {name}: {s['判定']}</span>"
+        pos_sigs = sorted([s for s in signals if s["スコア"] > 0], key=lambda x: -x["スコア"])
+        neg_sigs = sorted([s for s in signals if s["スコア"] < 0], key=lambda x: x["スコア"])
+        if verdict == "買い":
+            top2 = pos_sigs[:2] or sorted(signals, key=lambda x: -abs(x["スコア"]))[:2]
+        elif verdict == "売り":
+            top2 = neg_sigs[:2] or sorted(signals, key=lambda x: -abs(x["スコア"]))[:2]
+        else:  # 様子見: ポジ1＋ネガ1で両面を見せる
+            top2 = (pos_sigs[:1] + neg_sigs[:1]) or sorted(signals, key=lambda x: -abs(x["スコア"]))[:2]
         reasons_html = "　".join(_reason_span(s) for s in top2)
 
         _detail = get_signal_detail(signals, verdict, df=df, sma_long=sma_long)
@@ -751,27 +758,36 @@ elif page == "📊 テクニカル分析":
         elif _detail.get("sideways"):
             _filter_msg = "<div style='color:#ff9800;font-size:0.85em;margin-top:6px'>⚠️ 横ばい相場（ADX低水準）→ シグナルの信頼性が低下中</div>"
 
-        st.markdown(
-            f"""<div style="background:{sig_bg};border:2px solid {sig_color};
-                border-radius:16px;padding:24px;text-align:center;margin-bottom:16px">
-                <div style="font-size:3em">{sig_emoji}</div>
-                <div style="font-size:2em;font-weight:bold;color:{sig_color}">{verdict}</div>
-                <div style="font-size:1.1em;color:#ccc;margin-top:4px">{sig_msg}</div>
-                <div style="font-size:0.9em;color:#aaa;margin-top:4px">{sig_sub}</div>
-                <div style="margin-top:10px;display:flex;justify-content:center;gap:10px;flex-wrap:wrap">
-                  {"<span style='background:" + _grade_color + "33;border:1px solid " + _grade_color + ";padding:3px 12px;border-radius:20px;font-size:0.9em;color:" + _grade_color + "'>" + _grade + "</span>" if _grade else ""}
-                  <span style="background:{_conf_color}33;border:1px solid {_conf_color};padding:3px 12px;border-radius:20px;font-size:0.9em;color:{_conf_color}">
-                    一致率 {_conf}%
-                  </span>
-                  <span style="background:#33333366;border:1px solid #555;padding:3px 12px;border-radius:20px;font-size:0.9em;color:#aaa">
-                    加重スコア {_wpct:+.0f}%
-                  </span>
-                </div>
-                {_filter_msg}
-                <div style="margin-top:12px">{reasons_html}</div>
-            </div>""",
-            unsafe_allow_html=True,
+        # HTMLを事前に組み立て（f-string内での複雑な式はレンダラーが誤解するため）
+        _grade_span = (
+            f"<span style='background:{_grade_color}33;border:1px solid {_grade_color};"
+            f"padding:3px 12px;border-radius:20px;font-size:0.9em;color:{_grade_color}'>"
+            f"{_grade}</span>"
+        ) if _grade else ""
+        _conf_span = (
+            f"<span style='background:{_conf_color}33;border:1px solid {_conf_color};"
+            f"padding:3px 12px;border-radius:20px;font-size:0.9em;color:{_conf_color}'>"
+            f"一致率 {_conf}%</span>"
         )
+        _wpct_span = (
+            f"<span style='background:#33333366;border:1px solid #555;"
+            f"padding:3px 12px;border-radius:20px;font-size:0.9em;color:#aaa'>"
+            f"加重スコア {_wpct:+.0f}%</span>"
+        )
+        _badge_row = f"<div style='margin-top:10px;display:flex;justify-content:center;gap:10px;flex-wrap:wrap'>{_grade_span}{_conf_span}{_wpct_span}</div>"
+        _signal_html = (
+            f"<div style='background:{sig_bg};border:2px solid {sig_color};"
+            f"border-radius:16px;padding:24px;text-align:center;margin-bottom:16px'>"
+            f"<div style='font-size:3em'>{sig_emoji}</div>"
+            f"<div style='font-size:2em;font-weight:bold;color:{sig_color}'>{verdict}</div>"
+            f"<div style='font-size:1.1em;color:#ccc;margin-top:4px'>{sig_msg}</div>"
+            f"<div style='font-size:0.9em;color:#aaa;margin-top:4px'>{sig_sub}</div>"
+            f"{_badge_row}"
+            f"{_filter_msg}"
+            f"<div style='margin-top:12px'>{reasons_html}</div>"
+            f"</div>"
+        )
+        st.markdown(_signal_html, unsafe_allow_html=True)
 
         col_price, col_chg, col_rsi, col_atr = st.columns(4)
         col_price.metric("現在値", f"{close_val:,.2f}")
