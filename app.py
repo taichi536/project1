@@ -112,6 +112,7 @@ with st.sidebar:
         key="sidebar_ticker_select",
     )
     if _sel == "✏️ 直接入力":
+        from modules.data_fetcher import normalize_ticker as _norm
         _manual = st.text_input(
             "銘柄コード（例: 7203 / AAPL）",
             value="" if _cur in _wl else _cur,
@@ -119,7 +120,8 @@ with st.sidebar:
             placeholder="7203 / AAPL",
         )
         if _manual:
-            st.session_state["current_ticker"] = _manual.strip().upper()
+            _normalized = _norm(_manual.strip())
+            st.session_state["current_ticker"] = _normalized
     else:
         st.session_state["current_ticker"] = _label_map[_sel]
 
@@ -690,11 +692,19 @@ elif page == "📊 テクニカル分析":
                 err_str = str(e)
                 if "データを取得できませんでした" in err_str or "No data" in err_str:
                     st.error(f"「{ticker}」のデータを取得できませんでした。銘柄コードを確認してください（日本株: 4桁数字、米国株: アルファベット）")
+                elif "空になりました" in err_str:
+                    st.error(f"「{ticker}」のデータが不足しています。期間を「6ヶ月」以上に設定してください（現在: {period}）")
                 else:
-                    st.error(f"データエラー: {err_str}")
+                    st.error(f"「{ticker}」のデータ処理でエラーが発生しました: {err_str}")
                 st.stop()
             except Exception as e:
-                st.error(f"データ取得に失敗しました。しばらく経ってから再試行するか、別の銘柄で試してください。（詳細: {type(e).__name__}）")
+                _etype = type(e).__name__
+                if "Timeout" in _etype or "timeout" in str(e).lower():
+                    st.error("データ取得がタイムアウトしました。インターネット接続を確認してから再試行してください。")
+                elif "ConnectionError" in _etype or "network" in str(e).lower():
+                    st.error("ネットワークエラーが発生しました。インターネット接続を確認してください。")
+                else:
+                    st.error(f"データ取得に失敗しました。しばらく経ってから再試行するか、別の銘柄で試してください。（{_etype}）")
                 st.stop()
 
         _rsi_s = df["RSI"].dropna() if "RSI" in df.columns else pd.Series(dtype=float)
@@ -702,7 +712,7 @@ elif page == "📊 テクニカル分析":
         _atr_s = df["ATR"].dropna() if "ATR" in df.columns else pd.Series(dtype=float)
         atr_val = _atr_s.iloc[-1] if len(_atr_s) > 0 else None
         if len(df) == 0:
-            st.error("データが空です。別の銘柄か期間で再試行してください。")
+            st.error(f"「{ticker}」のデータが空です。期間を長く（6ヶ月以上）するか、別の銘柄を試してください。")
             st.stop()
         close_val = df["Close"].iloc[-1]
         prev_val = df["Close"].iloc[-2] if len(df) >= 2 else close_val
@@ -2075,15 +2085,20 @@ elif page == "📐 ポートフォリオ":
             st.error("2銘柄以上入力してください")
         else:
             dfs = {}
+            failed = []
             with st.spinner("データ取得中..."):
                 for t in tickers:
                     try:
                         dfs[t] = fetch_ohlcv(t, period=pf_period)
-                    except Exception as e:
-                        st.warning(f"{t}: スキップ ({e})")
+                    except ValueError:
+                        failed.append(t)
+                        st.warning(f"❌ {t}: 銘柄が見つかりません（コードを確認してください）")
+                    except Exception:
+                        failed.append(t)
+                        st.warning(f"⚠️ {t}: データ取得失敗（しばらく経ってから再試行してください）")
 
             if len(dfs) < 2:
-                st.error("有効なデータが2銘柄未満です")
+                st.error(f"有効なデータが{len(dfs)}銘柄しかありません（2銘柄以上必要）。失敗した銘柄: {', '.join(failed) or 'なし'}")
             else:
                 trades_df = get_trades()
                 pf_result = build_portfolio_summary(list(dfs.keys()), dfs, trades_df)
@@ -2091,63 +2106,66 @@ elif page == "📐 ポートフォリオ":
                 if "error" in pf_result:
                     st.error(pf_result["error"])
                 else:
-                    st.markdown("### 🔗 相関係数マトリクス")
-                    st.caption("値が低い（青）ほど分散効果が高い。0.7以上（赤）は集中リスク")
-                    fig_corr = build_correlation_heatmap(pf_result["corr"])
-                    st.plotly_chart(fig_corr, width="stretch")
+                    pf_tab1, pf_tab2, pf_tab3 = st.tabs(["🔗 相関分析", "⚖️ 最適配分", "🎯 ケリー基準"])
 
-                    st.markdown("### ⚖️ 最適ウェイト比較")
-                    col_mv, col_eq = st.columns(2)
-                    with col_mv:
-                        st.markdown("**最小分散ポートフォリオ**")
-                        st.caption("リスクを最小化する配分")
-                        fig_mv = build_portfolio_pie(pf_result["weights_min_var"], "最小分散")
-                        st.plotly_chart(fig_mv, width="stretch")
-                        s = pf_result["stats_min_var"]
-                        st.metric("期待リターン", f"{s['期待リターン(%)']:+.1f}%")
-                        st.metric("リスク（年率）", f"{s['リスク（年率ボラ%）']:.1f}%")
-                        st.metric("シャープレシオ", f"{s['シャープレシオ']:.2f}")
+                    with pf_tab1:
+                        st.markdown("### 相関係数マトリクス")
+                        st.caption("値が低い（青）ほど分散効果が高い。0.7以上（赤）は集中リスクの可能性")
+                        fig_corr = build_correlation_heatmap(pf_result["corr"])
+                        st.plotly_chart(fig_corr, width="stretch")
 
-                    with col_eq:
-                        st.markdown("**均等配分**")
-                        st.caption("単純均等割り（参考）")
-                        fig_eq = build_portfolio_pie(pf_result["weights_equal"], "均等配分")
-                        st.plotly_chart(fig_eq, width="stretch")
-                        s = pf_result["stats_equal"]
-                        st.metric("期待リターン", f"{s['期待リターン(%)']:+.1f}%")
-                        st.metric("リスク（年率）", f"{s['リスク（年率ボラ%）']:.1f}%")
-                        st.metric("シャープレシオ", f"{s['シャープレシオ']:.2f}")
+                        st.markdown("### 📈 銘柄別リターン推移（累積）")
+                        returns = pf_result["returns"]
+                        cumulative = (1 + returns).cumprod() - 1
+                        import plotly.express as px
+                        fig_ret = px.line(
+                            cumulative * 100,
+                            title="累積リターン (%)",
+                            labels={"value": "リターン (%)", "variable": "銘柄"},
+                            color_discrete_sequence=px.colors.qualitative.Set2,
+                        )
+                        fig_ret.update_layout(
+                            paper_bgcolor="#0e1117", plot_bgcolor="#1a1d23",
+                            font=dict(color="#fafafa"), height=400,
+                        )
+                        st.plotly_chart(fig_ret, width="stretch")
 
-                    # ケリー基準
-                    if pf_result.get("kelly") and isinstance(pf_result["kelly"], dict):
-                        st.markdown("### 🎯 ケリー基準（投資日記の取引実績より）")
+                    with pf_tab2:
+                        st.markdown("### 最適ウェイト比較")
+                        col_mv, col_eq = st.columns(2)
+                        with col_mv:
+                            st.markdown("**最小分散ポートフォリオ**")
+                            st.caption("リスクを最小化する配分")
+                            fig_mv = build_portfolio_pie(pf_result["weights_min_var"], "最小分散")
+                            st.plotly_chart(fig_mv, width="stretch")
+                            s = pf_result["stats_min_var"]
+                            st.metric("期待リターン", f"{s['期待リターン(%)']:+.1f}%")
+                            st.metric("リスク（年率）", f"{s['リスク（年率ボラ%）']:.1f}%")
+                            st.metric("シャープレシオ", f"{s['シャープレシオ']:.2f}")
+
+                        with col_eq:
+                            st.markdown("**均等配分**")
+                            st.caption("単純均等割り（参考）")
+                            fig_eq = build_portfolio_pie(pf_result["weights_equal"], "均等配分")
+                            st.plotly_chart(fig_eq, width="stretch")
+                            s = pf_result["stats_equal"]
+                            st.metric("期待リターン", f"{s['期待リターン(%)']:+.1f}%")
+                            st.metric("リスク（年率）", f"{s['リスク（年率ボラ%）']:.1f}%")
+                            st.metric("シャープレシオ", f"{s['シャープレシオ']:.2f}")
+
+                    with pf_tab3:
+                        st.markdown("### ケリー基準（投資日記の取引実績より）")
                         st.caption("過去の勝率・損益比から算出した理論上の最適投資比率")
-                        kelly_data = [
-                            {"銘柄": t, "ケリー推奨比率": f"{v*100:.1f}%",
-                             "ハーフケリー（安全版）": f"{v*50:.1f}%"}
-                            for t, v in pf_result["kelly"].items()
-                        ]
-                        st.dataframe(pd.DataFrame(kelly_data), width="stretch", hide_index=True)
-                        st.caption("※ ハーフケリー（推奨比率の半分）が実用的とされています")
-                    else:
-                        st.info("投資日記に取引履歴を記録するとケリー基準が計算されます")
-
-                    # リターン時系列
-                    st.markdown("### 📈 銘柄別リターン推移（累積）")
-                    returns = pf_result["returns"]
-                    cumulative = (1 + returns).cumprod() - 1
-                    import plotly.express as px
-                    fig_ret = px.line(
-                        cumulative * 100,
-                        title="累積リターン (%)",
-                        labels={"value": "リターン (%)", "variable": "銘柄"},
-                        color_discrete_sequence=px.colors.qualitative.Set2,
-                    )
-                    fig_ret.update_layout(
-                        paper_bgcolor="#0e1117", plot_bgcolor="#1a1d23",
-                        font=dict(color="#fafafa"), height=400,
-                    )
-                    st.plotly_chart(fig_ret, width="stretch")
+                        if pf_result.get("kelly") and isinstance(pf_result["kelly"], dict):
+                            kelly_data = [
+                                {"銘柄": t, "ケリー推奨比率": f"{v*100:.1f}%",
+                                 "ハーフケリー（安全版）": f"{v*50:.1f}%"}
+                                for t, v in pf_result["kelly"].items()
+                            ]
+                            st.dataframe(pd.DataFrame(kelly_data), width="stretch", hide_index=True)
+                            st.caption("※ ハーフケリー（推奨比率の半分）が実用的とされています")
+                        else:
+                            st.info("📝 投資日記に取引履歴を記録するとケリー基準が自動計算されます")
 
 
 # ─── 投資日記 ─────────────────────────────────────────────────────────────────
@@ -2187,17 +2205,24 @@ elif page == "📔 投資日記":
             t_notes = st.text_area("その他メモ")
 
             submitted = st.form_submit_button("💾 記録する", type="primary")
-            if submitted and t_ticker and t_price > 0:
-                add_trade(
-                    ticker=t_ticker, action=t_action, price=t_price,
-                    quantity=int(t_qty), fee=t_fee,
-                    technical_reason=t_tech, fundamental_reason=t_fund,
-                    emotion=t_emotion, emotion_score=t_emotion_score,
-                    stop_loss=t_stop if t_stop > 0 else None,
-                    target_price=t_target if t_target > 0 else None,
-                    notes=t_notes,
-                )
-                st.success(f"✅ {t_ticker} の{t_action}を記録しました！")
+            if submitted:
+                if not t_ticker:
+                    st.error("銘柄コードを入力してください（例: 7203 / AAPL）")
+                elif t_price <= 0:
+                    st.error("価格は0より大きい値を入力してください")
+                else:
+                    from modules.data_fetcher import normalize_ticker as _norm_t
+                    _normalized_ticker = _norm_t(t_ticker.strip())
+                    add_trade(
+                        ticker=_normalized_ticker, action=t_action, price=t_price,
+                        quantity=int(t_qty), fee=t_fee,
+                        technical_reason=t_tech, fundamental_reason=t_fund,
+                        emotion=t_emotion, emotion_score=t_emotion_score,
+                        stop_loss=t_stop if t_stop > 0 else None,
+                        target_price=t_target if t_target > 0 else None,
+                        notes=t_notes,
+                    )
+                    st.success(f"✅ {_normalized_ticker} の{t_action}を記録しました！")
 
         st.markdown("### 取引履歴")
         trades_df = get_trades()

@@ -70,7 +70,9 @@ def _actual_signals(df: pd.DataFrame, sma_short: int, sma_long: int) -> pd.Serie
     for i in range(len(df)):
         if i < min_rows:
             continue
-        slice_df = df.iloc[: i + 1]
+        # evaluate_signals/overall_signal はどちらも最終2行しか参照しないため
+        # フルスライスではなく末尾2行のみ渡す（O(n²) → O(1)に改善）
+        slice_df = df.iloc[i - 1: i + 1]
         try:
             sigs = evaluate_signals(slice_df, sma_short=sma_short, sma_long=sma_long)
             verdict, _ = overall_signal(sigs, df=slice_df, sma_long=sma_long)
