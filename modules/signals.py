@@ -18,8 +18,10 @@ def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) 
     sma_s = _latest(df, f"SMA{sma_short}")
     sma_l = _latest(df, f"SMA{sma_long}")
     if sma_s is not None and sma_l is not None:
-        prev_s = df[f"SMA{sma_short}"].dropna().iloc[-2] if len(df) >= 2 else None
-        prev_l = df[f"SMA{sma_long}"].dropna().iloc[-2] if len(df) >= 2 else None
+        _s_series = df[f"SMA{sma_short}"].dropna()
+        _l_series = df[f"SMA{sma_long}"].dropna()
+        prev_s = _s_series.iloc[-2] if len(_s_series) >= 2 else None
+        prev_l = _l_series.iloc[-2] if len(_l_series) >= 2 else None
         if prev_s is not None and prev_l is not None:
             golden = prev_s < prev_l and sma_s >= sma_l
             dead = prev_s > prev_l and sma_s <= sma_l
@@ -59,7 +61,8 @@ def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) 
     macd = _latest(df, "MACD")
     macd_sig = _latest(df, "MACD_signal")
     macd_hist = _latest(df, "MACD_hist")
-    prev_hist = df["MACD_hist"].dropna().iloc[-2] if "MACD_hist" in df.columns and len(df) >= 2 else None
+    _hist_series = df["MACD_hist"].dropna() if "MACD_hist" in df.columns else pd.Series(dtype=float)
+    prev_hist = _hist_series.iloc[-2] if len(_hist_series) >= 2 else None
     if macd is not None and macd_sig is not None:
         if macd > macd_sig and prev_hist is not None and prev_hist < 0 and macd_hist > 0:
             judge, score = "上昇転換シグナル（買い）", 2
@@ -102,7 +105,7 @@ def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) 
     if sa is not None and sb is not None:
         cloud_top = max(sa, sb)
         cloud_bot = min(sa, sb)
-        cloud_thickness = (cloud_top - cloud_bot) / cloud_bot * 100 if cloud_bot > 0 else 0
+        cloud_thickness = (cloud_top - cloud_bot) / abs(cloud_bot) * 100 if cloud_bot != 0 else 0
         if close > cloud_top:
             judge = f"雲の上 → 強い上昇トレンド（雲厚 {cloud_thickness:.1f}%）"
             score = 2 if cloud_thickness > 3 else 1
@@ -167,7 +170,7 @@ def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) 
 
     # --- VWAP（出来高加重平均: 機関投資家の基準価格） ---
     vwap = _latest(df, "VWAP")
-    if vwap is not None:
+    if vwap is not None and vwap != 0:
         pct = (close - vwap) / vwap * 100
         if close > vwap * 1.03:
             judge, score = "VWAPより3%以上高い → 過熱・反落注意", -2

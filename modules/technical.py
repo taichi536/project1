@@ -34,7 +34,8 @@ def add_bollinger_bands(df: pd.DataFrame, period: int = 20, std: float = 2.0) ->
     df["BB_upper"] = sma + std * sigma
     df["BB_mid"] = sma
     df["BB_lower"] = sma - std * sigma
-    df["BB_pct"] = (df["Close"] - df["BB_lower"]) / (df["BB_upper"] - df["BB_lower"])
+    bb_width = (df["BB_upper"] - df["BB_lower"]).replace(0, np.nan)
+    df["BB_pct"] = (df["Close"] - df["BB_lower"]) / bb_width
     return df
 
 
@@ -100,7 +101,8 @@ def add_adx(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
 def add_stochastic(df: pd.DataFrame, k: int = 14, d: int = 3) -> pd.DataFrame:
     low_min = df["Low"].rolling(k).min()
     high_max = df["High"].rolling(k).max()
-    df["Stoch_K"] = 100 * (df["Close"] - low_min) / (high_max - low_min)
+    denom = (high_max - low_min).replace(0, np.nan)
+    df["Stoch_K"] = 100 * (df["Close"] - low_min) / denom
     df["Stoch_D"] = df["Stoch_K"].rolling(d).mean()
     return df
 

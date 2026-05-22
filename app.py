@@ -162,7 +162,7 @@ with st.sidebar:
     month = __import__("time").strftime("%Y-%m")
     if month in cost_data:
         m = cost_data[month]
-        usd = m.get("estimated_usd", 0)
+        usd = m.get("estimated_usd") or 0
         jpy = usd * 150
         cached = m.get("cached_calls", 0)
         total = m.get("calls", 0)
@@ -333,7 +333,7 @@ if page == "🏠 ダッシュボード":
             rsi = r["RSI"]
 
             chg_str = f"{chg:+.2f}%" if chg is not None else "N/A"
-            chg_color = "color:#26a69a" if chg and chg >= 0 else "color:#ef5350"
+            chg_color = "color:#26a69a" if (chg is not None and chg >= 0) else "color:#ef5350"
             price_str = f"{price:,.2f}" if price else "N/A"
             rsi_str = f"{rsi:.0f}" if rsi else "-"
             changed_badge = " 🔔NEW" if r.get("シグナル変化") else ""
@@ -385,6 +385,8 @@ if page == "🏠 ダッシュボード":
     else:
         for _tk, _lots in _positions.items():
             _total_qty = sum(lot[2] for lot in _lots)
+            if _total_qty == 0:
+                continue
             _avg_price = sum(lot[1] * lot[2] for lot in _lots) / _total_qty
 
             # 日記から損切り・目標価格を取得
@@ -402,8 +404,8 @@ if page == "🏠 ダッシュボード":
             except Exception:
                 _cur_price = None
 
-            _pnl_pct = (_cur_price - _avg_price) / _avg_price * 100 if _cur_price else None
-            _pnl_yen = (_cur_price - _avg_price) * _total_qty if _cur_price else None
+            _pnl_pct = (_cur_price - _avg_price) / _avg_price * 100 if (_cur_price is not None and _avg_price) else None
+            _pnl_yen = (_cur_price - _avg_price) * _total_qty if _cur_price is not None else None
 
             # 売り時判定
             _urgency = "🟡 様子見継続"
@@ -450,8 +452,8 @@ if page == "🏠 ダッシュボード":
                     </div>
                     <div style="margin-top:10px;font-size:1.05em;font-weight:bold;color:{_border_color}">{_urgency}</div>
                     <div style="color:#ccc;margin-top:4px;font-size:0.9em">{_urgency_detail}</div>
-                    {'<div style="color:#888;font-size:0.85em;margin-top:6px">損切ライン: ' + f'{_stop:,.0f}円' + '</div>' if _stop else ''}
-                    {'<div style="color:#888;font-size:0.85em">目標価格: ' + f'{_target:,.0f}円' + '</div>' if _target else ''}
+                    {'<div style="color:#888;font-size:0.85em;margin-top:6px">損切ライン: ' + f'{_stop:,.0f}円' + '</div>' if _stop is not None else ''}
+                    {'<div style="color:#888;font-size:0.85em">目標価格: ' + f'{_target:,.0f}円' + '</div>' if _target is not None else ''}
                 </div>""",
                 unsafe_allow_html=True,
             )
@@ -556,7 +558,7 @@ elif page == "🔭 銘柄スキャン":
                 price = r["現在値"]
                 chg = r["前日比(%)"]
                 chg_str = f"{chg:+.2f}%" if chg is not None else "N/A"
-                chg_color = "#26a69a" if (chg or 0) >= 0 else "#ef5350"
+                chg_color = "#26a69a" if (chg is not None and chg >= 0) else "#ef5350"
                 rsi = r["RSI"]
                 score = r["スコア"]
 
@@ -687,11 +689,16 @@ elif page == "📊 テクニカル分析":
                 st.error(f"データ取得に失敗しました。しばらく経ってから再試行するか、別の銘柄で試してください。（詳細: {type(e).__name__}）")
                 st.stop()
 
-        rsi_val = df["RSI"].dropna().iloc[-1] if "RSI" in df.columns else None
-        atr_val = df["ATR"].dropna().iloc[-1] if "ATR" in df.columns else None
+        _rsi_s = df["RSI"].dropna() if "RSI" in df.columns else pd.Series(dtype=float)
+        rsi_val = _rsi_s.iloc[-1] if len(_rsi_s) > 0 else None
+        _atr_s = df["ATR"].dropna() if "ATR" in df.columns else pd.Series(dtype=float)
+        atr_val = _atr_s.iloc[-1] if len(_atr_s) > 0 else None
+        if len(df) == 0:
+            st.error("データが空です。別の銘柄か期間で再試行してください。")
+            st.stop()
         close_val = df["Close"].iloc[-1]
         prev_val = df["Close"].iloc[-2] if len(df) >= 2 else close_val
-        chg_pct = (close_val - prev_val) / prev_val * 100
+        chg_pct = (close_val - prev_val) / prev_val * 100 if prev_val else 0
 
         # 決算日を取得（バックグラウンドで）
         try:

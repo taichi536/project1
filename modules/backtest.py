@@ -104,6 +104,8 @@ def run_backtest(
 ) -> dict:
     df = compute_all(df_raw.copy(), sma_short=sma_short, sma_long=sma_long)
     df = df.dropna()
+    if df.empty:
+        raise ValueError("指標計算後にデータが空になりました。期間を長くするか別の銘柄を試してください。")
 
     if strategy == "actual":
         raw_signals = _actual_signals(df, sma_short, sma_long)
@@ -148,7 +150,7 @@ def run_backtest(
             position = 0
 
         # 買いシグナル
-        if sig == 1 and position == 0 and cash > price:
+        if sig == 1 and position == 0 and cash > price * (1 + fee_rate):
             shares = int(cash * 0.95 / (price * (1 + fee_rate)))
             if shares > 0:
                 entry_cost = shares * price * (1 + fee_rate)  # 手数料込み取得コスト
