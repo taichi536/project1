@@ -88,7 +88,8 @@ with st.sidebar:
     _label_map = {}
     for _t in _wl:
         _name = _gcn(_t, use_api=False)
-        _label = f"{_name} ({_t})" if _name != _t.upper().replace(".T", "") else _t
+        _t_display = _t.replace(".T", "")
+        _label = f"{_name} ({_t_display})" if _name.upper() != _t_display.upper() else _t_display
         _label_map[_label] = _t
     _display_options = list(_label_map.keys()) + ["✏️ 直接入力"]
     _cur = st.session_state.get("current_ticker", _wl[0] if _wl else "")
@@ -204,21 +205,26 @@ if page == "🏠 ダッシュボード":
         auto_refresh = st.toggle("🔄 自動更新",
                                  key="auto_refresh",
                                  on_change=_on_auto_refresh_change)
-    with col_r2:
-        interval_label = st.selectbox(
-            "間隔",
-            ["1分", "3分", "5分", "15分"],
-            index=st.session_state.get("auto_refresh_interval_idx", 1),
-            disabled=not auto_refresh,
-            label_visibility="collapsed",
-            key="auto_refresh_interval",
-        )
-    interval_map = {"1分": 60, "3分": 180, "5分": 300, "15分": 900}
-    interval_sec = interval_map[interval_label]
-    _interval_idx = ["1分", "3分", "5分", "15分"].index(interval_label)
-    if _interval_idx != st.session_state.get("auto_refresh_interval_idx"):
-        st.session_state["auto_refresh_interval_idx"] = _interval_idx
-        _save_dash_config({"auto_refresh": auto_refresh, "auto_refresh_interval_idx": _interval_idx})
+    _interval_labels = ["1分", "3分", "5分", "15分"]
+    _interval_map = {"1分": 60, "3分": 180, "5分": 300, "15分": 900}
+    if auto_refresh:
+        with col_r2:
+            interval_label = st.selectbox(
+                "間隔",
+                _interval_labels,
+                index=st.session_state.get("auto_refresh_interval_idx", 1),
+                label_visibility="collapsed",
+                key="auto_refresh_interval",
+            )
+        _interval_idx = _interval_labels.index(interval_label)
+        if _interval_idx != st.session_state.get("auto_refresh_interval_idx"):
+            st.session_state["auto_refresh_interval_idx"] = _interval_idx
+            _save_dash_config({"auto_refresh": True, "auto_refresh_interval_idx": _interval_idx})
+    else:
+        interval_label = _interval_labels[st.session_state.get("auto_refresh_interval_idx", 1)]
+        with col_r2:
+            st.caption("更新間隔: " + interval_label)
+    interval_sec = _interval_map[interval_label]
 
     if auto_refresh:
         st_autorefresh(interval=interval_sec * 1000, key="dashboard_refresh")
@@ -506,7 +512,9 @@ elif page == "🔭 銘柄スキャン":
                                            "RSI": None, "MACD方向": "-", "理由": str(e)[:40]}
             prog.empty()
             results = [results_map[tk] for tk in tickers if tk in results_map]
+            import datetime as _dt
             st.session_state[f"scan_result_{selected_cat}"] = results
+            st.session_state[f"scan_time_{selected_cat}"] = _dt.datetime.now().strftime("%m/%d %H:%M")
 
         results = st.session_state.get(f"scan_result_{selected_cat}", [])
         if not results:
@@ -535,7 +543,9 @@ elif page == "🔭 銘柄スキャン":
                 st.warning("現在このカテゴリに買いシグナルが出ている銘柄はありません。別カテゴリを試すか、時間をおいて再スキャンしてください。")
 
             st.markdown("---")
-            st.markdown("### スキャン結果一覧")
+            _scan_time = st.session_state.get(f"scan_time_{selected_cat}", "")
+            _scan_time_str = f"　（スキャン日時: {_scan_time}）" if _scan_time else ""
+            st.markdown(f"### スキャン結果一覧{_scan_time_str}")
             st.caption("「📊 分析」ボタンで詳細なテクニカル分析を確認できます")
 
             for r in results:
@@ -640,19 +650,41 @@ elif page == "📊 テクニカル分析":
         sma_short = c3.number_input("短期MA", value=cfg["sma_default"][0], min_value=3, max_value=100, step=1)
         sma_long = c4.number_input("長期MA", value=cfg["sma_default"][1], min_value=5, max_value=300, step=1)
 
+    # ウォッチリスト外の銘柄が選択されている場合（スキャン遷移など）
+    if ticker and ticker not in watchlist:
+        _wl_col1, _wl_col2 = st.columns([3, 1])
+        with _wl_col1:
+            st.info(f"📋 **{ticker}** はウォッチリスト未登録です")
+        with _wl_col2:
+            if st.button("➕ 追加", key="add_to_wl"):
+                watchlist.append(ticker)
+                save_watchlist(watchlist)
+                st.success(f"{ticker} を追加しました")
+                st.rerun()
+
     # ダッシュボード/スキャンから飛んできた場合は自動で分析実行
     _auto = st.session_state.pop("auto_analyze", False)
     analyze_btn = st.button("🔍 分析する", type="primary", width="stretch") or _auto
 
+    if _auto:
+        st.toast("⬇️ 分析結果を表示しました。下にスクロールしてください。", icon="📊")
+
     if analyze_btn and ticker:
-        with st.spinner("データ取得中..."):
+        with st.spinner("データ取得・指標計算中..."):
             try:
                 df = fetch_ohlcv(ticker, period=period, interval=cfg["interval"])
                 df = compute_all(df, sma_short=sma_short, sma_long=sma_long)
                 signals = evaluate_signals(df, sma_short=sma_short, sma_long=sma_long)
                 verdict, score = overall_signal(signals, df=df, sma_long=sma_long)
+            except ValueError as e:
+                err_str = str(e)
+                if "データを取得できませんでした" in err_str or "No data" in err_str:
+                    st.error(f"「{ticker}」のデータを取得できませんでした。銘柄コードを確認してください（日本株: 4桁数字、米国株: アルファベット）")
+                else:
+                    st.error(f"データエラー: {err_str}")
+                st.stop()
             except Exception as e:
-                st.error(f"データ取得エラー: {e}")
+                st.error(f"データ取得に失敗しました。しばらく経ってから再試行するか、別の銘柄で試してください。（詳細: {type(e).__name__}）")
                 st.stop()
 
         rsi_val = df["RSI"].dropna().iloc[-1] if "RSI" in df.columns else None
@@ -682,12 +714,18 @@ elif page == "📊 テクニカル分析":
             )
 
         # ── 大きなシグナル表示 ──────────────────────────────
-        sig_color = {"買い": "#26a69a", "売り": "#ef5350", "様子見": "#ffd54f"}.get(verdict, "#888")
-        sig_emoji = {"買い": "🟢", "売り": "🔴", "様子見": "🟡"}.get(verdict, "⚪")
+        sig_color = {"買い": "#26a69a", "売り": "#ef5350", "様子見": "#ff9800"}.get(verdict, "#888")
+        sig_bg   = {"買い": "#0d2b22", "売り": "#2b0d0d", "様子見": "#2b1e00"}.get(verdict, "#1a1d23")
+        sig_emoji = {"買い": "🟢", "売り": "🔴", "様子見": "⏸"}.get(verdict, "⚪")
         sig_msg = {
             "買い": "買いのタイミングです",
             "売り": "売りを検討してください",
-            "様子見": "まだ動かず待ちましょう",
+            "様子見": "今はエントリーを見送ってください",
+        }.get(verdict, "")
+        sig_sub = {
+            "買い": "複数の指標が上昇を示しています",
+            "売り": "複数の指標が下落を示しています",
+            "様子見": "⚠️ 今すぐ買わないでください。次のシグナルを待ちましょう",
         }.get(verdict, "")
 
         # シンプルな理由（上位2つ）
@@ -711,14 +749,15 @@ elif page == "📊 テクニカル分析":
         if _detail.get("adx_down"):
             _filter_msg = "<div style='color:#ef5350;font-size:0.85em;margin-top:6px'>⛔ ADXが強い下落トレンドを確認 → 買いシグナルは封鎖中</div>"
         elif _detail.get("sideways"):
-            _filter_msg = "<div style='color:#ffd54f;font-size:0.85em;margin-top:6px'>⚠️ 横ばい相場（ADX低水準）→ シグナルの信頼性が低下中</div>"
+            _filter_msg = "<div style='color:#ff9800;font-size:0.85em;margin-top:6px'>⚠️ 横ばい相場（ADX低水準）→ シグナルの信頼性が低下中</div>"
 
         st.markdown(
-            f"""<div style="background:{sig_color}22;border:2px solid {sig_color};
+            f"""<div style="background:{sig_bg};border:2px solid {sig_color};
                 border-radius:16px;padding:24px;text-align:center;margin-bottom:16px">
                 <div style="font-size:3em">{sig_emoji}</div>
                 <div style="font-size:2em;font-weight:bold;color:{sig_color}">{verdict}</div>
                 <div style="font-size:1.1em;color:#ccc;margin-top:4px">{sig_msg}</div>
+                <div style="font-size:0.9em;color:#aaa;margin-top:4px">{sig_sub}</div>
                 <div style="margin-top:10px;display:flex;justify-content:center;gap:10px;flex-wrap:wrap">
                   {"<span style='background:" + _grade_color + "33;border:1px solid " + _grade_color + ";padding:3px 12px;border-radius:20px;font-size:0.9em;color:" + _grade_color + "'>" + _grade + "</span>" if _grade else ""}
                   <span style="background:{_conf_color}33;border:1px solid {_conf_color};padding:3px 12px;border-radius:20px;font-size:0.9em;color:{_conf_color}">
@@ -821,6 +860,13 @@ elif page == "📊 テクニカル分析":
         rr_color = "✅" if plan["risk_reward"] >= 2 else ("⚠️" if plan["risk_reward"] >= 1 else "❌")
         pc4.metric(f"リスクリワード比 {rr_color}", f"1 : {plan['risk_reward']:.1f}",
                    help="2以上が理想。損1に対してどれだけ利益が見込めるか")
+
+        # 投資プランの整合性チェック
+        _ep = plan["entry_price"]
+        if plan["stop_loss"] >= _ep:
+            st.warning("⚠️ 損切りラインが現在値以上に設定されています。手動で損切り価格を確認してください。")
+        if plan["target1"] <= _ep:
+            st.warning("⚠️ 利確ラインが現在値以下に設定されています。手動で目標価格を確認してください。")
 
         # 様子見のときは「次にどうなったら動くか」を表示
         if verdict == "様子見":
@@ -1750,16 +1796,18 @@ elif page == "🔬 バックテスト":
     bt_tab_single, bt_tab_batch = st.tabs(["📈 単一銘柄", "📊 一括バックテスト"])
 
     # ── 共通パラメータ（両タブで使う）──────────────────────────────────────
-    with st.sidebar.expander("⚙️ バックテスト設定", expanded=False):
-        bt_period = st.selectbox("検証期間", ["1y", "2y", "5y"], index=1,
-                                 format_func=lambda x: {"1y": "1年", "2y": "2年", "5y": "5年"}[x])
-        bt_strategy_label = st.selectbox("戦略", list(STRATEGIES.keys()))
-        bt_short = st.number_input("短期MA", value=25, min_value=5, max_value=50)
-        bt_long = st.number_input("長期MA", value=75, min_value=20, max_value=200)
-        bt_rsi_buy = st.number_input("RSI買いライン", value=35, min_value=10, max_value=50)
-        bt_rsi_sell = st.number_input("RSI売りライン", value=65, min_value=50, max_value=90)
-        bt_cash = st.number_input("初期資金 (円)", value=1_000_000, min_value=100_000, step=100_000)
-        bt_stop_atr = st.slider("損切り幅 (ATR倍)", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
+    with st.expander("⚙️ バックテスト設定（期間・戦略・資金）", expanded=False):
+        _btc1, _btc2, _btc3, _btc4 = st.columns(4)
+        bt_period = _btc1.selectbox("検証期間", ["1y", "2y", "5y"], index=1,
+                                    format_func=lambda x: {"1y": "1年", "2y": "2年", "5y": "5年"}[x])
+        bt_strategy_label = _btc2.selectbox("戦略", list(STRATEGIES.keys()))
+        bt_cash = _btc3.number_input("初期資金 (円)", value=1_000_000, min_value=100_000, step=100_000)
+        bt_stop_atr = _btc4.slider("損切り幅 (ATR倍)", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
+        _btc5, _btc6, _btc7, _btc8 = st.columns(4)
+        bt_short = _btc5.number_input("短期MA", value=25, min_value=5, max_value=50)
+        bt_long = _btc6.number_input("長期MA", value=75, min_value=20, max_value=200)
+        bt_rsi_buy = _btc7.number_input("RSI買いライン", value=35, min_value=10, max_value=50)
+        bt_rsi_sell = _btc8.number_input("RSI売りライン", value=65, min_value=50, max_value=90)
 
     strategy_key = STRATEGIES[bt_strategy_label]
 
@@ -1771,10 +1819,11 @@ elif page == "🔬 バックテスト":
         bt_btn = st.button("▶ バックテスト実行", type="primary", width="stretch", key="bt_single_btn")
 
         if bt_btn and bt_ticker:
-            with st.spinner("データ取得・バックテスト実行中..."):
-                try:
-                    df_raw = fetch_ohlcv(bt_ticker, period=bt_period)
-                    result = run_backtest(
+            _bt_prog = st.progress(0, text="📥 株価データ取得中...")
+            try:
+                df_raw = fetch_ohlcv(bt_ticker, period=bt_period)
+                _bt_prog.progress(40, text="📐 テクニカル指標計算中...")
+                result = run_backtest(
                         df_raw,
                         strategy=strategy_key,
                         sma_short=bt_short,
@@ -1784,11 +1833,15 @@ elif page == "🔬 バックテスト":
                         initial_cash=bt_cash,
                         stop_loss_atr=bt_stop_atr,
                     )
-                    st.session_state["bt_single_result"] = result
-                    st.session_state["bt_single_ticker"] = bt_ticker
-                    st.session_state["bt_single_label"] = bt_strategy_label
-                except Exception as e:
-                    st.error(f"エラー: {e}")
+                _bt_prog.progress(90, text="📊 結果を集計中...")
+                st.session_state["bt_single_result"] = result
+                st.session_state["bt_single_ticker"] = bt_ticker
+                st.session_state["bt_single_label"] = bt_strategy_label
+                _bt_prog.progress(100, text="✅ 完了")
+                _bt_prog.empty()
+            except Exception as e:
+                _bt_prog.empty()
+                st.error(f"バックテストに失敗しました。銘柄コードと期間を確認してください。（詳細: {type(e).__name__}: {e}）")
 
         result = st.session_state.get("bt_single_result")
         if result:
