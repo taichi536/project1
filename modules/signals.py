@@ -45,16 +45,16 @@ def evaluate_signals(df: pd.DataFrame, sma_short: int = 25, sma_long: int = 75) 
     # --- RSI（売買過熱感） ---
     rsi = _latest(df, "RSI")
     if rsi is not None:
-        if rsi < 25:
-            judge, score = "かなり売られすぎ → 反発しやすい", 2
-        elif rsi < 40:
+        if rsi < 20:
+            judge, score = "極度の売られすぎ → 強い反発期待", 2
+        elif rsi < 35:
             judge, score = "売られすぎ気味 → 買い候補", 1
-        elif rsi > 75:
+        elif rsi > 80:
             judge, score = "かなり買われすぎ → 下落しやすい", -2
-        elif rsi > 60:
-            judge, score = "買われすぎ気味 → 注意", -1
+        elif rsi > 70:
+            judge, score = "買われすぎ気味 → 利確検討", -1
         else:
-            judge, score = "中立域（40〜60）", 0
+            judge, score = "中立域（35〜70）", 0
         signals.append({"指標": "RSI（売買過熱感）", "値": f"{rsi:.1f}", "判定": judge, "スコア": score})
 
     # --- MACD（モメンタム変化） ---
@@ -203,7 +203,7 @@ INDICATOR_WEIGHTS: dict[str, float] = {
     "一目均衡表（雲）":        2.0,   # ★★☆ 複合トレンド指標。雲の上/下は強いサイン
     "MACD（勢い）":            2.0,   # ★★☆ モメンタム転換の早期検知。タイミングに有効
     "RSI（売買過熱感）":       1.0,   # ★☆☆ 過熱感の確認。単独では誤シグナルが多い
-    "出来高トレンド（OBV）":   1.0,   # ★☆☆ 大口の動き確認。遅れが出やすい
+    "出来高トレンド（OBV）":   2.0,   # ★★☆ 大口の動き確認。出来高なき上昇は信頼できない
     "ボリンジャーバンド":      1.0,   # ★☆☆ レンジ相場で有効。トレンド相場では弱い
     "VWAP（機関投資家の基準価格）": 1.0,  # ★☆☆ 機関投資家の基準。参考程度
 }
@@ -328,7 +328,7 @@ def overall_signal(
     raw_total = sum(s["スコア"] for s in signals)
     pct, adx_confirmed_down, sideways_market = _calc_weighted_context(signals, df, sma_long)
 
-    threshold = 0.42 if sideways_market else 0.32
+    threshold = 0.52 if sideways_market else 0.40
 
     if pct >= threshold and not adx_confirmed_down:
         return "買い", raw_total

@@ -1843,12 +1843,18 @@ elif page == "🔬 バックテスト":
                                     format_func=lambda x: {"1y": "1年", "2y": "2年", "5y": "5年"}[x])
         bt_strategy_label = _btc2.selectbox("戦略", list(STRATEGIES.keys()))
         bt_cash = _btc3.number_input("初期資金 (円)", value=1_000_000, min_value=100_000, step=100_000)
-        bt_stop_atr = _btc4.slider("損切り幅 (ATR倍)", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
+        bt_stop_atr = _btc4.slider("損切り幅 (ATR倍)", min_value=1.0, max_value=4.0, value=2.0, step=0.5,
+                                   help="ATR（平均値動き幅）×倍数で損切りライン設定。2.0推奨")
         _btc5, _btc6, _btc7, _btc8 = st.columns(4)
         bt_short = _btc5.number_input("短期MA", value=25, min_value=5, max_value=50)
         bt_long = _btc6.number_input("長期MA", value=75, min_value=20, max_value=200)
         bt_rsi_buy = _btc7.number_input("RSI買いライン", value=35, min_value=10, max_value=50)
         bt_rsi_sell = _btc8.number_input("RSI売りライン", value=65, min_value=50, max_value=90)
+        _btc9, _btc10, _, _ = st.columns(4)
+        bt_take_atr = _btc9.slider("利確幅 (ATR倍)", min_value=0.0, max_value=6.0, value=0.0, step=0.5,
+                                   help="0=利確なし（シグナルが出るまで保有）。2.5〜3.0が一般的なRR比1:1.2〜1.5")
+        bt_pos_pct = _btc10.slider("1トレード資金比率 (%)", min_value=10, max_value=100, value=95, step=5,
+                                   help="1回の取引で使う資金の割合。リスク管理上は50%以下を推奨") / 100
 
     strategy_key = STRATEGIES[bt_strategy_label]
 
@@ -1873,6 +1879,8 @@ elif page == "🔬 バックテスト":
                         rsi_sell=bt_rsi_sell,
                         initial_cash=bt_cash,
                         stop_loss_atr=bt_stop_atr,
+                        take_profit_atr=bt_take_atr,
+                        position_pct=bt_pos_pct,
                     )
                 _bt_prog.progress(90, text="📊 結果を集計中...")
                 st.session_state["bt_single_result"] = result
@@ -2014,6 +2022,8 @@ elif page == "🔬 バックテスト":
                         rsi_sell=bt_rsi_sell,
                         initial_cash=bt_cash,
                         stop_loss_atr=bt_stop_atr,
+                        take_profit_atr=bt_take_atr,
+                        position_pct=bt_pos_pct,
                         max_workers=int(batch_workers),
                     )
                 progress_bar.empty()

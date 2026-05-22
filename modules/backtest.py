@@ -103,6 +103,8 @@ def run_backtest(
     rsi_sell: float = 65,
     initial_cash: float = 1_000_000,
     stop_loss_atr: float = 2.0,
+    take_profit_atr: float = 0.0,   # 0=利確なし、2.5=ATR×2.5で利確
+    position_pct: float = 0.95,     # 1トレードに使う資金比率
 ) -> dict:
     df = compute_all(df_raw.copy(), sma_short=sma_short, sma_long=sma_long)
     df = df.dropna()
@@ -126,7 +128,8 @@ def run_backtest(
     shares = 0
     entry_price = 0.0
     stop_price = 0.0
-    entry_cost = 0.0  # 買い時の手数料込みコスト（損益計算用）
+    take_price = 0.0   # 利確ターゲット価格
+    entry_cost = 0.0   # 買い時の手数料込みコスト（損益計算用）
 
     portfolio_values = []
     trades = []
@@ -140,7 +143,6 @@ def run_backtest(
         # 損切りチェック
         if position == 1 and price <= stop_price:
             proceeds = shares * price * (1 - fee_rate)
-            # 損益 = 売却額 - 取得コスト（手数料込み）
             pnl = proceeds - entry_cost
             trades.append({
                 "日付": date, "種別": "損切り売",
@@ -151,13 +153,27 @@ def run_backtest(
             shares = 0
             position = 0
 
+        # 利確チェック（take_profit_atr > 0 の場合のみ）
+        elif position == 1 and take_profit_atr > 0 and price >= take_price:
+            proceeds = shares * price * (1 - fee_rate)
+            pnl = proceeds - entry_cost
+            trades.append({
+                "日付": date, "種別": "利確売",
+                "価格": round(price, 2), "株数": shares,
+                "損益": round(pnl, 0),
+            })
+            cash += proceeds
+            shares = 0
+            position = 0
+
         # 買いシグナル
         if sig == 1 and position == 0 and cash > price * (1 + fee_rate):
-            shares = int(cash * 0.95 / (price * (1 + fee_rate)))
+            shares = int(cash * position_pct / (price * (1 + fee_rate)))
             if shares > 0:
-                entry_cost = shares * price * (1 + fee_rate)  # 手数料込み取得コスト
+                entry_cost = shares * price * (1 + fee_rate)
                 entry_price = price
                 stop_price = price - stop_loss_atr * atr
+                take_price = price + take_profit_atr * atr if take_profit_atr > 0 else float("inf")
                 cash -= entry_cost
                 trades.append({
                     "日付": date, "種別": "買い",
@@ -169,7 +185,6 @@ def run_backtest(
         # 売りシグナル
         elif sig == -1 and position == 1:
             proceeds = shares * price * (1 - fee_rate)
-            # 損益 = 売却額 - 取得コスト（手数料込み）
             pnl = proceeds - entry_cost
             trades.append({
                 "日付": date, "種別": "売り",
@@ -249,6 +264,8 @@ def run_batch_backtest(
     rsi_sell: float = 65,
     initial_cash: float = 1_000_000,
     stop_loss_atr: float = 2.0,
+    take_profit_atr: float = 0.0,
+    position_pct: float = 0.95,
     max_workers: int = 4,
 ) -> dict:
     """
@@ -270,6 +287,8 @@ def run_batch_backtest(
                 rsi_sell=rsi_sell,
                 initial_cash=initial_cash,
                 stop_loss_atr=stop_loss_atr,
+                take_profit_atr=take_profit_atr,
+                position_pct=position_pct,
             )
             m = result["metrics"]
             return {
