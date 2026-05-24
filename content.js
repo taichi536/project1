@@ -996,12 +996,19 @@ async function triggerAutoAdd() {
 // RDSのプロフィール/レジュメタブに切り替える
 // 条件に関わらずレジュメ系タブを強制クリック
 async function forceClickRDSResumeTab() {
+  // 詳細パネル・モーダル内に限定して検索（ページ全体検索だと別候補者カードをクリックする危険がある）
+  const panel = findRDSDetailPanel()
+    || document.querySelector('[role="dialog"]')
+    || document.querySelector('[class*="modal" i]')
+    || document.querySelector('[class*="dialog" i]');
+  const searchRoot = panel || document;
+
   const tabLabels = ['レジュメ', 'プロフィール', '基本情報', '職務経歴'];
   for (const label of tabLabels) {
-    const tab = Array.from(document.querySelectorAll('button, [role="tab"], li, span, a'))
+    const tab = Array.from(searchRoot.querySelectorAll('button, [role="tab"], li, a'))
       .find(el => {
         const t = (el.innerText || '').trim();
-        return t === label || t.startsWith(label);
+        return (t === label || t.startsWith(label)) && t.length < label.length + 6;
       });
     if (tab) { tab.click(); await sleep(800); return true; }
   }
@@ -1009,18 +1016,23 @@ async function forceClickRDSResumeTab() {
 }
 
 async function tryClickRDSResumeTab() {
-  // スカウト履歴系のタブが選択中かどうか確認
-  const panel = findRDSDetailPanel();
-  const panelText = (panel?.innerText || '').trim();
+  // 詳細パネル・モーダル内に限定して検索（ページ全体検索だと別候補者カードをクリックする危険がある）
+  const panel = findRDSDetailPanel()
+    || document.querySelector('[role="dialog"]')
+    || document.querySelector('[class*="modal" i]')
+    || document.querySelector('[class*="dialog" i]');
+  if (!panel) return false;
+
+  const panelText = (panel.innerText || '').trim();
   const hasScoutHistoryTab = panelText.includes('スカウト履歴') && !panelText.includes('職務経歴');
   if (!hasScoutHistoryTab) return false; // すでにレジュメ表示中なら何もしない
 
   const tabLabels = ['レジュメ', 'プロフィール', '基本情報', '職務経歴'];
   for (const label of tabLabels) {
-    const tab = Array.from(document.querySelectorAll('button, [role="tab"], li, span, a'))
+    const tab = Array.from(panel.querySelectorAll('button, [role="tab"], li, a'))
       .find(el => {
         const t = (el.innerText || '').trim();
-        return t === label || t.startsWith(label);
+        return (t === label || t.startsWith(label)) && t.length < label.length + 6;
       });
     if (tab) {
       tab.click();
@@ -1779,10 +1791,13 @@ function removeNonProfileSections(text) {
     'エージェントからのメッセージ', 'この度はご連絡', '貴方様のご経歴を拝見',
     'ご経歴を拝見し', '採用担当者からのメッセージ', 'メッセージ履歴'
   ];
-  // パネル全体がスカウト履歴・候補者評価から始まる場合は空を返す（idx>50 の制限を撤廃）
+  // 最初の300文字以内に現れるマーカーはタブラベルと見なしてスキップ
+  // （例：詳細パネル上部の「レジュメ | スカウト履歴」タブナビゲーション）
+  const MIN_OFFSET = 300;
   let cutIdx = text.length;
   for (const marker of stopMarkers) {
-    const idx = text.indexOf(marker);
+    let idx = text.indexOf(marker);
+    while (idx >= 0 && idx < MIN_OFFSET) idx = text.indexOf(marker, idx + marker.length);
     if (idx >= 0 && idx < cutIdx) cutIdx = idx;
   }
   return text.substring(0, cutIdx).trim();
@@ -1914,6 +1929,17 @@ function findRDSDetailPanel() {
     });
   }
 
+  // 方法3: モーダル・ダイアログ（中央配置レイアウト対応）
+  if (candidates.length === 0) {
+    const profileKeywords = ['職務経歴', '職歴', 'スキル', '学歴', '自己PR'];
+    document.querySelectorAll('[role="dialog"],[class*="modal" i],[class*="dialog" i],[class*="overlay" i]').forEach(modal => {
+      const innerText = (modal.innerText || '').trim();
+      if (innerText.length > 200 && profileKeywords.some(kw => innerText.includes(kw))) {
+        candidates.push({ el: modal, score: innerText.length });
+      }
+    });
+  }
+
   if (candidates.length === 0) return null;
   candidates.sort((a, b) => b.score - a.score);
   return candidates[0].el;
@@ -1990,7 +2016,7 @@ function extractProfile() {
         '自己PR', 'PR', 'アピール',
         '希望', '年収', '転職理由',
         '経験業種', '経験職種', '経験社数'
-      ], detailPanel);
+      ], detailPanel, 30, 12000);
 
       const bySelector = extractBySelectors([
         '[class*="resume"]', '[class*="Resume"]',
@@ -2008,7 +2034,7 @@ function extractProfile() {
       text = removeNonProfileSections(text);
 
       if (text.length < 100) {
-        text = removeNonProfileSections(extractMainText(detailPanel, 2500));
+        text = removeNonProfileSections(extractMainText(detailPanel, 5000));
       }
     } else {
       text = extractByKeywords([
@@ -2196,7 +2222,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // スカウト履歴タブが表示されている場合はレジュメタブに切り替える
           await tryClickRDSResumeTab();
           await sleep(500);
-          await scrollModalToBottom();
+          // 詳細パネル内のみスクロール（パネルが見つからない場合は全体スクロールしない）
+          const rdsPanel = findRDSDetailPanel();
+          if (rdsPanel) {
+            let scrollTarget = rdsPanel;
+            rdsPanel.querySelectorAll('*').forEach(el => {
+              const s = window.getComputedStyle(el);
+              if (s.overflowY !== 'scroll' && s.overflowY !== 'auto') return;
+              const rect = el.getBoundingClientRect();
+              if (rect.height > 200) scrollTarget = el;
+            });
+            scrollTarget.scrollTop = scrollTarget.scrollHeight;
+            await sleep(1000);
+          }
         } else {
           await scrollRightPanelToBottom();
         }
