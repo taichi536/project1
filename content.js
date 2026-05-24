@@ -907,6 +907,26 @@ async function triggerAutoAdd() {
     await sleep(500);
   }
 
+  // ビズリーチ：仮想スクロールで次バッチへ
+  if (getPlatform() === 'bizreach') {
+    const viewport = document.querySelector('cdk-virtual-scroll-viewport');
+    if (viewport) {
+      const prevTop = viewport.scrollTop;
+      viewport.scrollTop += 250 * Math.max(cards.length, 5); // カード高さ約250px×枚数
+      await sleep(700);
+      if (viewport.scrollTop > prevTop + 50) {
+        // まだスクロールできる = 未処理の候補者が残っている
+        showAutoStatus(`🤖 次の候補者を処理中... (累計✅${addedCount}人追加)`);
+        await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+        await triggerAutoAdd();
+        return;
+      }
+    }
+    showAutoStatus(`🤖 完了！ ✅${addedCount}人を検討リストに追加 (全${totalProcessed}人中)`, 8000);
+    await saveAutoAddProgress({ running: false });
+    return;
+  }
+
   // 次のページがあれば自動で移動して処理を続ける
   const nextPage = findNextPageButton();
   if (nextPage) {
@@ -987,16 +1007,20 @@ async function getFullProfile(cardEl, fallbackText) {
     return fallbackText.substring(0, 900);
   }
 
-  // その他：Bizreachはカードクリックで右パネルが開く
+  // Bizreach: カードクリックで右パネルが開くので読んだ後に閉じる
   if (platform === 'bizreach') {
     cardEl.click();
     await sleep(1200);
     const panel = findBizreachDetailPanel();
+    let bizResult = fallbackText.substring(0, 900);
     if (panel) {
       const full = extractMainText(panel, 5000);
-      if (full.length > 200) return full;
+      if (full.length > 200) bizResult = full;
     }
-    return fallbackText.substring(0, 900);
+    // Escapeキーでパネルを閉じる
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+    await sleep(400);
+    return bizResult;
   }
 
   // その他：プロフィールURLをフェッチして全文取得
