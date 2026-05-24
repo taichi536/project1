@@ -1457,7 +1457,11 @@ function checkShortTenureNG(profileText) {
       return 'NG';
     }
 
-    // ② 直前行を確認
+    // ② 同行に部署・役職キーワードがあればサブエントリー → スキップ
+    const roleRe = /部長|課長|係長|主任|マネージャー|ディレクター|リーダー|担当|チーフ|シニア|ジュニア|エンジニア|営業部|開発部|総務部|人事部|経営企画|事業部|本部|センター|グループ|チーム|課$|室$|部$/;
+    if (roleRe.test(line)) continue;
+
+    // ③ 直前行を確認
     const prevLine = i > 0 ? lines[i - 1] : '';
     if (companyRe.test(prevLine)) {
       const prevTenure = parseTenureMonths(prevLine);
@@ -1465,7 +1469,7 @@ function checkShortTenureNG(profileText) {
         // 直前が長期在籍の会社エントリー → 今行は部署・役職変更のサブエントリー → スキップ
         continue;
       }
-      // 直前が会社名のみ行（在籍期間なし）→ 新規会社の短期在籍 → NG
+      // 直前が会社名のみ行（在籍期間なし）かつ今行に役職・部署なし → 新規会社の短期在籍 → NG
       console.log(`[Snow-we] 短期在籍NG: ${total}ヶ月 / 会社名行: "${prevLine.substring(0, 50)}"`);
       return 'NG';
     }
