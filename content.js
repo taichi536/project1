@@ -890,7 +890,18 @@ async function triggerAutoAdd() {
     try { profileText = await getFullProfile(el, cardText); } catch (_) {}
 
     if (isRDS) {
-      await scrollModalToBottom();
+      // パネル内のみスクロール（リストをスクロールするとスカウト履歴検索が不正確になる）
+      const rdsAutoPanel = findRDSDetailPanel();
+      if (rdsAutoPanel) {
+        let autoScrollTarget = rdsAutoPanel;
+        rdsAutoPanel.querySelectorAll('*').forEach(el => {
+          const s = window.getComputedStyle(el);
+          if (s.overflowY !== 'scroll' && s.overflowY !== 'auto') return;
+          if (el.getBoundingClientRect().height > 200) autoScrollTarget = el;
+        });
+        autoScrollTarget.scrollTop = autoScrollTarget.scrollHeight;
+        await sleep(800);
+      }
       const daysAgo = checkScoutSentInBody();
       if (daysAgo !== null && daysAgo < RESCOUNT_DAYS) {
         setBatchBadge(el, 'warn', `⏸ 送信済（${daysAgo}日前）`);
@@ -1001,12 +1012,12 @@ async function forceClickRDSResumeTab() {
     || document.querySelector('[role="dialog"]')
     || document.querySelector('[class*="modal" i]')
     || document.querySelector('[class*="dialog" i]');
-  const searchRoot = panel || document;
+  if (!panel) return false; // パネルが見つからない場合はドキュメント全体を検索しない
 
   const tabLabels = ['レジュメ', 'プロフィール', '基本情報', '職務経歴'];
   for (const label of tabLabels) {
     // button/role=tab/li/a/span をパネル内限定で検索（span はタブラベルによく使われる）
-    const tab = Array.from(searchRoot.querySelectorAll('button, [role="tab"], li, span, a'))
+    const tab = Array.from(panel.querySelectorAll('button, [role="tab"], li, span, a'))
       .find(el => {
         const t = (el.innerText || '').trim();
         return (t === label || t.startsWith(label)) && t.length < label.length + 6;
@@ -1198,9 +1209,13 @@ function findBizreachStarButton(cardEl) {
 // Angular は JS property を更新する（attribute は初期値のみ反映のことがある）
 function isBizreachStarred(starEl) {
   const toggle = starEl.querySelector('b-ui-icon-toggle') || starEl;
-  // JS property を優先
+  // Angular は JS property を優先的に更新する
   if (toggle.checked === true)  return true;
   if (toggle.checked === false) return false;
+  // aria-checked（Angular が DOM attribute として反映する場合）
+  const aria = toggle.getAttribute('aria-checked');
+  if (aria === 'true')  return true;
+  if (aria === 'false') return false;
   // フォールバック：HTML attribute
   return toggle.getAttribute('checked') === 'true';
 }
