@@ -968,6 +968,18 @@ async function getFullProfile(cardEl, fallbackText) {
     return fallbackText.substring(0, 900);
   }
 
+  // その他：Bizreachはカードクリックで右パネルが開く
+  if (platform === 'bizreach') {
+    cardEl.click();
+    await sleep(1200);
+    const panel = findBizreachDetailPanel();
+    if (panel) {
+      const full = extractMainText(panel, 3000);
+      if (full.length > 200) return full;
+    }
+    return fallbackText.substring(0, 900);
+  }
+
   // その他：プロフィールURLをフェッチして全文取得
   const profileUrl = findProfileUrl(cardEl);
   if (profileUrl) {
@@ -1645,6 +1657,25 @@ function findAMBIDetailPanel() {
     const t = (el.innerText || '').trim();
     if (rect.left > viewportWidth * 0.3 && rect.width > 300 && t.length > 200 && t.length < 15000) {
       const hasKeyword = ['職務経歴', '職歴', 'スキル', '経験職種', '学歴', '語学'].some(kw => t.includes(kw));
+      if (hasKeyword) candidates.push({ el, score: t.length });
+    }
+  });
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0].el;
+}
+
+// -------------------------------------------------------
+// Bizreach詳細パネルを特定する（カードクリックで開く右パネル）
+// -------------------------------------------------------
+function findBizreachDetailPanel() {
+  const viewportWidth = window.innerWidth;
+  const candidates = [];
+  document.querySelectorAll('div, section, article, main').forEach(el => {
+    const rect = el.getBoundingClientRect();
+    const t = (el.innerText || '').trim();
+    if (rect.left > viewportWidth * 0.4 && rect.width > 280 && t.length > 200 && t.length < 20000) {
+      const hasKeyword = ['在籍企業名', '学歴', '経験職種', '希望年収', '経験業種', '職務経歴', '資格'].some(kw => t.includes(kw));
       if (hasKeyword) candidates.push({ el, score: t.length });
     }
   });
