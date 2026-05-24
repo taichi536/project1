@@ -1424,40 +1424,54 @@ function checkIncomeNG(profileText) {
   return null;
 }
 
-// 在籍期間チェック：過去職歴に2年（24ヶ月）未満の在籍がある場合NG
-// 現在進行中（〜現在 / 在籍中）のマッチはスキップして誤判定を防ぐ
+// 在籍期間チェック：過去職歴に2年（24ヶ月）未満の会社エントリーがある場合NG
+// 同一企業内の部署・役職変更で経歴を分割した場合の誤NG判定を防ぐ：
+//   直前行が長期在籍（≥24ヶ月）の会社エントリーなら「サブエントリー」とみなしスキップ
 function checkShortTenureNG(profileText) {
   if (!profileText) return null;
 
-  // マッチ位置の前150文字に「現在」「在籍中」があれば現職 → スキップ
-  function isCurrentJob(idx) {
-    const before = profileText.slice(Math.max(0, idx - 150), idx);
-    return before.includes('現在') || before.includes('在籍中');
+  // 会社エントリーの目印（部署名・役職名とは区別できる）
+  const companyRe = /株式会社|有限会社|合同会社|ホールディングス|LLC|Inc\b|Corp\b|Ltd\b|銀行[^員振]|証券[^取]|生命保険|損害保険|病院|クリニック/;
+
+  // 1行から在籍期間（ヶ月換算）を取り出す
+  function parseTenureMonths(str) {
+    const m1 = str.match(/[（(](\d+)年(?:(\d+)ヶ月)?[）)]/);
+    if (m1) return parseInt(m1[1], 10) * 12 + parseInt(m1[2] || '0', 10);
+    const m2 = str.match(/[（(](\d+)ヶ月[）)]/);
+    if (m2) return parseInt(m2[1], 10);
+    return null;
   }
 
-  // パターン1: （X年）または（X年Yヶ月）
-  const yearPat = /[（(](\d+)年(?:(\d+)ヶ月)?[）)]/g;
-  let m;
-  while ((m = yearPat.exec(profileText)) !== null) {
-    if (isCurrentJob(m.index)) continue;
-    const total = parseInt(m[1], 10) * 12 + parseInt(m[2] || '0', 10);
-    if (total > 0 && total < 24) {
-      console.log(`[Snow-we] 短期在籍NG: ${m[1]}年${m[2] || 0}ヶ月 = ${total}ヶ月`);
+  const lines = profileText.split('\n').map(l => l.trim()).filter(Boolean);
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.includes('現在') || line.includes('在籍中')) continue;
+
+    const total = parseTenureMonths(line);
+    if (total === null || total <= 0 || total >= 24) continue;
+
+    // ① 同行に会社名 → 会社レベルの短期在籍 → NG
+    if (companyRe.test(line)) {
+      console.log(`[Snow-we] 短期在籍NG: ${total}ヶ月 / "${line.substring(0, 50)}"`);
       return 'NG';
     }
-  }
 
-  // パターン2: （Xヶ月）のみ（年なし）
-  const monthPat = /[（(](\d+)ヶ月[）)]/g;
-  while ((m = monthPat.exec(profileText)) !== null) {
-    if (isCurrentJob(m.index)) continue;
-    const total = parseInt(m[1], 10);
-    if (total > 0 && total < 24) {
-      console.log(`[Snow-we] 短期在籍NG: ${total}ヶ月`);
+    // ② 直前行を確認
+    const prevLine = i > 0 ? lines[i - 1] : '';
+    if (companyRe.test(prevLine)) {
+      const prevTenure = parseTenureMonths(prevLine);
+      if (prevTenure !== null && prevTenure >= 24) {
+        // 直前が長期在籍の会社エントリー → 今行は部署・役職変更のサブエントリー → スキップ
+        continue;
+      }
+      // 直前が会社名のみ行（在籍期間なし）→ 新規会社の短期在籍 → NG
+      console.log(`[Snow-we] 短期在籍NG: ${total}ヶ月 / 会社名行: "${prevLine.substring(0, 50)}"`);
       return 'NG';
     }
-  }
 
+    // ③ 前後に会社名なし → 部署・役職・プロジェクト期間のサブエントリー → スキップ
+  }
   return null;
 }
 
