@@ -1328,12 +1328,15 @@ async function callBizreachFavoriteApi(resumeNumericId) {
     const [k, ...vParts] = part.trim().split('=');
     if (k === 'XSRF-TOKEN') { xsrfToken = decodeURIComponent(vParts.join('=')); break; }
   }
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+  };
   if (xsrfToken) headers['X-XSRF-TOKEN'] = xsrfToken;
   try {
     const res = await fetch(
       `${location.origin}/v1/api/resume-favorite/${resumeNumericId}`,
-      { method: 'PUT', credentials: 'include', headers }
+      { method: 'PUT', credentials: 'include', headers, body: JSON.stringify({ favorite: true }) }
     );
     console.log('[Snow-we] お気に入りAPI:', res.status, resumeNumericId);
     return res.status === 204 || res.status === 200 || res.ok;
