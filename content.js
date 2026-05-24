@@ -1196,8 +1196,8 @@ JSON1行のみで出力:
 {"o":"OK"} または {"o":"NG"} または {"o":"要確認"}`;
 
   const data = await claudeFetch(apiKey, {
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 20,
+    model: 'claude-sonnet-4-6',
+    max_tokens: 30,
     messages: [{ role: 'user', content: prompt }]
   });
   const text = (data.content?.[0]?.text || '').trim();
