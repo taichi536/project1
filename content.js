@@ -823,16 +823,40 @@ async function triggerAutoAdd() {
   // RDSはパネルを信頼するためストレージ不要。他媒体のみ取得
   const scoutHistory = isRDS ? {} : await getScoutHistory();
 
+  // ─── 仮想スクロール用：セッション内の処理済みIDセット ───
+  // 再帰呼び出し時に前バッチの候補者を再処理しないための dedup
+  const BATCH_SESSION_KEY = 'snowWeBatchProcessed';
+  const isFreshStart = !progress.running; // running=true なら再帰呼び出し
+  if (isFreshStart) sessionStorage.removeItem(BATCH_SESSION_KEY);
+  let batchProcessed;
+  try {
+    batchProcessed = new Set(JSON.parse(sessionStorage.getItem(BATCH_SESSION_KEY) || '[]'));
+  } catch (_) { batchProcessed = new Set(); }
+
   // ─── 候補者を1人ずつ処理 ───
   const pending = []; // 処理済み記録用
   for (let i = 0; i < cards.length; i++) {
     const { el, text: cardText } = cards[i];
     showAutoStatus(`📥 ${i + 1}/${cards.length}人 プロフィール取得中...`);
 
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    await sleep(400);
+    // Bizreach の仮想スクロール内では scrollIntoView が viewport と競合するためスキップ
+    if (getPlatform() !== 'bizreach') {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await sleep(400);
+    }
 
     const candidateId = getCandidateId(el);
+
+    // 仮想スクロール再帰時：前バッチで処理済みなら即スキップ
+    if (candidateId && batchProcessed.has(candidateId)) {
+      console.log('[Snow-we] 処理済みスキップ:', candidateId);
+      continue;
+    }
+    // 処理開始前にマーク（失敗しても再処理しない）
+    if (candidateId) {
+      batchProcessed.add(candidateId);
+      try { sessionStorage.setItem(BATCH_SESSION_KEY, JSON.stringify([...batchProcessed])); } catch (_) {}
+    }
 
     if (!isRDS) {
       const status = scoutStatus(scoutHistory, candidateId);
@@ -915,8 +939,10 @@ async function triggerAutoAdd() {
       || document.querySelector('cdk-virtual-scroll-viewport');
     if (viewport) {
       const prevTop = viewport.scrollTop;
-      viewport.scrollTop += 250 * Math.max(cards.length, 5); // カード高さ約250px×枚数
-      await sleep(700);
+      // ビューポート高さ分スクロール（過大スクロールによるスキップを防ぐ）
+      const scrollBy = viewport.clientHeight || 800;
+      viewport.scrollTop += scrollBy;
+      await sleep(1000); // Angular CDK のレンダリング待機
       if (viewport.scrollTop > prevTop + 50) {
         // まだスクロールできる = 未処理の候補者が残っている
         showAutoStatus(`🤖 次の候補者を処理中... (累計✅${addedCount}人追加)`);
@@ -925,6 +951,7 @@ async function triggerAutoAdd() {
         return;
       }
     }
+    sessionStorage.removeItem(BATCH_SESSION_KEY);
     showAutoStatus(`🤖 完了！ ✅${addedCount}人を検討リストに追加 (全${totalProcessed}人中)`, 8000);
     await saveAutoAddProgress({ running: false });
     return;
@@ -1135,60 +1162,66 @@ function isBizreachStarred(starEl) {
   return toggle.getAttribute('checked') === 'true';
 }
 
-// Bizreach 星ボタンを実際にクリックする（複数手法でフォールバック）
+// Bizreach 星ボタンを実際にクリックする（API応答を待ってポーリングでチェック）
 async function clickBizreachStar(starBtn) {
   const innerToggle = starBtn.querySelector('b-ui-icon-toggle') || starBtn;
   const innerIcon   = innerToggle.querySelector('b-ui-icon') || innerToggle;
-  const opts = { bubbles: true, cancelable: true, composed: true, view: window, button: 0, buttons: 1 };
+  const opts = { bubbles: true, cancelable: true, composed: true, view: window, button: 0, buttons: 0 };
 
-  // 手法1: 最内部要素に対してポインター→マウス→クリックの完全シーケンス
-  innerIcon.dispatchEvent(new PointerEvent('pointerover',  {...opts, buttons: 0}));
-  innerIcon.dispatchEvent(new MouseEvent  ('mouseover',    {...opts, buttons: 0}));
-  innerIcon.dispatchEvent(new PointerEvent('pointerdown',  opts));
-  innerIcon.dispatchEvent(new MouseEvent  ('mousedown',    opts));
-  await sleep(30);
-  innerIcon.dispatchEvent(new PointerEvent('pointerup',    {...opts, buttons: 0}));
-  innerIcon.dispatchEvent(new MouseEvent  ('mouseup',      {...opts, buttons: 0}));
-  innerIcon.dispatchEvent(new MouseEvent  ('click',        {...opts, buttons: 0}));
-  await sleep(500);
-  if (isBizreachStarred(starBtn)) return true;
+  // クリック後にポーリングで starred を確認（API応答が遅い場合に対応）
+  async function pollStarred(maxMs = 3000) {
+    const end = Date.now() + maxMs;
+    while (Date.now() < end) {
+      if (isBizreachStarred(starBtn)) return true;
+      await sleep(300);
+    }
+    return false;
+  }
 
-  // 手法2: b-ui-icon-toggle に直接クリック
-  innerToggle.dispatchEvent(new MouseEvent('click', {...opts, buttons: 0}));
-  await sleep(500);
-  if (isBizreachStarred(starBtn)) return true;
+  // 手法1: b-ui-icon（最内部）にポインター→マウス→クリック完全シーケンス
+  const downOpts = {...opts, buttons: 1};
+  innerIcon.dispatchEvent(new PointerEvent('pointerover', opts));
+  innerIcon.dispatchEvent(new MouseEvent  ('mouseover',   opts));
+  innerIcon.dispatchEvent(new PointerEvent('pointerdown', downOpts));
+  innerIcon.dispatchEvent(new MouseEvent  ('mousedown',   downOpts));
+  await sleep(50);
+  innerIcon.dispatchEvent(new PointerEvent('pointerup',   opts));
+  innerIcon.dispatchEvent(new MouseEvent  ('mouseup',     opts));
+  innerIcon.dispatchEvent(new MouseEvent  ('click',       opts));
+  if (await pollStarred(3000)) return true;
 
-  // 手法3: ess-star-icon-toggle 自体をクリック
-  starBtn.dispatchEvent(new MouseEvent('click', {...opts, buttons: 0}));
-  await sleep(500);
-  if (isBizreachStarred(starBtn)) return true;
+  // 手法2: b-ui-icon-toggle に click（手法1が無効だった場合のみ試す）
+  innerToggle.dispatchEvent(new MouseEvent('click', opts));
+  if (await pollStarred(3000)) return true;
 
-  // 手法4: Angular ng.getComponent() API（開発モードや DevTools 有効時）
+  // 手法3: ess-star-icon-toggle 自体に click
+  starBtn.dispatchEvent(new MouseEvent('click', opts));
+  if (await pollStarred(3000)) return true;
+
+  // 手法4: Angular ng.getComponent() API
   try {
     const ngApi = window.ng;
     if (ngApi) {
       for (const el of [innerToggle, starBtn]) {
         const comp = ngApi.getComponent?.(el);
         if (!comp) continue;
-        if (typeof comp.toggle   === 'function') { comp.toggle();    }
-        else if (typeof comp.onClick === 'function') { comp.onClick(); }
-        else { comp.checked = true; }
+        if (typeof comp.toggle   === 'function') comp.toggle();
+        else if (typeof comp.onClick === 'function') comp.onClick();
+        else comp.checked = true;
         ngApi.applyChanges?.(el);
-        await sleep(400);
-        if (isBizreachStarred(starBtn)) return true;
+        if (await pollStarred(2000)) return true;
       }
     }
   } catch (_) {}
 
-  // 手法5: 内部 button/a 要素を探してクリック
+  // 手法5: 内部 button/a 要素
   const innerBtn = starBtn.querySelector('button,[role="button"],a');
   if (innerBtn) {
     innerBtn.click();
-    await sleep(500);
-    if (isBizreachStarred(starBtn)) return true;
+    if (await pollStarred(2000)) return true;
   }
 
-  console.warn('[Snow-we] 星クリック全手法失敗');
+  console.warn('[Snow-we] 星クリック全手法失敗（isTrusted制限またはAPI拒否の可能性）');
   return false;
 }
 
