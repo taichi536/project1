@@ -1873,7 +1873,7 @@ function removeNonProfileSections(text) {
   // マーカーが先頭200文字以内に現れる場合の判断：
   //   テキスト全体にプロフィールキーワード(≥2個)あり → タブラベル（スキップ）
   //   なし → パネル全体がスカウト履歴 → 空を返す
-  const profileKws = ['職務経歴', '職歴', 'スキル', '学歴', '業務内容', '自己PR', '資格', '転職理由', '経験', '担当'];
+  const profileKws = ['職務経歴', '職歴', 'スキル', '学歴', '業務内容', '自己PR', '資格', '転職理由'];
   // 全文でのキーワード数を先に計算（ループ内で再利用）
   const totalKwHits = profileKws.filter(kw => text.includes(kw)).length;
   let cutIdx = text.length;
