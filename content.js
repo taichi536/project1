@@ -1109,17 +1109,20 @@ async function getFullProfile(cardEl, fallbackText) {
       panel = findBizreachDetailPanel();
     }
 
-    let bizResult = fallbackText.substring(0, 900);
+    // カードテキストは年収・学歴・会社名などを含むため常に先頭に含める
+    const cardSummary = fallbackText.substring(0, 600);
+    let bizResult = cardSummary;
     if (panel) {
-      const full = extractMainText(panel, 5000);
+      const full = extractMainText(panel, 4400);
       if (full.length > 200) {
-        bizResult = full;
-        console.log('[Snow-we] Bizreachプロフィール取得成功:', full.length, '文字');
+        // カードテキスト（年収・学歴等）＋パネル詳細テキストを結合
+        bizResult = cardSummary + '\n---\n' + full;
+        console.log('[Snow-we] Bizreachプロフィール取得成功:', full.length, '文字（カード+パネル結合）');
       } else {
-        console.warn('[Snow-we] Bizreachパネルテキスト不足 → カードテキストで代替:', full.length, '文字');
+        console.warn('[Snow-we] Bizreachパネルテキスト不足 → カードテキストのみ:', full.length, '文字');
       }
     } else {
-      console.warn('[Snow-we] Bizreach右パネル未検出 → カードテキストで代替');
+      console.warn('[Snow-we] Bizreach右パネル未検出 → カードテキストのみ');
     }
 
     // Escapeキーでパネルを閉じてスクロール位置を復元
