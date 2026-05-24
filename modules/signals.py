@@ -246,14 +246,17 @@ def signal_grade(weighted_pct: float, verdict: str, adx_confirmed_down: bool, si
     if verdict == "買い":
         if weighted_pct >= 0.55 and not sideways:
             return "S級シグナル", "#26a69a"
-        elif weighted_pct >= 0.40:
+        # 横ばい市場ではoverall_signalの閾値(0.52)に合わせてA級も引き上げ
+        a_buy = 0.52 if sideways else 0.40
+        if weighted_pct >= a_buy:
             return "A級シグナル", "#4caf50"
         else:
             return "B級シグナル", "#ffd54f"
     elif verdict == "売り":
         if weighted_pct <= -0.55:
             return "S級シグナル", "#ef5350"
-        elif weighted_pct <= -0.40:
+        a_sell = -0.52 if sideways else -0.40
+        if weighted_pct <= a_sell:
             return "A級シグナル", "#ff7043"
         else:
             return "B級シグナル", "#ffd54f"

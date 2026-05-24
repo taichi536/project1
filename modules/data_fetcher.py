@@ -6,7 +6,13 @@ import os
 import time
 from pathlib import Path
 from datetime import datetime, timedelta
-import streamlit as st
+try:
+    import streamlit as st
+    def _st_cache(ttl: int):
+        return st.cache_data(ttl=ttl, show_spinner=False)
+except ImportError:
+    def _st_cache(ttl: int):  # type: ignore
+        return lambda f: f
 
 
 # ── USD/JPY 為替レートキャッシュ ─────────────────────────────────────────────
@@ -296,7 +302,7 @@ def fetch_realtime_price(ticker: str) -> dict:
     return result
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@_st_cache(ttl=300)
 def fetch_ohlcv(ticker: str, period: str = "6mo", interval: str = "1d") -> pd.DataFrame:
     t = normalize_ticker(ticker)
 
@@ -340,7 +346,7 @@ def fetch_ohlcv(ticker: str, period: str = "6mo", interval: str = "1d") -> pd.Da
     return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@_st_cache(ttl=3600)
 def fetch_earnings_date(ticker: str) -> dict:
     """次の決算発表日と残り日数を返す"""
     try:
@@ -362,7 +368,7 @@ def fetch_earnings_date(ticker: str) -> dict:
     return {"date": None, "days_until": None}
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@_st_cache(ttl=3600)
 def fetch_info(ticker: str) -> dict:
     t = normalize_ticker(ticker)
     return yf.Ticker(t).info

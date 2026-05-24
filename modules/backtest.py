@@ -70,9 +70,9 @@ def _actual_signals(df: pd.DataFrame, sma_short: int, sma_long: int) -> pd.Serie
     for i in range(len(df)):
         if i < min_rows:
             continue
-        # evaluate_signals/overall_signal はどちらも最終2行しか参照しないため
-        # フルスライスではなく末尾2行のみ渡す（O(n²) → O(1)に改善）
-        slice_df = df.iloc[i - 1: i + 1]
+        # OBVは直近10行以上が必要（len(obv_series) >= 10 ガード）。
+        # 15行渡すことでOBVを含む全指標を正しく評価しつつ O(n) を維持する。
+        slice_df = df.iloc[max(0, i - 14): i + 1]
         try:
             sigs = evaluate_signals(slice_df, sma_short=sma_short, sma_long=sma_long)
             verdict, _ = overall_signal(sigs, df=slice_df, sma_long=sma_long)
@@ -166,8 +166,8 @@ def run_backtest(
             shares = 0
             position = 0
 
-        # 買いシグナル
-        if sig == 1 and position == 0 and cash > price * (1 + fee_rate):
+        # 買いシグナル（損切り・利確直後の同バー再エントリーを防ぐため elif）
+        elif sig == 1 and position == 0 and cash > price * (1 + fee_rate):
             shares = int(cash * position_pct / (price * (1 + fee_rate)))
             if shares > 0:
                 entry_cost = shares * price * (1 + fee_rate)
@@ -224,7 +224,7 @@ def run_backtest(
 
     # 勝率
     if not trades_df.empty:
-        sell_trades = trades_df[trades_df["種別"].isin(["売り", "損切り売"])]
+        sell_trades = trades_df[trades_df["種別"].isin(["売り", "損切り売", "利確売"])]
         win_rate = (sell_trades["損益"] > 0).mean() * 100 if len(sell_trades) > 0 else 0
         total_trades = len(sell_trades)
     else:
