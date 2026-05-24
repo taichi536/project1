@@ -919,6 +919,14 @@ async function triggerAutoAdd() {
       continue;
     }
 
+    // 短期在籍チェック：過去職歴に2年未満の在籍がある場合は即NG確定
+    if (checkShortTenureNG(profileText)) {
+      setBatchBadge(el, 'ng', '❌ 見送り(短期在籍)');
+      totalProcessed++;
+      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+      continue;
+    }
+
     // ─── AI判定（1人ずつ）───
     setBatchBadge(el, 'checking', '🤖 判定中...');
     showAutoStatus(`🤖 ${pending.length + 1}人目 AI判定中... ✅${addedCount}人追加`);
@@ -1413,6 +1421,43 @@ function checkIncomeNG(profileText) {
     console.log(`[Snow-we] 年収NG: ${age}歳 ${income}万 < 閾値${threshold}万 (${isIT ? 'IT' : '文系'})`);
     return 'NG';
   }
+  return null;
+}
+
+// 在籍期間チェック：過去職歴に2年（24ヶ月）未満の在籍がある場合NG
+// 現在進行中（〜現在 / 在籍中）のマッチはスキップして誤判定を防ぐ
+function checkShortTenureNG(profileText) {
+  if (!profileText) return null;
+
+  // マッチ位置の前150文字に「現在」「在籍中」があれば現職 → スキップ
+  function isCurrentJob(idx) {
+    const before = profileText.slice(Math.max(0, idx - 150), idx);
+    return before.includes('現在') || before.includes('在籍中');
+  }
+
+  // パターン1: （X年）または（X年Yヶ月）
+  const yearPat = /[（(](\d+)年(?:(\d+)ヶ月)?[）)]/g;
+  let m;
+  while ((m = yearPat.exec(profileText)) !== null) {
+    if (isCurrentJob(m.index)) continue;
+    const total = parseInt(m[1], 10) * 12 + parseInt(m[2] || '0', 10);
+    if (total > 0 && total < 24) {
+      console.log(`[Snow-we] 短期在籍NG: ${m[1]}年${m[2] || 0}ヶ月 = ${total}ヶ月`);
+      return 'NG';
+    }
+  }
+
+  // パターン2: （Xヶ月）のみ（年なし）
+  const monthPat = /[（(](\d+)ヶ月[）)]/g;
+  while ((m = monthPat.exec(profileText)) !== null) {
+    if (isCurrentJob(m.index)) continue;
+    const total = parseInt(m[1], 10);
+    if (total > 0 && total < 24) {
+      console.log(`[Snow-we] 短期在籍NG: ${total}ヶ月`);
+      return 'NG';
+    }
+  }
+
   return null;
 }
 
