@@ -175,9 +175,21 @@ function findCandidateCardsByPlatform() {
 // -------------------------------------------------------
 function highlightAddButton(cardEl) {
   const platform = getPlatform();
+  // Bizreach: 星ボタンをハイライト
+  if (platform === 'bizreach') {
+    const btn = findBizreachStarButton(cardEl);
+    if (!btn) return;
+    btn.classList.add('snow-we-btn-highlight');
+    if (getComputedStyle(btn).position === 'static') btn.style.position = 'relative';
+    const tip = document.createElement('span');
+    tip.className = 'snow-we-btn-tip';
+    tip.textContent = '★';
+    btn.appendChild(tip);
+    return;
+  }
+
   const btnTextMap = {
     ambi:     'この検討人材リストに追加',
-    bizreach: 'ラベル',
     dodax:    'タグ',
     rds:      '検討中リスト追加',
   };
@@ -1061,14 +1073,34 @@ async function fetchProfilePage(url) {
   }
 }
 
+// Bizreach の星ボタン（bui-button--icon-only で b-ui-icon を含まないもの）を返す
+function findBizreachStarButton(cardEl) {
+  const roots = [cardEl, cardEl.parentElement, cardEl.closest('li,tr,article,[class*="row"]')].filter(Boolean);
+  for (const root of roots) {
+    const btn = Array.from(root.querySelectorAll('button.bui-button--icon-only'))
+      .find(el => !el.querySelector('b-ui-icon'));
+    if (btn) return btn;
+  }
+  return null;
+}
+
 // 候補者カードの追加ボタンを探してクリックする
 async function clickAddButton(cardEl, tagName) {
   const platform = getPlatform();
+
+  // Bizreach: 星ボタンを直接クリック（ダイアログなし）
+  if (platform === 'bizreach') {
+    const starBtn = findBizreachStarButton(cardEl);
+    if (!starBtn) return false;
+    if (starBtn.classList.contains('bui-state-active')) return false; // すでにスター済み
+    starBtn.click();
+    return true;
+  }
+
   const labelMap = {
     rds:      '検討中リスト追加',
     ambi:     'この検討人材リストに追加',
     dodax:    'タグ',
-    bizreach: 'ラベル',
     green:    '気になる',
     mynavi:   '検討リスト',
   };
@@ -1106,21 +1138,6 @@ async function handleAddDialog(tagName) {
   });
 
   for (const dialog of dialogs) {
-    // Bizreach: チェックボックスリストからラベル名で検索してクリック
-    if (getPlatform() === 'bizreach' && tagName) {
-      const items = Array.from(dialog.querySelectorAll('label, li, [class*="item"], [class*="label"]'));
-      const target = items.find(el => (el.innerText || '').trim().includes(tagName));
-      if (target) {
-        const cb = target.querySelector('input[type="checkbox"]');
-        if (cb) { cb.click(); } else { target.click(); }
-        await sleep(400);
-        // 「閉じる」または確定ボタンをクリック
-        const closeBtn = Array.from(dialog.querySelectorAll('button,a')).find(b => ['閉じる','完了','保存'].includes((b.innerText || '').trim()));
-        if (closeBtn) closeBtn.click();
-        return;
-      }
-    }
-
     // タグ入力欄があれば入力する（他媒体）
     if (tagName) {
       const input = dialog.querySelector('input[type="text"],input:not([type]),textarea');
