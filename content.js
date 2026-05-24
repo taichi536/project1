@@ -1055,7 +1055,7 @@ async function fetchProfilePage(url) {
       best = (doc.body?.innerText || doc.body?.textContent || '').trim();
     }
 
-    return best.replace(/\s+/g, ' ').trim().substring(0, 3000);
+    return best.replace(/\s+/g, ' ').trim().substring(0, 5000);
   } catch {
     return null;
   }
