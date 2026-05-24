@@ -333,18 +333,19 @@ function scoutStatus(history, candidateId) {
 function getCandidateId(cardEl) {
   // Bizreach: cardEl が ess-resume-list-item 自身（新セレクタ）または祖先に持つ場合
   if (getPlatform() === 'bizreach') {
-    // 直接 id を持つ場合（ess-resume-list-item を直接選択した場合）
+    // 直接 id を持つ場合
     if (cardEl.id && cardEl.id.startsWith('resume-')) return `bizreach_${cardEl.id}`;
-    // 祖先に ess-resume-list-item がある場合（旧フォールバック）
-    let el = cardEl;
-    for (let i = 0; i < 12; i++) {
+    // 子要素の bui-drawer-trigger に id がある（実際のBizreach構造）
+    const drawer = cardEl.querySelector('bui-drawer-trigger[id^="resume-"]');
+    if (drawer?.id) return `bizreach_${drawer.id}`;
+    // 祖先を探す（念のため）
+    let el = cardEl.parentElement;
+    for (let i = 0; i < 8; i++) {
       if (!el) break;
-      if (el.tagName?.toLowerCase() === 'ess-resume-list-item' && el.id) {
-        return `bizreach_${el.id}`;
-      }
+      if (el.id?.startsWith('resume-')) return `bizreach_${el.id}`;
       el = el.parentElement;
     }
-    // id がない場合はカードテキストの先頭行フィンガープリントを使う（重複処理防止）
+    // フォールバック：カードテキストのフィンガープリント
     const fpLines = (cardEl.innerText || '').split('\n').map(l => l.trim()).filter(l => l.length > 3);
     const fp = fpLines.slice(0, 8).join('|');
     if (fp.length > 20) return `bizreach_fp_${simpleHash(fp)}`;
