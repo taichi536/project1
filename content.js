@@ -1125,25 +1125,88 @@ function findBizreachStarButton(cardEl) {
 }
 
 // Bizreach の星ボタンが既スター済みかどうかを返す
+// Angular は JS property を更新する（attribute は初期値のみ反映のことがある）
 function isBizreachStarred(starEl) {
   const toggle = starEl.querySelector('b-ui-icon-toggle') || starEl;
+  // JS property を優先
+  if (toggle.checked === true)  return true;
+  if (toggle.checked === false) return false;
+  // フォールバック：HTML attribute
   return toggle.getAttribute('checked') === 'true';
+}
+
+// Bizreach 星ボタンを実際にクリックする（複数手法でフォールバック）
+async function clickBizreachStar(starBtn) {
+  const innerToggle = starBtn.querySelector('b-ui-icon-toggle') || starBtn;
+  const innerIcon   = innerToggle.querySelector('b-ui-icon') || innerToggle;
+  const opts = { bubbles: true, cancelable: true, composed: true, view: window, button: 0, buttons: 1 };
+
+  // 手法1: 最内部要素に対してポインター→マウス→クリックの完全シーケンス
+  innerIcon.dispatchEvent(new PointerEvent('pointerover',  {...opts, buttons: 0}));
+  innerIcon.dispatchEvent(new MouseEvent  ('mouseover',    {...opts, buttons: 0}));
+  innerIcon.dispatchEvent(new PointerEvent('pointerdown',  opts));
+  innerIcon.dispatchEvent(new MouseEvent  ('mousedown',    opts));
+  await sleep(30);
+  innerIcon.dispatchEvent(new PointerEvent('pointerup',    {...opts, buttons: 0}));
+  innerIcon.dispatchEvent(new MouseEvent  ('mouseup',      {...opts, buttons: 0}));
+  innerIcon.dispatchEvent(new MouseEvent  ('click',        {...opts, buttons: 0}));
+  await sleep(500);
+  if (isBizreachStarred(starBtn)) return true;
+
+  // 手法2: b-ui-icon-toggle に直接クリック
+  innerToggle.dispatchEvent(new MouseEvent('click', {...opts, buttons: 0}));
+  await sleep(500);
+  if (isBizreachStarred(starBtn)) return true;
+
+  // 手法3: ess-star-icon-toggle 自体をクリック
+  starBtn.dispatchEvent(new MouseEvent('click', {...opts, buttons: 0}));
+  await sleep(500);
+  if (isBizreachStarred(starBtn)) return true;
+
+  // 手法4: Angular ng.getComponent() API（開発モードや DevTools 有効時）
+  try {
+    const ngApi = window.ng;
+    if (ngApi) {
+      for (const el of [innerToggle, starBtn]) {
+        const comp = ngApi.getComponent?.(el);
+        if (!comp) continue;
+        if (typeof comp.toggle   === 'function') { comp.toggle();    }
+        else if (typeof comp.onClick === 'function') { comp.onClick(); }
+        else { comp.checked = true; }
+        ngApi.applyChanges?.(el);
+        await sleep(400);
+        if (isBizreachStarred(starBtn)) return true;
+      }
+    }
+  } catch (_) {}
+
+  // 手法5: 内部 button/a 要素を探してクリック
+  const innerBtn = starBtn.querySelector('button,[role="button"],a');
+  if (innerBtn) {
+    innerBtn.click();
+    await sleep(500);
+    if (isBizreachStarred(starBtn)) return true;
+  }
+
+  console.warn('[Snow-we] 星クリック全手法失敗');
+  return false;
 }
 
 // 候補者カードの追加ボタンを探してクリックする
 async function clickAddButton(cardEl, tagName) {
   const platform = getPlatform();
 
-  // Bizreach: 星ボタン（ess-star-icon-toggle > b-ui-icon-toggle）を直接クリック
+  // Bizreach: 星ボタン（ess-star-icon-toggle > b-ui-icon-toggle）
   if (platform === 'bizreach') {
     const starBtn = findBizreachStarButton(cardEl);
     if (!starBtn) return false;
-    if (isBizreachStarred(starBtn)) return false; // すでにスター済み
-    // Angularコンポーネントには内部のb-ui-icon-toggleをクリックする方が確実
-    const innerToggle = starBtn.querySelector('b-ui-icon-toggle') || starBtn;
-    innerToggle.click();
-    await sleep(300);
-    return true;
+    if (isBizreachStarred(starBtn)) {
+      console.log('[Snow-we] すでにスター済み、スキップ');
+      return false;
+    }
+    const result = await clickBizreachStar(starBtn);
+    console.log('[Snow-we] 星クリック結果:', result, '/ checked後:', isBizreachStarred(starBtn));
+    return result;
   }
 
   const labelMap = {
