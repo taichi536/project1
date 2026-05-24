@@ -956,12 +956,12 @@ async function getFullProfile(cardEl, fallbackText) {
     await tryClickRDSResumeTab();
     const panel = findRDSDetailPanel();
     if (panel) {
-      const full = removeNonProfileSections(extractMainText(panel, 3000));
+      const full = removeNonProfileSections(extractMainText(panel, 5000));
       if (full.length > 200) return full;
       // まだ短い場合は強制的にタブ切り替えを再試行
       const switched = await forceClickRDSResumeTab();
       if (switched) {
-        const full2 = removeNonProfileSections(extractMainText(findRDSDetailPanel(), 3000));
+        const full2 = removeNonProfileSections(extractMainText(findRDSDetailPanel(), 5000));
         if (full2.length > 200) return full2;
       }
     }
@@ -974,7 +974,7 @@ async function getFullProfile(cardEl, fallbackText) {
     await sleep(1200);
     const panel = findBizreachDetailPanel();
     if (panel) {
-      const full = extractMainText(panel, 3000);
+      const full = extractMainText(panel, 5000);
       if (full.length > 200) return full;
     }
     return fallbackText.substring(0, 900);
