@@ -1109,15 +1109,18 @@ async function fetchProfilePage(url) {
 
 // Bizreach の星ボタン（ess-star-icon-toggle）をカード要素から探して返す
 function findBizreachStarButton(cardEl) {
-  // candidate-list-item-content の親→ ess-resume-list-item → b-ui-virtual-scroll-item の順で探す
-  const roots = [
-    cardEl.parentElement,
-    cardEl.closest('ess-resume-list-item, b-ui-cassette-content, b-ui-virtual-scroll-item'),
-  ].filter(Boolean);
-  for (const root of roots) {
-    const toggle = root.querySelector('ess-star-icon-toggle');
-    if (toggle) return toggle;
+  // 自身から最大6段階上の親まで順番にquerySelectorで探す
+  let el = cardEl;
+  for (let i = 0; i < 6; i++) {
+    if (!el) break;
+    const star = el.querySelector('ess-star-icon-toggle');
+    if (star) {
+      console.log('[Snow-we] 星ボタン発見 深さ', i, el.tagName);
+      return star;
+    }
+    el = el.parentElement;
   }
+  console.warn('[Snow-we] 星ボタン未発見 cardEl:', cardEl?.tagName, cardEl?.className?.substring(0, 40));
   return null;
 }
 
