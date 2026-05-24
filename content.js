@@ -1100,13 +1100,26 @@ async function getFullProfile(cardEl, fallbackText) {
     // ess-resume-list-item の内側にある実際のコンテンツ要素をクリック
     const clickTarget = cardEl.querySelector('.candidate-list-item-content, b-ui-cassette-content, [class*="cassette-content"], [class*="resume-item"]') || cardEl;
     clickTarget.click();
-    await sleep(1200);
+    await sleep(1800); // Angular ルーティング完了まで待機
 
-    const panel = findBizreachDetailPanel();
+    let panel = findBizreachDetailPanel();
+    // パネルが見つからない場合は追加で待機して再試行
+    if (!panel) {
+      await sleep(1000);
+      panel = findBizreachDetailPanel();
+    }
+
     let bizResult = fallbackText.substring(0, 900);
     if (panel) {
       const full = extractMainText(panel, 5000);
-      if (full.length > 200) bizResult = full;
+      if (full.length > 200) {
+        bizResult = full;
+        console.log('[Snow-we] Bizreachプロフィール取得成功:', full.length, '文字');
+      } else {
+        console.warn('[Snow-we] Bizreachパネルテキスト不足 → カードテキストで代替:', full.length, '文字');
+      }
+    } else {
+      console.warn('[Snow-we] Bizreach右パネル未検出 → カードテキストで代替');
     }
 
     // Escapeキーでパネルを閉じてスクロール位置を復元
