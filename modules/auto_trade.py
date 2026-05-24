@@ -95,6 +95,11 @@ class AutoTrader:
         if not self.is_enabled():
             return None
 
+        from modules.market_utils import is_tradeable
+        tradeable, reason = is_tradeable(ticker)
+        if not tradeable:
+            return {"status": "skipped", "message": reason}
+
         if not self.broker.is_connected():
             return {"status": "error", "message": "ブローカーに接続できません"}
 
