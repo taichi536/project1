@@ -849,7 +849,10 @@ async function triggerAutoAdd() {
   // 再帰呼び出し時に前バッチの候補者を再処理しないための dedup
   const BATCH_SESSION_KEY = 'snowWeBatchProcessed';
   const isFreshStart = !progress.running; // running=true なら再帰呼び出し
-  if (isFreshStart) sessionStorage.removeItem(BATCH_SESSION_KEY);
+  if (isFreshStart) {
+    sessionStorage.removeItem(BATCH_SESSION_KEY);
+    sessionStorage.removeItem('snowWeBizreachStarred');
+  }
   let batchProcessed;
   try {
     batchProcessed = new Set(JSON.parse(sessionStorage.getItem(BATCH_SESSION_KEY) || '[]'));
@@ -1364,9 +1367,24 @@ async function clickAddButton(cardEl, tagName) {
     // APIを直接呼び出す（最優先）
     const resumeNumericId = getBizreachResumeNumericId(cardEl);
     if (resumeNumericId) {
+      // セッション内で既にスター済み（別DOM要素での重複防止）
+      let starredIds;
+      try { starredIds = new Set(JSON.parse(sessionStorage.getItem('snowWeBizreachStarred') || '[]')); }
+      catch (_) { starredIds = new Set(); }
+      if (starredIds.has(resumeNumericId)) {
+        console.log('[Snow-we] セッション内スター済みスキップ:', resumeNumericId);
+        const toggle = starBtn.querySelector('b-ui-icon-toggle') || starBtn;
+        toggle.setAttribute('checked', 'true');
+        return false;
+      }
       const apiOk = await callBizreachFavoriteApi(resumeNumericId);
       if (apiOk) {
         console.log('[Snow-we] APIで星追加成功:', resumeNumericId);
+        // DOM星状態を更新（Angularをバイパスしているため手動で反映）
+        const toggle = starBtn.querySelector('b-ui-icon-toggle') || starBtn;
+        toggle.setAttribute('checked', 'true');
+        starredIds.add(resumeNumericId);
+        try { sessionStorage.setItem('snowWeBizreachStarred', JSON.stringify([...starredIds])); } catch (_) {}
         return true;
       }
     }
