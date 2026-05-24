@@ -344,7 +344,10 @@ function getCandidateId(cardEl) {
       }
       el = el.parentElement;
     }
-    // Bizreach では fingerprint fallback は衝突するため使わない → null を返す
+    // id がない場合はカードテキストの先頭行フィンガープリントを使う（重複処理防止）
+    const fpLines = (cardEl.innerText || '').split('\n').map(l => l.trim()).filter(l => l.length > 3);
+    const fp = fpLines.slice(0, 8).join('|');
+    if (fp.length > 20) return `bizreach_fp_${simpleHash(fp)}`;
     return null;
   }
 
@@ -976,8 +979,8 @@ async function triggerAutoAdd() {
       || document.querySelector('cdk-virtual-scroll-viewport');
     if (viewport) {
       const prevTop = viewport.scrollTop;
-      // ビューポート高さ分スクロール（過大スクロールによるスキップを防ぐ）
-      const scrollBy = viewport.clientHeight || 800;
+      // 70%分スクロール（バッチ境界の隙間を防ぐため30%のオーバーラップを確保）
+      const scrollBy = Math.floor((viewport.clientHeight || 800) * 0.7);
       viewport.scrollTop += scrollBy;
       await sleep(1000); // Angular CDK のレンダリング待機
       if (viewport.scrollTop > prevTop + 50) {
@@ -1740,14 +1743,26 @@ function buildCriteriaText(criteria, platform) {
   lines.push(`- 学歴: 問わない（高卒以上OK、スキル重視）`);
   lines.push(`- 転職回数: 20代最大3社、30代最大4社、40代最大5社。1社の在籍が1年未満の場合は注意`);
 
-  lines.push(`\n【判定方針】`);
-  lines.push(`以下の順番で判定すること：`);
-  lines.push(`1. 絶対NG条件（アクセンチュア・ベイカレント・秘書・保守運用のみ）に該当する → 即NG`);
-  lines.push(`2. 年収が明記されており基準を明確に下回る → NG`);
-  lines.push(`3. 在籍期間基準に明確に違反している → NG`);
-  lines.push(`4. 上記1〜3のいずれにも該当しない場合 → 必ずOKとすること（学歴・社格・その他で迷ってもOK）`);
-  lines.push(`5. 年収・在籍期間が不明で判断できない場合のみ「要確認」`);
-  lines.push(`※上記1〜3以外の理由でNGにしてはいけない`);
+  if (isBizreach) {
+    lines.push(`\n【Bizreach判定方針（厳格・上記Bizreach専用基準と合わせて適用）】`);
+    lines.push(`以下の順番で判定すること：`);
+    lines.push(`1. 絶対NG条件（アクセンチュア・ベイカレント・秘書・保守運用のみ）に該当する → 即NG`);
+    lines.push(`2. 社格・学歴・年収の3条件をそれぞれ確認する`);
+    lines.push(`3. いずれか1つでも明確にNG（中小企業・無名企業・基準学歴未満・年収基準未達）→ NG`);
+    lines.push(`4. 3条件すべてが明確にOK → OK`);
+    lines.push(`5. いずれかの条件が不明・読み取れない → NG（迷う場合は必ずNG）`);
+    lines.push(`※「要確認」は絶対に使用しないこと。必ずOKかNGのいずれかを返すこと`);
+    lines.push(`※学歴・社格が基準を満たさない場合は年収に関わらずNG`);
+  } else {
+    lines.push(`\n【判定方針】`);
+    lines.push(`以下の順番で判定すること：`);
+    lines.push(`1. 絶対NG条件（アクセンチュア・ベイカレント・秘書・保守運用のみ）に該当する → 即NG`);
+    lines.push(`2. 年収が明記されており基準を明確に下回る → NG`);
+    lines.push(`3. 在籍期間基準に明確に違反している → NG`);
+    lines.push(`4. 上記1〜3のいずれにも該当しない場合 → 必ずOKとすること（学歴・社格・その他で迷ってもOK）`);
+    lines.push(`5. 年収・在籍期間が不明で判断できない場合のみ「要確認」`);
+    lines.push(`※上記1〜3以外の理由でNGにしてはいけない`);
+  }
 
   // 追加条件（設定タブで入力された場合）
   const ai = criteria.ageIncome || {};
