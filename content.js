@@ -1057,19 +1057,29 @@ async function getFullProfile(cardEl, fallbackText) {
 
   // Bizreach: カードクリックで右パネルが開くので読んだ後に閉じる
   if (platform === 'bizreach') {
+    // クリック前にスクロール位置を保存（Angular ルーティングで位置がズレるため）
+    const viewport = document.querySelector('cdk-virtual-scroll-viewport');
+    const savedTop = viewport ? viewport.scrollTop : 0;
+
     // ess-resume-list-item の内側にある実際のコンテンツ要素をクリック
     const clickTarget = cardEl.querySelector('.candidate-list-item-content, b-ui-cassette-content, [class*="cassette-content"], [class*="resume-item"]') || cardEl;
     clickTarget.click();
     await sleep(1200);
+
     const panel = findBizreachDetailPanel();
     let bizResult = fallbackText.substring(0, 900);
     if (panel) {
       const full = extractMainText(panel, 5000);
       if (full.length > 200) bizResult = full;
     }
-    // Escapeキーでパネルを閉じる
+
+    // Escapeキーでパネルを閉じてスクロール位置を復元
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
-    await sleep(400);
+    await sleep(500);
+    if (viewport && Math.abs(viewport.scrollTop - savedTop) > 30) {
+      viewport.scrollTop = savedTop;
+      await sleep(300);
+    }
     return bizResult;
   }
 
