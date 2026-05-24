@@ -1295,11 +1295,46 @@ async function clickBizreachStar(starBtn) {
   return false;
 }
 
+// Bizreach カード要素から resume の数値IDを取得する
+function getBizreachResumeNumericId(cardEl) {
+  let el = cardEl;
+  for (let i = 0; i < 8; i++) {
+    if (!el) break;
+    const m = el.id?.match(/^resume-(\d+)$/);
+    if (m) return m[1];
+    el = el.parentElement;
+  }
+  return null;
+}
+
+// Bizreach お気に入りAPIを直接呼び出す（isTrusted 制限を回避）
+async function callBizreachFavoriteApi(resumeNumericId) {
+  if (!resumeNumericId) return false;
+  let xsrfToken = '';
+  for (const part of document.cookie.split(';')) {
+    const [k, ...vParts] = part.trim().split('=');
+    if (k === 'XSRF-TOKEN') { xsrfToken = decodeURIComponent(vParts.join('=')); break; }
+  }
+  const headers = { 'Content-Type': 'application/json' };
+  if (xsrfToken) headers['X-XSRF-TOKEN'] = xsrfToken;
+  try {
+    const res = await fetch(
+      `${location.origin}/v1/api/resume-favorite/${resumeNumericId}`,
+      { method: 'PUT', credentials: 'include', headers }
+    );
+    console.log('[Snow-we] お気に入りAPI:', res.status, resumeNumericId);
+    return res.status === 204 || res.status === 200 || res.ok;
+  } catch (e) {
+    console.warn('[Snow-we] お気に入りAPI失敗:', e.message);
+    return false;
+  }
+}
+
 // 候補者カードの追加ボタンを探してクリックする
 async function clickAddButton(cardEl, tagName) {
   const platform = getPlatform();
 
-  // Bizreach: 星ボタン（ess-star-icon-toggle > b-ui-icon-toggle）
+  // Bizreach: お気に入りAPIを直接呼び出す（合成イベントの isTrusted 制限を回避）
   if (platform === 'bizreach') {
     const starBtn = findBizreachStarButton(cardEl);
     if (!starBtn) return false;
@@ -1307,6 +1342,16 @@ async function clickAddButton(cardEl, tagName) {
       console.log('[Snow-we] すでにスター済み、スキップ');
       return false;
     }
+    // APIを直接呼び出す（最優先）
+    const resumeNumericId = getBizreachResumeNumericId(cardEl);
+    if (resumeNumericId) {
+      const apiOk = await callBizreachFavoriteApi(resumeNumericId);
+      if (apiOk) {
+        console.log('[Snow-we] APIで星追加成功:', resumeNumericId);
+        return true;
+      }
+    }
+    // APIが失敗した場合は合成イベントにフォールバック
     const result = await clickBizreachStar(starBtn);
     console.log('[Snow-we] 星クリック結果:', result, '/ checked後:', isBizreachStarred(starBtn));
     return result;
