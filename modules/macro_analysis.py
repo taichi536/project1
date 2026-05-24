@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 # ── リアルタイム市場指標 ────────────────────────────────────────────────────────
 _MARKET_SYMBOLS = {
     "日経平均": "^N225",
-    "TOPIX": "^TOPIX",
+    "TOPIX（1306ETF）": "1306.T",
     "S&P500": "^GSPC",
     "NASDAQ": "^IXIC",
     "USD/JPY": "USDJPY=X",
