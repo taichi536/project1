@@ -1871,23 +1871,23 @@ function removeNonProfileSections(text) {
     'ご経歴を拝見し', '採用担当者からのメッセージ', 'メッセージ履歴'
   ];
   // マーカーが先頭200文字以内に現れる場合の判断：
-  //   直後500文字にプロフィールキーワード(≥2個)あり → タブラベル（スキップ）
+  //   テキスト全体にプロフィールキーワード(≥2個)あり → タブラベル（スキップ）
   //   なし → パネル全体がスカウト履歴 → 空を返す
-  const profileKws = ['職務経歴', '職歴', 'スキル', '学歴', '業務内容', '自己PR', '資格', '転職理由'];
+  const profileKws = ['職務経歴', '職歴', 'スキル', '学歴', '業務内容', '自己PR', '資格', '転職理由', '経験', '担当'];
+  // 全文でのキーワード数を先に計算（ループ内で再利用）
+  const totalKwHits = profileKws.filter(kw => text.includes(kw)).length;
   let cutIdx = text.length;
   for (const marker of stopMarkers) {
     let idx = text.indexOf(marker);
     if (idx < 0) continue;
 
     if (idx < 200) {
-      const following = text.slice(idx + marker.length, idx + marker.length + 500);
-      const kwHits = profileKws.filter(kw => following.includes(kw)).length;
-      if (kwHits >= 2) {
-        // タブラベル: スキップして次の出現を探す
+      if (totalKwHits >= 2) {
+        // 全文にプロフィールキーワードが2個以上 → タブラベル: スキップして次の出現を探す
         idx = text.indexOf(marker, idx + marker.length);
         while (idx >= 0 && idx < 200) idx = text.indexOf(marker, idx + marker.length);
       } else {
-        // パネルがスカウト履歴そのもの → 空を返す（getProfileは「候補者未選択」エラーを返す）
+        // パネルがスカウト履歴そのもの → 空を返す
         return '';
       }
     }
@@ -2342,9 +2342,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const looksEmpty = profileText.trim().length < 50;
         // スカウト履歴タブが開いたままの場合（removeNonProfileSectionsが空を返した）
         const rdsPanel2 = isRDS ? findRDSDetailPanel() : null;
+        const rdsPanel2Text = rdsPanel2 ? (rdsPanel2.innerText || '') : '';
+        const profileKwsForPanel = ['職務経歴', '職歴', 'スキル', '学歴', '業務内容', '自己PR', '資格', '経験'];
+        const panelHasProfileContent = profileKwsForPanel.some(kw => rdsPanel2Text.includes(kw));
         const panelIsScoutHistory = isRDS && rdsPanel2
-          && (rdsPanel2.innerText || '').includes('スカウト履歴')
-          && !(rdsPanel2.innerText || '').includes('職務経歴');
+          && rdsPanel2Text.includes('スカウト履歴')
+          && !panelHasProfileContent;
 
         if (isRDS && (looksEmpty || panelIsScoutHistory)) {
           const errMsg = panelIsScoutHistory
