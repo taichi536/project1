@@ -1005,7 +1005,8 @@ async function forceClickRDSResumeTab() {
 
   const tabLabels = ['レジュメ', 'プロフィール', '基本情報', '職務経歴'];
   for (const label of tabLabels) {
-    const tab = Array.from(searchRoot.querySelectorAll('button, [role="tab"], li, a'))
+    // button/role=tab/li/a/span をパネル内限定で検索（span はタブラベルによく使われる）
+    const tab = Array.from(searchRoot.querySelectorAll('button, [role="tab"], li, span, a'))
       .find(el => {
         const t = (el.innerText || '').trim();
         return (t === label || t.startsWith(label)) && t.length < label.length + 6;
@@ -1029,7 +1030,7 @@ async function tryClickRDSResumeTab() {
 
   const tabLabels = ['レジュメ', 'プロフィール', '基本情報', '職務経歴'];
   for (const label of tabLabels) {
-    const tab = Array.from(panel.querySelectorAll('button, [role="tab"], li, a'))
+    const tab = Array.from(panel.querySelectorAll('button, [role="tab"], li, span, a'))
       .find(el => {
         const t = (el.innerText || '').trim();
         return (t === label || t.startsWith(label)) && t.length < label.length + 6;
@@ -1791,13 +1792,28 @@ function removeNonProfileSections(text) {
     'エージェントからのメッセージ', 'この度はご連絡', '貴方様のご経歴を拝見',
     'ご経歴を拝見し', '採用担当者からのメッセージ', 'メッセージ履歴'
   ];
-  // 最初の300文字以内に現れるマーカーはタブラベルと見なしてスキップ
-  // （例：詳細パネル上部の「レジュメ | スカウト履歴」タブナビゲーション）
-  const MIN_OFFSET = 300;
+  // マーカーが先頭200文字以内に現れる場合の判断：
+  //   直後500文字にプロフィールキーワード(≥2個)あり → タブラベル（スキップ）
+  //   なし → パネル全体がスカウト履歴 → 空を返す
+  const profileKws = ['職務経歴', '職歴', 'スキル', '学歴', '業務内容', '自己PR', '資格', '転職理由'];
   let cutIdx = text.length;
   for (const marker of stopMarkers) {
     let idx = text.indexOf(marker);
-    while (idx >= 0 && idx < MIN_OFFSET) idx = text.indexOf(marker, idx + marker.length);
+    if (idx < 0) continue;
+
+    if (idx < 200) {
+      const following = text.slice(idx + marker.length, idx + marker.length + 500);
+      const kwHits = profileKws.filter(kw => following.includes(kw)).length;
+      if (kwHits >= 2) {
+        // タブラベル: スキップして次の出現を探す
+        idx = text.indexOf(marker, idx + marker.length);
+        while (idx >= 0 && idx < 200) idx = text.indexOf(marker, idx + marker.length);
+      } else {
+        // パネルがスカウト履歴そのもの → 空を返す（getProfileは「候補者未選択」エラーを返す）
+        return '';
+      }
+    }
+
     if (idx >= 0 && idx < cutIdx) cutIdx = idx;
   }
   return text.substring(0, cutIdx).trim();
@@ -2244,15 +2260,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         console.log('[Snow-we] detailPanel:', panel ? `あり (${(panel.innerText||'').trim().length}文字)` : 'なし');
         console.log('[Snow-we] プロフィール先頭100文字:', profileText.substring(0, 100));
 
-        // RDSで候補者が未選択（テキストが極端に短い）場合のみ選択を促す
+        // RDSで取得できなかった場合の判定
         const looksEmpty = profileText.trim().length < 50;
+        // スカウト履歴タブが開いたままの場合（removeNonProfileSectionsが空を返した）
+        const rdsPanel2 = isRDS ? findRDSDetailPanel() : null;
+        const panelIsScoutHistory = isRDS && rdsPanel2
+          && (rdsPanel2.innerText || '').includes('スカウト履歴')
+          && !(rdsPanel2.innerText || '').includes('職務経歴');
 
-        if (isRDS && looksEmpty) {
+        if (isRDS && (looksEmpty || panelIsScoutHistory)) {
+          const errMsg = panelIsScoutHistory
+            ? 'レジュメタブを開いてから文生成してください（現在スカウト履歴タブが表示中）'
+            : '候補者が選択されていません';
           sendResponse({
             success: false,
             needsCandidateSelection: true,
             profileText: '',
-            error: '候補者が選択されていません'
+            error: errMsg
           });
         } else {
           sendResponse({
