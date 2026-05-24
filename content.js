@@ -175,7 +175,7 @@ function findCandidateCardsByPlatform() {
 // -------------------------------------------------------
 function highlightAddButton(cardEl) {
   const platform = getPlatform();
-  // Bizreach: 星ボタンをハイライト
+  // Bizreach: 星ボタン（ess-star-icon-toggle）をハイライト
   if (platform === 'bizreach') {
     const btn = findBizreachStarButton(cardEl);
     if (!btn) return;
@@ -323,6 +323,13 @@ function scoutStatus(history, candidateId) {
 
 // カードから候補者の一意IDを取得（プロフィールURL を優先）
 function getCandidateId(cardEl) {
+  // Bizreach: ess-resume-list-item の id属性（例: resume-8869626）を使用
+  if (getPlatform() === 'bizreach') {
+    const item = cardEl.closest('ess-resume-list-item') || cardEl.parentElement?.closest('ess-resume-list-item');
+    const rid = item?.id; // "resume-XXXXXXX"
+    if (rid) return `bizreach_${rid}`;
+  }
+
   const url = findProfileUrl(cardEl);
   if (url) return url.replace(/[?#].*$/, ''); // クエリ・ハッシュを除去
 
@@ -1073,26 +1080,35 @@ async function fetchProfilePage(url) {
   }
 }
 
-// Bizreach の星ボタン（bui-button--icon-only で b-ui-icon を含まないもの）を返す
+// Bizreach の星ボタン（ess-star-icon-toggle）をカード要素から探して返す
 function findBizreachStarButton(cardEl) {
-  const roots = [cardEl, cardEl.parentElement, cardEl.closest('li,tr,article,[class*="row"]')].filter(Boolean);
+  // candidate-list-item-content の親→ ess-resume-list-item → b-ui-virtual-scroll-item の順で探す
+  const roots = [
+    cardEl.parentElement,
+    cardEl.closest('ess-resume-list-item, b-ui-cassette-content, b-ui-virtual-scroll-item'),
+  ].filter(Boolean);
   for (const root of roots) {
-    const btn = Array.from(root.querySelectorAll('button.bui-button--icon-only'))
-      .find(el => !el.querySelector('b-ui-icon'));
-    if (btn) return btn;
+    const toggle = root.querySelector('ess-star-icon-toggle');
+    if (toggle) return toggle;
   }
   return null;
+}
+
+// Bizreach の星ボタンが既スター済みかどうかを返す
+function isBizreachStarred(starEl) {
+  const toggle = starEl.querySelector('b-ui-icon-toggle') || starEl;
+  return toggle.getAttribute('checked') === 'true';
 }
 
 // 候補者カードの追加ボタンを探してクリックする
 async function clickAddButton(cardEl, tagName) {
   const platform = getPlatform();
 
-  // Bizreach: 星ボタンを直接クリック（ダイアログなし）
+  // Bizreach: 星ボタン（ess-star-icon-toggle）を直接クリック（ダイアログなし）
   if (platform === 'bizreach') {
     const starBtn = findBizreachStarButton(cardEl);
     if (!starBtn) return false;
-    if (starBtn.classList.contains('bui-state-active')) return false; // すでにスター済み
+    if (isBizreachStarred(starBtn)) return false; // すでにスター済み
     starBtn.click();
     return true;
   }
