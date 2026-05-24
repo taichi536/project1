@@ -909,7 +909,10 @@ async function triggerAutoAdd() {
 
   // ビズリーチ：仮想スクロールで次バッチへ
   if (getPlatform() === 'bizreach') {
-    const viewport = document.querySelector('cdk-virtual-scroll-viewport');
+    // candidate-list-item-content を含む cdk-virtual-scroll-viewport を特定
+    const viewport = document.querySelector('.candidate-list-item-content')
+      ?.closest('cdk-virtual-scroll-viewport')
+      || document.querySelector('cdk-virtual-scroll-viewport');
     if (viewport) {
       const prevTop = viewport.scrollTop;
       viewport.scrollTop += 250 * Math.max(cards.length, 5); // カード高さ約250px×枚数
@@ -1128,12 +1131,15 @@ function isBizreachStarred(starEl) {
 async function clickAddButton(cardEl, tagName) {
   const platform = getPlatform();
 
-  // Bizreach: 星ボタン（ess-star-icon-toggle）を直接クリック（ダイアログなし）
+  // Bizreach: 星ボタン（ess-star-icon-toggle > b-ui-icon-toggle）を直接クリック
   if (platform === 'bizreach') {
     const starBtn = findBizreachStarButton(cardEl);
     if (!starBtn) return false;
     if (isBizreachStarred(starBtn)) return false; // すでにスター済み
-    starBtn.click();
+    // Angularコンポーネントには内部のb-ui-icon-toggleをクリックする方が確実
+    const innerToggle = starBtn.querySelector('b-ui-icon-toggle') || starBtn;
+    innerToggle.click();
+    await sleep(300);
     return true;
   }
 
