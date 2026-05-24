@@ -109,7 +109,15 @@ function findCandidateCardsByPlatform() {
   }
 
   if (platform === 'bizreach') {
-    // Bizreachは全幅カード。ラベル・コメントボタンを含む
+    // ess-resume-list-item を直接選択（broad selector による phantom element を排除）
+    const items = Array.from(document.querySelectorAll('ess-resume-list-item'));
+    if (items.length > 0) {
+      return dedup(items.filter(el => {
+        const text = el.innerText || '';
+        return agePattern.test(text) && text.length > 50;
+      }));
+    }
+    // フォールバック：ess-resume-list-item が見つからない場合は旧ロジック
     return dedup(Array.from(document.querySelectorAll('div, article, li')).filter(el => {
       const rect = el.getBoundingClientRect();
       const text = (el.innerText || '');
@@ -323,11 +331,21 @@ function scoutStatus(history, candidateId) {
 
 // カードから候補者の一意IDを取得（プロフィールURL を優先）
 function getCandidateId(cardEl) {
-  // Bizreach: ess-resume-list-item の id属性（例: resume-8869626）を使用
+  // Bizreach: cardEl が ess-resume-list-item 自身（新セレクタ）または祖先に持つ場合
   if (getPlatform() === 'bizreach') {
-    const item = cardEl.closest('ess-resume-list-item') || cardEl.parentElement?.closest('ess-resume-list-item');
-    const rid = item?.id; // "resume-XXXXXXX"
-    if (rid) return `bizreach_${rid}`;
+    // 直接 id を持つ場合（ess-resume-list-item を直接選択した場合）
+    if (cardEl.id && cardEl.id.startsWith('resume-')) return `bizreach_${cardEl.id}`;
+    // 祖先に ess-resume-list-item がある場合（旧フォールバック）
+    let el = cardEl;
+    for (let i = 0; i < 12; i++) {
+      if (!el) break;
+      if (el.tagName?.toLowerCase() === 'ess-resume-list-item' && el.id) {
+        return `bizreach_${el.id}`;
+      }
+      el = el.parentElement;
+    }
+    // Bizreach では fingerprint fallback は衝突するため使わない → null を返す
+    return null;
   }
 
   const url = findProfileUrl(cardEl);
@@ -1039,7 +1057,9 @@ async function getFullProfile(cardEl, fallbackText) {
 
   // Bizreach: カードクリックで右パネルが開くので読んだ後に閉じる
   if (platform === 'bizreach') {
-    cardEl.click();
+    // ess-resume-list-item の内側にある実際のコンテンツ要素をクリック
+    const clickTarget = cardEl.querySelector('.candidate-list-item-content, b-ui-cassette-content, [class*="cassette-content"], [class*="resume-item"]') || cardEl;
+    clickTarget.click();
     await sleep(1200);
     const panel = findBizreachDetailPanel();
     let bizResult = fallbackText.substring(0, 900);
@@ -1322,11 +1342,14 @@ function extractIncomeFromText(text) {
 
 // 年齢と年収からNG判定を返す（確実にNGの場合のみ 'NG'、それ以外は null）
 function checkIncomeNG(profileText) {
+  // Bizreach は年収情報が 0 や非公開で取得できないことが多いため Claude に委ねる
+  if (getPlatform() === 'bizreach') return null;
+
   const ageMatch = profileText.match(/(\d{2})歳/);
   if (!ageMatch) return null;
   const age = parseInt(ageMatch[1], 10);
   const income = extractIncomeFromText(profileText);
-  if (income === null) return null; // 年収不明はClaudeに任せる
+  if (income === null || income === 0) return null; // 年収不明・ゼロはClaudeに任せる
 
   // ITエンジニア系キーワードで職種を判定
   const isIT = /エンジニア|ソフトウェア開発|インフラ|クラウド|システム開発|SE[^\w]|データエンジニア|バックエンド|フロントエンド|DevOps/.test(profileText);
