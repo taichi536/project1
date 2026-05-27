@@ -1839,8 +1839,8 @@ elif page == "🔬 バックテスト":
     # ── 共通パラメータ（両タブで使う）──────────────────────────────────────
     with st.expander("⚙️ バックテスト設定（期間・戦略・資金）", expanded=False):
         _btc1, _btc2, _btc3, _btc4 = st.columns(4)
-        bt_period = _btc1.selectbox("検証期間", ["1y", "2y", "5y"], index=1,
-                                    format_func=lambda x: {"1y": "1年", "2y": "2年", "5y": "5年"}[x])
+        bt_period = _btc1.selectbox("検証期間", ["1y", "2y", "3y", "5y"], index=2,
+                                    format_func=lambda x: {"1y": "1年", "2y": "2年", "3y": "3年", "5y": "5年"}[x])
         bt_strategy_label = _btc2.selectbox("戦略", list(STRATEGIES.keys()))
         bt_cash = _btc3.number_input("初期資金 (円)", value=1_000_000, min_value=100_000, step=100_000)
         bt_stop_atr = _btc4.slider("損切り幅 (ATR倍)", min_value=1.0, max_value=4.0, value=2.0, step=0.5,
@@ -1848,8 +1848,8 @@ elif page == "🔬 バックテスト":
         _btc5, _btc6, _btc7, _btc8 = st.columns(4)
         bt_short = _btc5.number_input("短期MA", value=25, min_value=5, max_value=50)
         bt_long = _btc6.number_input("長期MA", value=75, min_value=20, max_value=200)
-        bt_rsi_buy = _btc7.number_input("RSI買いライン", value=35, min_value=10, max_value=50)
-        bt_rsi_sell = _btc8.number_input("RSI売りライン", value=65, min_value=50, max_value=90)
+        bt_rsi_buy = _btc7.number_input("RSI買いライン", value=45, min_value=10, max_value=60)
+        bt_rsi_sell = _btc8.number_input("RSI売りライン", value=55, min_value=40, max_value=90)
         _btc9, _btc10, _, _ = st.columns(4)
         bt_take_atr = _btc9.slider("利確幅 (ATR倍)", min_value=0.0, max_value=6.0, value=0.0, step=0.5,
                                    help="0=利確なし（シグナルが出るまで保有）。2.5〜3.0が一般的なRR比1:1.2〜1.5")
