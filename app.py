@@ -2012,16 +2012,12 @@ elif page == "🔬 バックテスト":
                 st.error("銘柄を1つ以上入力してください")
             else:
                 progress_bar = st.progress(0, text=f"0/{len(batch_tickers)}銘柄処理中...")
-                status_text = st.empty()
                 completed = [0]
 
                 def _fetch_with_progress(ticker, period):
                     df = fetch_ohlcv(ticker, period=period)
+                    # スレッドからUIを更新しない（ScriptRunContextエラーを防止）
                     completed[0] += 1
-                    progress_bar.progress(
-                        min(completed[0] / len(batch_tickers), 1.0),
-                        text=f"{completed[0]}/{len(batch_tickers)}銘柄処理中..."
-                    )
                     return df
 
                 with st.spinner(f"{len(batch_tickers)}銘柄を並列バックテスト中..."):
@@ -2040,8 +2036,9 @@ elif page == "🔬 バックテスト":
                         position_pct=bt_pos_pct,
                         max_workers=int(batch_workers),
                     )
-                progress_bar.empty()
+                progress_bar.progress(1.0, text=f"完了: {len(batch_tickers)}銘柄")
                 st.session_state["bt_batch_result"] = batch_result
+                st.rerun()
 
         batch_result = st.session_state.get("bt_batch_result")
         if batch_result and not batch_result["rows"].empty:
