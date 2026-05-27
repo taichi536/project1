@@ -304,3 +304,96 @@ def quick_market_sentiment(news_items: list[dict]) -> str:
         messages=[{"role": "user", "content": prompt}],
     )
     return message.content[0].text
+
+
+_JP_SECTOR_ETFS = {
+    "銀行": "1615.T",
+    "食品": "1617.T",
+    "エネルギー": "1618.T",
+    "建設・資材": "1619.T",
+    "素材・化学": "1620.T",
+    "電機・精密": "1621.T",
+    "機械": "1622.T",
+    "自動車": "1623.T",
+    "商社・卸売": "1624.T",
+    "小売": "1625.T",
+    "金融（除銀行）": "1626.T",
+    "不動産": "1627.T",
+    "運輸・物流": "1628.T",
+    "IT・通信": "1629.T",
+    "電力・ガス": "1630.T",
+}
+
+_US_SECTOR_ETFS = {
+    "テクノロジー": "XLK",
+    "金融": "XLF",
+    "ヘルスケア": "XLV",
+    "エネルギー": "XLE",
+    "工業": "XLI",
+    "一般消費財": "XLY",
+    "生活必需品": "XLP",
+    "素材": "XLB",
+    "不動産": "XLRE",
+    "公益事業": "XLU",
+    "通信": "XLC",
+}
+
+
+def fetch_sector_momentum(region: str = "JP") -> pd.DataFrame:
+    """セクター別モメンタム（1M/3M/6M リターン）を計算して返す"""
+    etfs = _JP_SECTOR_ETFS if region == "JP" else _US_SECTOR_ETFS
+    rows = []
+    for name, symbol in etfs.items():
+        try:
+            df = yf.download(symbol, period="7mo", progress=False, auto_adjust=True)
+            if df.empty or len(df) < 20:
+                continue
+            close = df["Close"].squeeze()
+            now = float(close.iloc[-1])
+            def ret(days, c=close, n=now):
+                idx = max(0, len(c) - days)
+                past = float(c.iloc[idx])
+                return round((n - past) / past * 100, 1) if past > 0 else 0.0
+            rows.append({
+                "セクター": name,
+                "1ヶ月(%)": ret(21),
+                "3ヶ月(%)": ret(63),
+                "6ヶ月(%)": ret(126),
+            })
+        except Exception:
+            pass
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values("3ヶ月(%)", ascending=False).reset_index(drop=True)
+
+
+def fetch_market_breadth(tickers: list) -> dict:
+    """ウォッチリスト銘柄が50日MA・200日MAより上にある比率を返す"""
+    above_200 = 0
+    above_50 = 0
+    total = 0
+    for t in tickers:
+        try:
+            sym = t if t.endswith(".T") or "." in t or not t.isdigit() else t + ".T"
+            df = yf.download(sym, period="14mo", progress=False, auto_adjust=True)
+            if df.empty or len(df) < 50:
+                continue
+            close = df["Close"].squeeze()
+            now = float(close.iloc[-1])
+            ma50 = float(close.rolling(50).mean().iloc[-1])
+            total += 1
+            if now > ma50:
+                above_50 += 1
+            if len(close) >= 200:
+                ma200 = float(close.rolling(200).mean().iloc[-1])
+                if now > ma200:
+                    above_200 += 1
+        except Exception:
+            pass
+    if total == 0:
+        return {"above_200_pct": 0, "above_50_pct": 0, "total": 0}
+    return {
+        "above_200_pct": round(above_200 / max(1, total) * 100, 1),
+        "above_50_pct": round(above_50 / total * 100, 1),
+        "total": total,
+    }

@@ -59,6 +59,20 @@ def _combined_signals(df: pd.DataFrame, short: int, long: int) -> pd.Series:
     return signal
 
 
+def _trend_follow_signals(df: pd.DataFrame, long: int) -> pd.Series:
+    """長期MAクロスのみのシンプルなトレンドフォロー戦略"""
+    ma_col = f"SMA{long}"
+    if ma_col not in df.columns:
+        return pd.Series(0, index=df.index)
+    close = df["Close"]
+    ma = df[ma_col]
+    above = close > ma
+    signal = pd.Series(0, index=df.index)
+    signal[above & ~above.shift(1).fillna(False)] = 1   # 上抜け: 買い
+    signal[~above & above.shift(1).fillna(True)] = -1   # 下抜け: 売り
+    return signal
+
+
 def _actual_signals(df: pd.DataFrame, sma_short: int, sma_long: int) -> pd.Series:
     """
     実際の自動売買ロジック（overall_signal）と同じシグナルでバックテスト。
@@ -87,6 +101,7 @@ def _actual_signals(df: pd.DataFrame, sma_short: int, sma_long: int) -> pd.Serie
 
 STRATEGIES = {
     "実際のシグナル（overall_signal）": "actual",
+    "トレンドフォロー（MA上抜け/下抜け）": "trend_follow",
     "複合シグナル（推奨）": "combined",
     "ゴールデンクロス（移動平均）": "sma",
     "RSI逆張り": "rsi",
@@ -105,6 +120,7 @@ def run_backtest(
     stop_loss_atr: float = 2.0,
     take_profit_atr: float = 0.0,   # 0=利確なし、2.5=ATR×2.5で利確
     position_pct: float = 0.95,     # 1トレードに使う資金比率
+    fee_rate: float = 0.002,
 ) -> dict:
     df = compute_all(df_raw.copy(), sma_short=sma_short, sma_long=sma_long)
     df = df.dropna()
@@ -119,10 +135,11 @@ def run_backtest(
         raw_signals = _rsi_signals(df, rsi_buy, rsi_sell)
     elif strategy == "macd":
         raw_signals = _macd_signals(df)
+    elif strategy == "trend_follow":
+        raw_signals = _trend_follow_signals(df, sma_long)
     else:
         raw_signals = _combined_signals(df, sma_short, sma_long)
 
-    fee_rate = 0.001  # 片道0.1%の取引手数料
 
     cash = initial_cash
     shares = 0
@@ -267,6 +284,7 @@ def run_batch_backtest(
     take_profit_atr: float = 0.0,
     position_pct: float = 0.95,
     max_workers: int = 4,
+    fee_rate: float = 0.002,
 ) -> dict:
     """
     複数銘柄を並列でバックテストし集計結果を返す。
@@ -289,6 +307,7 @@ def run_batch_backtest(
                 stop_loss_atr=stop_loss_atr,
                 take_profit_atr=take_profit_atr,
                 position_pct=position_pct,
+                fee_rate=fee_rate,
             )
             m = result["metrics"]
             return {

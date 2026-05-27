@@ -132,7 +132,7 @@ with st.sidebar:
         st.caption(f"選択中: **{_ct_display}**　← 全ページで共通")
     st.markdown("---")
 
-    _PAGES = ["🏠 ダッシュボード", "🔭 銘柄スキャン", "📊 テクニカル分析", "🔍 スクリーニング", "📋 ファンダメンタル分析", "🌐 マクロ・ニュース", "🔬 バックテスト", "📐 ポートフォリオ", "📔 投資日記", "🔔 通知設定", "🤖 自動売買", "📖 トレードガイド"]
+    _PAGES = ["🏠 ダッシュボード", "🔭 銘柄スキャン", "📊 テクニカル分析", "📋 ファンダメンタル分析", "🌐 市場環境", "🔬 バックテスト", "📐 ポートフォリオ", "📔 投資日記", "🔔 通知設定", "🤖 自動売買", "📖 トレードガイド"]
     if "_nav_target" in st.session_state:
         _target = st.session_state.pop("_nav_target")
         if _target in _PAGES:
@@ -1538,54 +1538,6 @@ elif page == "📊 テクニカル分析":
                                     st.markdown(f"{badge} **[{n['source']}]** {n['title']}")
                     except Exception as e:
                         st.warning(f"マクロ分析エラー: {e}")
-
-
-# ─── スクリーニング ────────────────────────────────────────────────────────────
-elif page == "🔍 スクリーニング":
-    st.title("🔍 バリュー株スクリーニング")
-    st.markdown("**なごちょう式** 6条件 + Piotroski Fスコアで評価します")
-
-    tickers_input = st.text_area(
-        "銘柄コードを入力（1行1銘柄）",
-        value="7203\n9984\nTOYOTA\nAAPL",
-        height=150,
-    )
-    screen_btn = st.button("🔍 スクリーニング実行", type="primary")
-
-    if screen_btn:
-        tickers = [t.strip() for t in tickers_input.strip().split("\n") if t.strip()]
-        results = []
-        progress = st.progress(0)
-        for i, t in enumerate(tickers):
-            with st.spinner(f"{t} を確認中..."):
-                try:
-                    r = screen_single(t)
-                    results.append(r)
-                except Exception as e:
-                    st.warning(f"{t}: 取得失敗 ({e})")
-            progress.progress((i + 1) / len(tickers))
-
-        if results:
-            st.markdown("### スクリーニング結果")
-            for r in results:
-                pass_mark = "✅ 合格" if r["合否"] else "❌ 不合格"
-                with st.expander(f"**{r['ticker']}** — {pass_mark}"):
-                    rows = []
-                    for key, detail in r["詳細"].items():
-                        val = detail["値"]
-                        if isinstance(val, float):
-                            val_str = f"{val:.2f}"
-                        elif val is None:
-                            val_str = "N/A"
-                        else:
-                            val_str = str(val)
-                        rows.append({
-                            "項目": key,
-                            "値": val_str,
-                            "基準": detail["基準"],
-                            "判定": "✅" if detail["合否"] else "❌",
-                        })
-                    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
 
 # ─── ファンダメンタル分析 ─────────────────────────────────────────────────────
