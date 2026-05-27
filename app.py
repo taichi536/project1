@@ -1975,13 +1975,27 @@ elif page == "🔬 バックテスト":
         st.markdown("ウォッチリストまたは指定銘柄をまとめてバックテストし、戦略の統計的有効性を検証します。")
 
         from modules.dashboard import load_watchlist as _load_wl
+        from modules.universe import UNIVERSE as _UNIVERSE
         _wl = _load_wl()
-        _batch_default = "\n".join(_wl[:20]) if _wl else "7203\n9984\n6758\nAAPL\nMSFT"
+
+        # プリセット選択
+        _preset_options = ["📋 ウォッチリスト"] + list(_UNIVERSE.keys())
+        _preset_sel = st.selectbox(
+            "銘柄プリセット",
+            _preset_options,
+            help="プリセットを選ぶと銘柄欄に自動入力されます。手動で編集も可能です。",
+            key="bt_batch_preset",
+        )
+        if _preset_sel == "📋 ウォッチリスト":
+            _batch_default = "\n".join(_wl[:20]) if _wl else "7203\n9984\n6758\nAAPL\nMSFT"
+        else:
+            _batch_default = "\n".join(_UNIVERSE[_preset_sel]["tickers"])
+
         batch_tickers_raw = st.text_area(
             "対象銘柄（1行1銘柄）",
             value=_batch_default,
             height=150,
-            help="ウォッチリストが自動で入力されます。編集可能です。",
+            help="プリセット選択で自動入力。直接編集も可能です。",
         )
         _bcol1, _bcol2 = st.columns([3, 1])
         with _bcol2:
@@ -2044,14 +2058,13 @@ elif page == "🔬 バックテスト":
                         f"{sm['戦略優位銘柄数']}/{sm['対象銘柄数']}銘柄")
 
             _avg_wr = sm['平均勝率(%)']
+            _avg_trades = sm.get('平均取引回数', batch_result["rows"]["取引回数"].mean() if "取引回数" in batch_result["rows"].columns else 0)
             _med_ret = sm['中央値リターン(%)']
-            st.markdown(f"平均勝率 **{_avg_wr:.1f}%** ／ リターン中央値 **{_med_ret:+.1f}%**")
+            st.markdown(f"平均勝率 **{_avg_wr:.1f}%** ／ リターン中央値 **{_med_ret:+.1f}%** ／ 平均取引回数 **{_avg_trades:.1f}回**")
+            if _avg_trades < 5:
+                st.warning(f"⚠️ 平均取引回数が{_avg_trades:.1f}回と少なく、統計的な信頼性が低い可能性があります。期間を長くするか、戦略の閾値を見直してください。")
 
             st.markdown("### 📋 銘柄別結果")
-
-            def _color_return(val):
-                color = "#1e3a2f" if val > 0 else "#3a1e1e" if val < 0 else ""
-                return f"background-color: {color}" if color else ""
 
             df_rows = batch_result["rows"].copy()
             df_rows["総リターン(%)"] = df_rows["総リターン(%)"].apply(lambda x: f"{x:+.1f}%")
