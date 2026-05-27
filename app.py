@@ -1607,176 +1607,172 @@ elif page == "📋 ファンダメンタル分析":
                         st.warning(f"AI分析エラー: {e}")
 
 
-# ─── マクロ・ニュース分析 ─────────────────────────────────────────────────────
-elif page == "🌐 マクロ・ニュース":
-    st.title("🌐 マクロ経済・ニュース分析")
-    st.markdown("リアルタイムの市場データと経済ニュースから、今日の相場環境を把握します")
+# ─── 市場環境ダッシュボード ───────────────────────────────────────────────────
+elif page == "🌐 市場環境":
+    st.title("🌐 市場環境ダッシュボード")
+    st.markdown("売買判断に直結する市場の健全性・セクター別の強弱を確認します")
+
+    from modules.macro_analysis import (
+        fetch_live_market_data, get_market_sentiment_rule,
+        fetch_sector_momentum, fetch_market_breadth, get_macro_context,
+    )
+
+    if st.button("🔄 データ更新", key="macro_refresh"):
+        for k in ["_macro_live", "_macro_sector_jp", "_macro_sector_us", "_macro_breadth"]:
+            st.session_state.pop(k, None)
 
     macro_tab1, macro_tab2, macro_tab3 = st.tabs([
-        "📡 リアルタイム市場データ",
-        "📰 市場ニュース",
-        "📊 金融政策・経済指標",
+        "📊 市場健全性", "🏭 セクターモメンタム", "📡 主要指標",
     ])
 
     with macro_tab1:
-        st.markdown("### 📡 主要市場指標（リアルタイム）")
-        st.caption("yfinanceで取得した最新値です。15分程度の遅延があります。")
+        st.markdown("### 📊 市場の健全性スコア")
+        st.caption("ウォッチリストの銘柄がMAより上にある比率で市場全体の状態を把握します")
 
-        if st.button("🔄 今すぐ更新", key="refresh_market"):
-            st.session_state.pop("_live_market_cache", None)
+        _wl_macro = load_watchlist()
+        if "_macro_breadth" not in st.session_state:
+            with st.spinner("市場健全性を計算中（ウォッチリスト銘柄を確認）..."):
+                st.session_state["_macro_breadth"] = fetch_market_breadth(_wl_macro)
+        breadth = st.session_state["_macro_breadth"]
 
-        if "_live_market_cache" not in st.session_state:
-            with st.spinner("市場データを取得中..."):
-                st.session_state["_live_market_cache"] = fetch_live_market_data()
+        b50 = breadth["above_50_pct"]
+        b200 = breadth["above_200_pct"]
+        total_b = breadth["total"]
 
-        live_data = st.session_state.get("_live_market_cache", [])
+        _bc1, _bc2, _bc3 = st.columns(3)
+        _bc1.metric("50日MA以上の銘柄", f"{b50}%", f"{total_b}銘柄中")
+        _bc2.metric("200日MA以上の銘柄", f"{b200}%", f"{total_b}銘柄中")
+
+        # 市場判定
+        if b50 >= 70:
+            _bc3.success("🟢 強気相場")
+            _market_advice = "積極的にエントリー可。モメンタムに乗った銘柄を優先"
+        elif b50 >= 50:
+            _bc3.info("🟡 中立相場")
+            _market_advice = "慎重に。強いシグナルが出た銘柄のみエントリー"
+        elif b50 >= 30:
+            _bc3.warning("🟠 弱気相場")
+            _market_advice = "新規買いを控える。保有中の銘柄の損切りラインを引き上げ"
+        else:
+            _bc3.error("🔴 下落相場")
+            _market_advice = "原則キャッシュポジション。買いは見送り"
+
+        st.info(f"💡 **今の行動指針**: {_market_advice}")
+
+        # VIX
+        if "_macro_live" not in st.session_state:
+            with st.spinner("指標取得中..."):
+                st.session_state["_macro_live"] = fetch_live_market_data()
+        live_data = st.session_state.get("_macro_live", [])
+        vix_data = next((d for d in live_data if "VIX" in d["指標"]), None)
+        if vix_data:
+            vix_val = vix_data["現在値"]
+            vix_chg = vix_data.get("change_pct", 0)
+            try:
+                vix_num = float(str(vix_val).replace("%", "").replace(",", ""))
+            except Exception:
+                vix_num = 0
+            st.markdown("---")
+            st.markdown("### 😨 恐怖指数（VIX）")
+            _vc1, _vc2 = st.columns(2)
+            _vc1.metric("VIX", vix_val, f"{vix_chg:+.1f}%")
+            if vix_num < 15:
+                _vc2.success("🟢 低恐怖（強気）— 通常の売買OK")
+            elif vix_num < 25:
+                _vc2.info("🟡 通常水準 — 通常の売買OK")
+            elif vix_num < 35:
+                _vc2.warning("🟠 高恐怖 — ポジションサイズを縮小")
+            else:
+                _vc2.error("🔴 極度の恐怖 — 買い禁止、損切り優先")
+
+    with macro_tab2:
+        st.markdown("### 🏭 セクター別モメンタム（過去リターン）")
+        st.caption("強いセクターの銘柄を優先的に選ぶことで勝率が上がります")
+
+        _sreg = st.radio("市場", ["🇯🇵 日本", "🇺🇸 米国"], horizontal=True, key="sector_region")
+        _region_key = "JP" if "日本" in _sreg else "US"
+        _cache_key = f"_macro_sector_{_region_key.lower()}"
+
+        if _cache_key not in st.session_state:
+            with st.spinner(f"セクターETFデータ取得中..."):
+                st.session_state[_cache_key] = fetch_sector_momentum(_region_key)
+
+        df_sector = st.session_state.get(_cache_key, pd.DataFrame())
+
+        if not df_sector.empty:
+            # 棒グラフ（3ヶ月リターン）
+            import plotly.graph_objects as go
+            colors = ["#26a69a" if v >= 0 else "#ef5350" for v in df_sector["3ヶ月(%)"]]
+            fig_s = go.Figure(go.Bar(
+                x=df_sector["セクター"],
+                y=df_sector["3ヶ月(%)"],
+                marker_color=colors,
+                text=[f"{v:+.1f}%" for v in df_sector["3ヶ月(%)"]],
+                textposition="outside",
+            ))
+            fig_s.update_layout(
+                title="セクター別 3ヶ月リターン（強い順）",
+                yaxis_title="リターン(%)",
+                height=400,
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#ccc"),
+            )
+            st.plotly_chart(fig_s, use_container_width=True)
+
+            # 強い/弱いセクターのハイライト
+            _sc1, _sc2 = st.columns(2)
+            top3 = df_sector.head(3)["セクター"].tolist()
+            bot3 = df_sector.tail(3)["セクター"].tolist()
+            _sc1.success(f"**今強いセクター（優先買い）**\n\n" + "\n".join(f"- {s}" for s in top3))
+            _sc2.error(f"**今弱いセクター（買い控え）**\n\n" + "\n".join(f"- {s}" for s in bot3))
+
+            st.dataframe(df_sector, width="stretch", hide_index=True)
+        else:
+            st.warning("セクターデータを取得できませんでした。")
+
+    with macro_tab3:
+        st.markdown("### 📡 主要市場指標")
+        if not live_data and "_macro_live" not in st.session_state:
+            with st.spinner("指標取得中..."):
+                st.session_state["_macro_live"] = fetch_live_market_data()
+            live_data = st.session_state.get("_macro_live", [])
 
         if live_data:
-            # センチメント判定
             sentiment = get_market_sentiment_rule(live_data)
             label = sentiment["label"]
             score_val = sentiment["score"]
             if "強気" in label:
-                st.success(f"### 🎯 市場センチメント: **{label}**（スコア: {score_val:+d}）")
+                st.success(f"市場センチメント: **{label}**（スコア: {score_val:+d}）")
             elif "弱気" in label:
-                st.error(f"### 🎯 市場センチメント: **{label}**（スコア: {score_val:+d}）")
+                st.error(f"市場センチメント: **{label}**（スコア: {score_val:+d}）")
             else:
-                st.warning(f"### 🎯 市場センチメント: **{label}**（スコア: {score_val:+d}）")
+                st.warning(f"市場センチメント: **{label}**（スコア: {score_val:+d}）")
 
-            for reason in sentiment["reasons"]:
-                st.caption(f"  ・{reason}")
-
-            st.markdown("---")
-
-            # 指標テーブル
-            _cols = st.columns(3)
+            _cols3 = st.columns(3)
             for i, d in enumerate(live_data):
                 c = d.get("change_pct", 0) or 0
                 color = "#26a69a" if c >= 0 else "#ef5350"
                 arrow = "▲" if c >= 0 else "▼"
-                with _cols[i % 3]:
+                with _cols3[i % 3]:
                     st.markdown(
                         f"""<div style='border:1px solid #333;border-radius:8px;padding:10px 14px;margin-bottom:8px'>
                         <div style='font-size:12px;color:#aaa'>{d['指標']}</div>
-                        <div style='font-size:22px;font-weight:bold'>{d['現在値']}</div>
+                        <div style='font-size:20px;font-weight:bold'>{d['現在値']}</div>
                         <div style='font-size:13px;color:{color}'>{arrow} {c:+.2f}%</div>
                         </div>""",
                         unsafe_allow_html=True,
                     )
-
-            # セクター影響
-            st.markdown("---")
-            st.markdown("### 🏭 セクター別・今日の注目点")
-            impacts = get_sector_impact(live_data)
-            if impacts:
-                df_impact = pd.DataFrame(impacts)
-                st.dataframe(df_impact, width="stretch", hide_index=True)
-                st.caption("⚠️ これは機械的なルールによる参考情報です。最終判断は自己責任でお願いします。")
-            else:
-                st.info("現在のデータでは特筆すべきセクター影響はありません（市場が落ち着いている状態）")
-
-            # 投資判断への使い方ガイド
-            with st.expander("💡 この情報を投資判断にどう使う？"):
-                st.markdown("""
-**マクロ環境は「追い風/向かい風」の確認に使います。**
-
-| センチメント | 推奨アクション |
-|---|---|
-| 強気・やや強気 | テクニカル分析でエントリーポイントを積極探索。シグナルが「買い」なら信頼度UP |
-| 中立 | シグナルに従って通常通り判断。ポジション大きくしすぎない |
-| やや弱気・弱気 | 新規買いは慎重に。損切りラインをいつもより厳しく設定 |
-
-**セクター影響の読み方:**
-- 円安 → 輸出株（トヨタ・ソニー等）に有利。買いシグナルが重なれば信頼度UP
-- 金利上昇 → 銀行株に有利、グロース株に不利
-- VIX高 → リスクオフ。新規買いを控え、キャッシュポジション増やす
-
-**使い方のポイント:**
-1. 毎朝この画面を開いてセンチメントを確認（30秒）
-2. 「弱気」なら今日はその銘柄の新規買いを見送る
-3. 「強気」なら通常の判断でOK
-""")
         else:
-            st.warning("市場データを取得できませんでした。しばらくしてから再度お試しください。")
-
-    with macro_tab2:
-        st.markdown("### 📰 最新市場ニュース")
-        col_l, col_r = st.columns([1, 2])
-        with col_l:
-            ticker_macro = st.text_input("個別銘柄への影響を分析（任意）", placeholder="7203 / AAPL", key="macro_ticker").strip()
-        news_btn = st.button("📰 ニュース取得", type="primary")
-
-        if news_btn:
-            with st.spinner("ニュースを収集中..."):
-                news = fetch_market_news(max_per_source=5)
-
-            if news:
-                st.success(f"{len(news)}件のニュースを取得しました")
-
-                # ニュース一覧
-                high = [n for n in news if score_macro_relevance(n["title"], n.get("summary", "")) >= 2]
-                other = [n for n in news if score_macro_relevance(n["title"], n.get("summary", "")) < 2]
-
-                if high:
-                    st.markdown("**🔴 市場への影響が大きいニュース**")
-                    for n in high[:8]:
-                        st.markdown(f"- **[{n['source']}]** {n['title']}")
-                        if n.get("summary"):
-                            st.caption(f"  {n['summary'][:150]}")
-
-                if other:
-                    with st.expander(f"その他のニュース（{len(other)}件）"):
-                        for n in other[:10]:
-                            st.markdown(f"- [{n['source']}] {n['title']}")
-
-                # AI分析（オプション）
-                if ticker_macro and st.session_state.get("ai_enabled") and os.getenv("ANTHROPIC_API_KEY"):
-                    st.markdown(f"### 🔍 {ticker_macro} への影響分析（AI）")
-                    with st.spinner(f"{ticker_macro} への影響を分析中..."):
-                        try:
-                            try:
-                                info = fetch_info(ticker_macro)
-                                company_name = info.get("longName") or info.get("shortName", ticker_macro)
-                                sector = info.get("sector", "不明")
-                            except Exception:
-                                company_name = ticker_macro
-                                sector = "不明"
-                            impact = analyze_news_sentiment(ticker_macro, company_name, sector, news)
-                            st.markdown(impact)
-                        except Exception as e:
-                            st.warning(f"影響分析エラー: {e}")
-                elif ticker_macro and not os.getenv("ANTHROPIC_API_KEY"):
-                    st.info("個別銘柄への詳細AI分析はANTHROPIC_API_KEY設定後に利用可能です。上の「リアルタイム市場データ」タブのセクター影響を参考にしてください。")
-            else:
-                st.warning("ニュースを取得できませんでした。ネットワーク接続を確認してください。")
-
-    with macro_tab3:
-        st.markdown("### 📊 金融政策・主要経済指標")
-        st.caption("※ 下記は定期的に手動更新している参考値です。正確な値は日銀・FRBの公式発表をご確認ください。")
-
-        macro_ctx = get_macro_context()
-        for region, indicators in macro_ctx.items():
-            st.markdown(f"#### {region}")
-            rows = []
-            for name, data in indicators.items():
-                rows.append({
-                    "指標": name,
-                    "現在値": data["値"],
-                    "方向性": data["方向"],
-                    "投資への影響": data["投資影響"],
-                })
-            df_macro = pd.DataFrame(rows)
-            st.dataframe(df_macro, width="stretch", hide_index=True)
+            st.warning("市場データを取得できませんでした。")
 
         st.markdown("---")
-        st.markdown("#### 📌 今後の主要イベントカレンダー")
+        st.markdown("#### 📌 主要イベントカレンダー")
         events = [
             {"タイミング": "随時", "イベント": "日銀金融政策決定会合", "注目度": "★★★", "影響": "円相場・金融株・REITに直結"},
             {"タイミング": "毎月初旬", "イベント": "米雇用統計 (NFP)", "注目度": "★★★", "影響": "FRB政策観測・ドル円に影響"},
-            {"タイミング": "毎月中旬", "イベント": "米CPI（消費者物価指数）", "注目度": "★★★", "影響": "インフレ→利下げ観測→グロース株"},
+            {"タイミング": "毎月中旬", "イベント": "米CPI（消費者物価）", "注目度": "★★★", "影響": "インフレ→利下げ観測→グロース株"},
             {"タイミング": "四半期", "イベント": "決算シーズン（3・6・9・12月）", "注目度": "★★★", "影響": "個別株の最大の変動要因"},
-            {"タイミング": "随時", "イベント": "地政学リスク（中東・台湾海峡等）", "注目度": "★★☆", "影響": "リスクオフ・原油・防衛株"},
-            {"タイミング": "随時", "イベント": "米中貿易摩擦・関税動向", "注目度": "★★☆", "影響": "製造業・半導体・自動車に逆風"},
         ]
         st.dataframe(pd.DataFrame(events), width="stretch", hide_index=True)
 
@@ -1802,11 +1798,14 @@ elif page == "🔬 バックテスト":
         bt_long = _btc6.number_input("長期MA", value=75, min_value=20, max_value=200)
         bt_rsi_buy = _btc7.number_input("RSI買いライン", value=45, min_value=10, max_value=60)
         bt_rsi_sell = _btc8.number_input("RSI売りライン", value=55, min_value=40, max_value=90)
-        _btc9, _btc10, _, _ = st.columns(4)
+        _btc9, _btc10, _btc11, _ = st.columns(4)
         bt_take_atr = _btc9.slider("利確幅 (ATR倍)", min_value=0.0, max_value=6.0, value=0.0, step=0.5,
                                    help="0=利確なし（シグナルが出るまで保有）。2.5〜3.0が一般的なRR比1:1.2〜1.5")
         bt_pos_pct = _btc10.slider("1トレード資金比率 (%)", min_value=10, max_value=100, value=95, step=5,
                                    help="1回の取引で使う資金の割合。リスク管理上は50%以下を推奨") / 100
+        bt_fee_rate = _btc11.number_input("取引コスト(%/回)", value=0.2, min_value=0.0, max_value=1.0, step=0.05,
+                                          help="片道あたりの手数料+スプレッド。SBI/楽天は約0.1〜0.2%",
+                                          key="bt_fee") / 100
 
     strategy_key = STRATEGIES[bt_strategy_label]
 
@@ -1833,6 +1832,7 @@ elif page == "🔬 バックテスト":
                         stop_loss_atr=bt_stop_atr,
                         take_profit_atr=bt_take_atr,
                         position_pct=bt_pos_pct,
+                        fee_rate=bt_fee_rate,
                     )
                 _bt_prog.progress(90, text="📊 結果を集計中...")
                 st.session_state["bt_single_result"] = result
@@ -1998,6 +1998,7 @@ elif page == "🔬 バックテスト":
                         take_profit_atr=bt_take_atr,
                         position_pct=bt_pos_pct,
                         max_workers=int(batch_workers),
+                        fee_rate=bt_fee_rate,
                     )
                 progress_bar.progress(1.0, text=f"完了: {len(batch_tickers)}銘柄")
                 st.session_state["bt_batch_result"] = batch_result
