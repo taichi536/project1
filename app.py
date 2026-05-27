@@ -2040,48 +2040,54 @@ elif page == "🔬 バックテスト":
                 st.session_state["bt_batch_result"] = batch_result
 
         batch_result = st.session_state.get("bt_batch_result")
-        if batch_result and not batch_result["rows"].empty:
-            sm = batch_result["summary"]
-            st.markdown("### 📊 集計サマリー")
-            _sc1, _sc2, _sc3, _sc4, _sc5 = st.columns(5)
-            _sc1.metric("対象銘柄", f"{sm['対象銘柄数']}銘柄")
-            _avg_ret = sm['平均リターン(%)']
-            _avg_bh = sm['平均B&Hリターン(%)']
-            _sc2.metric("平均リターン", f"{_avg_ret:+.1f}%", f"B&H: {_avg_bh:+.1f}%")
-            _sc3.metric("平均最大DD", f"{sm['平均最大DD(%)']:.1f}%")
-            _sc4.metric("平均シャープ", f"{sm['平均シャープ']:.2f}")
-            _sc5.metric("戦略優位率", f"{sm['戦略優位率(%)']}%",
-                        f"{sm['戦略優位銘柄数']}/{sm['対象銘柄数']}銘柄")
-
-            _avg_wr = sm['平均勝率(%)']
-            _avg_trades = sm.get('平均取引回数', batch_result["rows"]["取引回数"].mean() if "取引回数" in batch_result["rows"].columns else 0)
-            _med_ret = sm['中央値リターン(%)']
-            st.markdown(f"平均勝率 **{_avg_wr:.1f}%** ／ リターン中央値 **{_med_ret:+.1f}%** ／ 平均取引回数 **{_avg_trades:.1f}回**")
-            if _avg_trades < 5:
-                st.warning(f"⚠️ 平均取引回数が{_avg_trades:.1f}回と少なく、統計的な信頼性が低い可能性があります。期間を長くするか、戦略の閾値を見直してください。")
-
-            st.markdown("### 📋 銘柄別結果")
-
-            df_rows = batch_result["rows"].copy()
-            df_rows["総リターン(%)"] = df_rows["総リターン(%)"].apply(lambda x: f"{x:+.1f}%")
-            df_rows["B&Hリターン(%)"] = df_rows["B&Hリターン(%)"].apply(lambda x: f"{x:+.1f}%")
-            df_rows["最大DD(%)"] = df_rows["最大DD(%)"].apply(lambda x: f"{x:.1f}%")
-            df_rows["勝率(%)"] = df_rows["勝率(%)"].apply(lambda x: f"{x:.1f}%")
-            df_rows["戦略優位"] = df_rows["戦略優位"].apply(lambda x: "✅" if x else "❌")
-            st.dataframe(df_rows, width="stretch", hide_index=True)
-
-            st.download_button(
-                "📥 一括バックテスト結果 CSV",
-                data=batch_result["rows"].to_csv(index=False, encoding="utf-8-sig"),
-                file_name=f"batch_backtest_{bt_period}.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
-
-            if batch_result["errors"]:
-                with st.expander(f"⚠️ エラー {len(batch_result['errors'])}件"):
-                    for ticker, err in batch_result["errors"]:
+        if batch_result is not None:
+            if batch_result["rows"].empty:
+                st.error("全銘柄でエラーが発生しました。以下を確認してください。")
+                if batch_result.get("errors"):
+                    for ticker, err in batch_result["errors"][:5]:
                         st.text(f"{ticker}: {err}")
+            else:
+                sm = batch_result["summary"]
+                st.markdown("### 📊 集計サマリー")
+                _sc1, _sc2, _sc3, _sc4, _sc5 = st.columns(5)
+                _sc1.metric("対象銘柄", f"{sm['対象銘柄数']}銘柄")
+                _avg_ret = sm['平均リターン(%)']
+                _avg_bh = sm['平均B&Hリターン(%)']
+                _sc2.metric("平均リターン", f"{_avg_ret:+.1f}%", f"B&H: {_avg_bh:+.1f}%")
+                _sc3.metric("平均最大DD", f"{sm['平均最大DD(%)']:.1f}%")
+                _sc4.metric("平均シャープ", f"{sm['平均シャープ']:.2f}")
+                _sc5.metric("戦略優位率", f"{sm['戦略優位率(%)']}%",
+                            f"{sm['戦略優位銘柄数']}/{sm['対象銘柄数']}銘柄")
+
+                _avg_wr = sm['平均勝率(%)']
+                _avg_trades = sm.get('平均取引回数', batch_result["rows"]["取引回数"].mean() if "取引回数" in batch_result["rows"].columns else 0)
+                _med_ret = sm['中央値リターン(%)']
+                st.markdown(f"平均勝率 **{_avg_wr:.1f}%** ／ リターン中央値 **{_med_ret:+.1f}%** ／ 平均取引回数 **{_avg_trades:.1f}回**")
+                if _avg_trades < 5:
+                    st.warning(f"⚠️ 平均取引回数が{_avg_trades:.1f}回と少なく、統計的な信頼性が低い可能性があります。期間を長くするか、戦略の閾値を見直してください。")
+
+                st.markdown("### 📋 銘柄別結果")
+
+                df_rows = batch_result["rows"].copy()
+                df_rows["総リターン(%)"] = df_rows["総リターン(%)"].apply(lambda x: f"{x:+.1f}%")
+                df_rows["B&Hリターン(%)"] = df_rows["B&Hリターン(%)"].apply(lambda x: f"{x:+.1f}%")
+                df_rows["最大DD(%)"] = df_rows["最大DD(%)"].apply(lambda x: f"{x:.1f}%")
+                df_rows["勝率(%)"] = df_rows["勝率(%)"].apply(lambda x: f"{x:.1f}%")
+                df_rows["戦略優位"] = df_rows["戦略優位"].apply(lambda x: "✅" if x else "❌")
+                st.dataframe(df_rows, width="stretch", hide_index=True)
+
+                st.download_button(
+                    "📥 一括バックテスト結果 CSV",
+                    data=batch_result["rows"].to_csv(index=False, encoding="utf-8-sig"),
+                    file_name=f"batch_backtest_{bt_period}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+
+                if batch_result["errors"]:
+                    with st.expander(f"⚠️ エラー {len(batch_result['errors'])}件"):
+                        for ticker, err in batch_result["errors"]:
+                            st.text(f"{ticker}: {err}")
 
 
 # ─── ポートフォリオ最適化 ─────────────────────────────────────────────────────
