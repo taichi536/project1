@@ -2014,9 +2014,20 @@ elif page == "🔬 バックテスト":
                 progress_bar = st.progress(0, text=f"0/{len(batch_tickers)}銘柄処理中...")
                 completed = [0]
 
+                try:
+                    from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+                    _ctx = get_script_run_ctx()
+                except Exception:
+                    _ctx = None
+
                 def _fetch_with_progress(ticker, period):
+                    if _ctx is not None:
+                        try:
+                            import threading
+                            add_script_run_ctx(threading.current_thread(), _ctx)
+                        except Exception:
+                            pass
                     df = fetch_ohlcv(ticker, period=period)
-                    # スレッドからUIを更新しない（ScriptRunContextエラーを防止）
                     completed[0] += 1
                     return df
 
