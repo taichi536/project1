@@ -2038,7 +2038,6 @@ elif page == "🔬 バックテスト":
                     )
                 progress_bar.progress(1.0, text=f"完了: {len(batch_tickers)}銘柄")
                 st.session_state["bt_batch_result"] = batch_result
-                st.rerun()
 
         batch_result = st.session_state.get("bt_batch_result")
         if batch_result and not batch_result["rows"].empty:
