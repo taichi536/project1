@@ -1199,6 +1199,24 @@ function findProfileUrl(cardEl) {
     if (href.startsWith(location.origin) && !href.includes('#')) return href;
   }
 
+  // doda-x: data属性から候補者IDを探してURLを構築
+  if (platform === 'dodax') {
+    for (let el = cardEl, depth = 0; el && depth < 4; el = el.parentElement, depth++) {
+      for (const attr of el.attributes) {
+        const v = attr.value;
+        if (/^\d{6,12}$/.test(v)) {
+          const url = `${location.origin}/member_search/detail/${v}`;
+          console.log(`[Snow-we] findProfileUrl: doda-x data属性から構築 ${attr.name}=${v} → ${url}`);
+          return url;
+        }
+      }
+    }
+    // data属性もなければDOM構造をログに出力（次の調査用）
+    const attrs = Array.from(cardEl.attributes).map(a => `${a.name}="${a.value.substring(0, 30)}"`).join(' ');
+    const innerLinks = Array.from(cardEl.querySelectorAll('a[href]')).map(l => l.href.substring(0, 60));
+    console.log(`[Snow-we] findProfileUrl: doda-x DOM調査 attrs=[${attrs}] links=[${innerLinks.join(', ')}]`);
+  }
+
   console.log(`[Snow-we] findProfileUrl: URL未発見 platform=${platform} cardTag=${cardEl.tagName} cardClass=${cardEl.className.substring(0, 50)}`);
   return null;
 }
@@ -1440,14 +1458,16 @@ async function clickAddButton(cardEl, tagName) {
     const isStarred = () => {
       if (starBtn.getAttribute('aria-pressed') === 'true' ||
           starBtn.getAttribute('aria-checked') === 'true') return true;
-      if (/\b(?:active|starred|is-active|is-starred|on)\b/.test(starBtn.className)) return true;
+      if (/\b(?:active|starred|is-active|is-starred|on|is-checked)\b/.test(starBtn.className)) return true;
       if (!icon) return false;
+      // is-checked-star クラスはスター済みを示す
+      if (icon.className.includes('is-checked-star')) return true;
       return icon.className.includes('icon-star') && !icon.className.includes('icon-star_border');
     };
     console.log(`[Snow-we] dodax 星診断 btn:"${starBtn.className}" icon:"${icon?.className || 'なし'}" aria-pressed:"${starBtn.getAttribute('aria-pressed')}" → starred:${isStarred()}`);
     if (isStarred()) { console.log('[Snow-we] dodax すでにスター済み、スキップ'); return false; }
 
-    // Try 1: React fiber の onClick を直接呼び出す（React 17+ 対応）
+    // Try 1: React fiber の onClick/onPointerDown を直接呼び出す
     const tryFiberClick = (el) => {
       try {
         const fKey = Object.keys(el).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'));
@@ -1455,31 +1475,39 @@ async function clickAddButton(cardEl, tagName) {
         let fiber = el[fKey];
         while (fiber) {
           const props = fiber.memoizedProps;
-          if (props && typeof props.onClick === 'function') {
-            props.onClick({ type: 'click', bubbles: true, cancelable: true, target: el, currentTarget: el, preventDefault: () => {}, stopPropagation: () => {} });
-            return true;
+          if (props) {
+            const handler = props.onClick || props.onPointerDown || props.onMouseDown;
+            if (typeof handler === 'function') {
+              handler({ type: 'click', bubbles: true, cancelable: true, target: el, currentTarget: el, preventDefault: () => {}, stopPropagation: () => {} });
+              return true;
+            }
           }
           fiber = fiber.return;
         }
       } catch (_) {}
       return false;
     };
-    tryFiberClick(starBtn) || (icon && tryFiberClick(icon));
-    await sleep(400);
+    // starBtn → icon → starBtnの親 の順で試す
+    const fiberOk = tryFiberClick(starBtn) || (icon && tryFiberClick(icon)) ||
+                    (starBtn.parentElement && tryFiberClick(starBtn.parentElement));
+    console.log('[Snow-we] dodax fiber click:', fiberOk);
+    await sleep(600);
     if (isStarred()) { console.log('[Snow-we] dodax 星クリック成功(fiber)'); return true; }
 
-    // Try 2: ネイティブ click（React ルートへのイベント委譲を通じて発火）
-    starBtn.click();
-    await sleep(400);
-    if (isStarred()) { console.log('[Snow-we] dodax 星クリック成功(native)'); return true; }
-
-    // Try 3: MouseEvent シーケンス
+    // Try 2: PointerEvent → MouseEvent の順でネイティブイベントを発火
     const opts = { bubbles: true, cancelable: true, view: window };
     const target = icon || starBtn;
+    try { target.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1 })); } catch (_) {}
+    try { target.dispatchEvent(new PointerEvent('pointerup',   { ...opts, pointerId: 1 })); } catch (_) {}
     target.dispatchEvent(new MouseEvent('mousedown', opts));
-    target.dispatchEvent(new MouseEvent('mouseup', opts));
-    target.dispatchEvent(new MouseEvent('click', opts));
-    await sleep(400);
+    target.dispatchEvent(new MouseEvent('mouseup',   opts));
+    target.dispatchEvent(new MouseEvent('click',     opts));
+    await sleep(600);
+    if (isStarred()) { console.log('[Snow-we] dodax 星クリック成功(pointer+mouse)'); return true; }
+
+    // Try 3: starBtn 自身の .click()
+    starBtn.click();
+    await sleep(600);
 
     const success = isStarred();
     console.log('[Snow-we] dodax 星クリック完了, スター済み:', success);
@@ -1761,16 +1789,29 @@ function setBatchBadge(el, cls, text, tooltip) {
 function findNextPageButton() {
   const nextTexts = ['次へ', '次のページ', '>', '›', 'Next'];
 
-  // 1. テキストベースの「次へ」ボタン（ページ全体から探す）
+  // 1. テキストベースの「次へ」ボタン
+  // モーダル・カレンダー内の要素や長いテキストを含む要素は除外する
+  const isInModal = (el) => {
+    for (let p = el.parentElement; p; p = p.parentElement) {
+      const cls = (p.className || '').toLowerCase();
+      if (cls.includes('modal') || cls.includes('calendar') || cls.includes('dialog') ||
+          p.getAttribute('role') === 'dialog') return true;
+    }
+    return false;
+  };
   for (const el of document.querySelectorAll('a,button,[role="button"],span,div,li')) {
     const t = (el.innerText || el.getAttribute('aria-label') || '').trim();
-    if (nextTexts.some(kw => t === kw || t.includes(kw))) {
-      if (!el.disabled && !el.classList.contains('disabled') &&
-          el.getAttribute('aria-disabled') !== 'true' &&
-          !el.classList.contains('active') && !el.classList.contains('current')) {
-        console.log('[Snow-we] テキスト次ページボタン発見:', t, el.tagName, el.className.substring(0, 40));
-        return el;
-      }
+    // テキストが短い（< 20文字）場合のみ。'>'や'›'は完全一致のみ
+    const matches = nextTexts.some(kw => {
+      if (kw === '>' || kw === '›') return t === kw;
+      return (t === kw || t.includes(kw)) && t.length < 20;
+    });
+    if (matches && !el.disabled && !el.classList.contains('disabled') &&
+        el.getAttribute('aria-disabled') !== 'true' &&
+        !el.classList.contains('active') && !el.classList.contains('current') &&
+        !isInModal(el)) {
+      console.log('[Snow-we] テキスト次ページボタン発見:', t, el.tagName, el.className.substring(0, 40));
+      return el;
     }
   }
 
