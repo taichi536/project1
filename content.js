@@ -1577,37 +1577,52 @@ function checkIncomeNG(profileText) {
 function checkShortTenureNG(profileText) {
   if (!profileText) return null;
 
-  // 会社エントリーの目印（㈱・（株）・\(株\) を追加）
   const companyRe = /株式会社|有限会社|合同会社|ホールディングス|LLC|Inc\b|Corp\b|Ltd\b|銀行[^員振]|証券[^取]|生命保険|損害保険|病院|クリニック|㈱|（株）|\(株\)/;
 
-  // 1行から在籍期間（ヶ月換算）を取り出す
-  // Bizreach形式: （X年Xヶ月）/ doda-x形式: 行頭に "0.3年", "6ヶ月", "各1年" など
+  // テキスト表記から在籍期間（ヶ月）を取り出す
+  // 対応形式: （X年Xヶ月）/ 0.3年 / 6ヶ月 / 各1年
   function parseTenureMonths(str) {
     const m1 = str.match(/[（(](\d+)年(?:(\d+)[ヶか]月)?[）)]/);
     if (m1) return parseInt(m1[1], 10) * 12 + parseInt(m1[2] || '0', 10);
     const m2 = str.match(/[（(](\d+)[ヶか]月[）)]/);
     if (m2) return parseInt(m2[1], 10);
-    // doda-x: 行頭が小数・整数の年数
     const m3 = str.match(/^(\d+(?:\.\d+)?)年/);
     if (m3) return Math.round(parseFloat(m3[1]) * 12);
-    // doda-x: 行頭が月数
     const m4 = str.match(/^(\d+)[ヶか]月/);
     if (m4) return parseInt(m4[1], 10);
-    // 各X年 形式
     const m5 = str.match(/各(\d+(?:\.\d+)?)年/);
     if (m5) return Math.round(parseFloat(m5[1]) * 12);
     return null;
   }
 
-  // doda-x: 行頭が在籍期間で始まる行かどうか
-  const dodaxTenureRe = /^(?:各\d+(?:\.\d+)?年|\d+(?:\.\d+)?年|\d+[ヶか]月)/;
+  // 詳細プロフィールページ形式: "2014年11月 〜 2015年8月" → ヶ月数
+  function parseDateRangeMonths(str) {
+    const m = str.match(/(\d{4})年(\d{1,2})月\s*[〜~～]\s*(\d{4})年(\d{1,2})月/);
+    if (!m) return null;
+    const months = (parseInt(m[3]) - parseInt(m[1])) * 12 + (parseInt(m[4]) - parseInt(m[2]));
+    return months > 0 ? months : null;
+  }
 
+  const dodaxTenureRe = /^(?:各\d+(?:\.\d+)?年|\d+(?:\.\d+)?年|\d+[ヶか]月)/;
   const lines = profileText.split('\n').map(l => l.trim()).filter(Boolean);
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.includes('現在') || line.includes('在籍中')) continue;
 
+    // ── A: 日付範囲形式（"YYYY年MM月 〜 YYYY年MM月"）──
+    // 詳細プロフィールページで職歴が "会社名 2014年11月 〜 2015年8月" 形式で表示される場合
+    const dateMonths = parseDateRangeMonths(line);
+    if (dateMonths !== null && dateMonths < 24) {
+      const prevLine2 = i > 0 ? lines[i - 1] : '';
+      const nextLine2 = i < lines.length - 1 ? lines[i + 1] : '';
+      if (companyRe.test(line) || companyRe.test(prevLine2) || companyRe.test(nextLine2)) {
+        console.log(`[Snow-we] 短期在籍NG(date): ${dateMonths}ヶ月 / "${line.substring(0, 60)}"`);
+        return 'NG';
+      }
+    }
+
+    // ── B: テキスト在籍期間形式 ──
     const total = parseTenureMonths(line);
     if (total === null || total <= 0 || total >= 24) continue;
 
@@ -1623,22 +1638,17 @@ function checkShortTenureNG(profileText) {
 
     // ③ doda-x形式の在籍期間行（行頭が数字+年/月）
     if (dodaxTenureRe.test(line)) {
-      // シーケンスの2行目以降はすでに合計済みのためスキップ
-      if (i > 0 && dodaxTenureRe.test(lines[i - 1])) continue;
+      if (i > 0 && dodaxTenureRe.test(lines[i - 1])) continue; // シーケンス2行目以降はスキップ
 
-      // 直近5行以内に会社名があるか確認（在籍中フラグも拾う）
       let companyLine = null;
       let isCurrent = false;
       for (let k = i - 1; k >= Math.max(0, i - 5); k--) {
-        if (lines[k].includes('現在') || lines[k].includes('在籍中') || lines[k].includes('現職')) {
-          isCurrent = true;
-        }
+        if (lines[k].includes('現在') || lines[k].includes('在籍中') || lines[k].includes('現職')) isCurrent = true;
         if (companyRe.test(lines[k])) { companyLine = lines[k]; break; }
-        if (dodaxTenureRe.test(lines[k])) break; // 別シーケンスに入ったら停止
+        if (dodaxTenureRe.test(lines[k])) break;
       }
       if (!companyLine || isCurrent) continue;
 
-      // 連続する在籍期間行を合計して会社全体の在籍期間を算出
       let companyTotal = total;
       for (let j = i + 1; j < lines.length; j++) {
         if (!dodaxTenureRe.test(lines[j]) || lines[j].includes('現在') || lines[j].includes('在籍中')) break;
@@ -1654,16 +1664,10 @@ function checkShortTenureNG(profileText) {
     const prevLine = i > 0 ? lines[i - 1] : '';
     if (companyRe.test(prevLine)) {
       const prevTenure = parseTenureMonths(prevLine);
-      if (prevTenure !== null && prevTenure >= 24) {
-        // 直前が長期在籍の会社エントリー → 部署・役職変更のサブエントリー → スキップ
-        continue;
-      }
-      // 直前が会社名のみ行（在籍期間なし）かつ今行に役職・部署なし → NG
+      if (prevTenure !== null && prevTenure >= 24) continue; // 長期在籍会社のサブエントリー
       console.log(`[Snow-we] 短期在籍NG: ${total}ヶ月 / 会社名行: "${prevLine.substring(0, 50)}"`);
       return 'NG';
     }
-
-    // 前後に会社名なし → 部署・役職・プロジェクト期間のサブエントリー → スキップ
   }
   return null;
 }
@@ -1963,7 +1967,9 @@ function buildCriteriaText(criteria, platform) {
     if (criteria.ageMax) parts.push(`${criteria.ageMax}歳以下`);
     lines.push(`- 年齢追加条件: ${parts.join('かつ')}`);
   }
-  if (criteria.minTenure) lines.push(`- 在籍期間: 異なる会社への転職で${criteria.minTenure}年未満の在籍が1社でもある場合はNG。同一会社内での部署異動・職種変更・昇格は同じ会社の在籍としてまとめて計算すること（例：同社に7年いて途中で役職変更した場合は7年として扱う）。在籍期間が読み取れない場合はスキップ`);
+  // minTenure未設定時はデフォルト2年を適用
+  const tenureYears = criteria.minTenure || 2;
+  lines.push(`- 在籍期間: 異なる会社への転職で${tenureYears}年未満の在籍が1社でもある場合はNG。同一会社内での部署異動・職種変更・昇格は同じ会社の在籍としてまとめて計算すること（例：同社に7年いて途中で役職変更した場合は7年として扱う）。在籍期間が読み取れない場合はスキップ`);
   if (criteria.requiredKeywords) lines.push(`- 必須経験: ${criteria.requiredKeywords}`);
   if (criteria.excludeCompanies) lines.push(`- 除外企業（追加）: 職歴に${criteria.excludeCompanies}が含まれる場合は即NG`);
   if (criteria.excludeKeywords)  lines.push(`- 除外: ${criteria.excludeKeywords}`);
