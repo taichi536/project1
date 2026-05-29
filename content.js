@@ -1120,8 +1120,9 @@ async function getFullProfile(cardEl, fallbackText) {
     if (fetched && fetched.length > 300) return fetched;
   }
 
-  // フォールバック：一覧カードのテキスト
-  return fallbackText.substring(0, 900);
+  // フォールバック：一覧カードのテキスト（doda-xは職歴が長いため1500文字）
+  const fallbackLimit = platform === 'dodax' ? 1500 : 900;
+  return fallbackText.substring(0, fallbackLimit);
 }
 
 // カード内のプロフィールページURLを探す
@@ -1384,27 +1385,49 @@ async function clickAddButton(cardEl, tagName) {
     const searchRoot = cardEl.closest('li, [class*="result"], [class*="member"], [class*="item"]') || cardEl;
     const starBtn = searchRoot.querySelector('.c-star-cts');
     if (!starBtn) { console.warn('[Snow-we] dodax 星ボタン未発見'); return false; }
-    const icon = starBtn.querySelector('i');
-    if (icon && icon.className.includes('icon-star') && !icon.className.includes('icon-star_border')) {
-      console.log('[Snow-we] dodax すでにスター済み、スキップ');
+
+    const isStarred = () => {
+      const ic = starBtn.querySelector('i');
+      return !!(ic && ic.className.includes('icon-star') && !ic.className.includes('icon-star_border'));
+    };
+    if (isStarred()) { console.log('[Snow-we] dodax すでにスター済み、スキップ'); return false; }
+
+    // Try 1: React fiber の onClick を直接呼び出す（React 17+ 対応）
+    const tryFiberClick = (el) => {
+      try {
+        const fKey = Object.keys(el).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'));
+        if (!fKey) return false;
+        let fiber = el[fKey];
+        while (fiber) {
+          const props = fiber.memoizedProps;
+          if (props && typeof props.onClick === 'function') {
+            props.onClick({ type: 'click', bubbles: true, cancelable: true, target: el, currentTarget: el, preventDefault: () => {}, stopPropagation: () => {} });
+            return true;
+          }
+          fiber = fiber.return;
+        }
+      } catch (_) {}
       return false;
-    }
-    // React系フレームワーク対応: mousedown→mouseup→click をすべて dispatch
+    };
+    const icon = starBtn.querySelector('i');
+    tryFiberClick(starBtn) || (icon && tryFiberClick(icon));
+    await sleep(400);
+    if (isStarred()) { console.log('[Snow-we] dodax 星クリック成功(fiber)'); return true; }
+
+    // Try 2: ネイティブ click（React ルートへのイベント委譲を通じて発火）
+    starBtn.click();
+    await sleep(400);
+    if (isStarred()) { console.log('[Snow-we] dodax 星クリック成功(native)'); return true; }
+
+    // Try 3: MouseEvent シーケンス
     const opts = { bubbles: true, cancelable: true, view: window };
     const target = icon || starBtn;
     target.dispatchEvent(new MouseEvent('mousedown', opts));
     target.dispatchEvent(new MouseEvent('mouseup', opts));
     target.dispatchEvent(new MouseEvent('click', opts));
-    await sleep(300);
-    // フォールバック：親要素にも同じシーケンス
-    if (icon && icon.className.includes('icon-star_border')) {
-      starBtn.dispatchEvent(new MouseEvent('mousedown', opts));
-      starBtn.dispatchEvent(new MouseEvent('mouseup', opts));
-      starBtn.dispatchEvent(new MouseEvent('click', opts));
-      await sleep(300);
-    }
-    const afterIcon = starBtn.querySelector('i');
-    const success = !!(afterIcon && afterIcon.className.includes('icon-star') && !afterIcon.className.includes('icon-star_border'));
+    await sleep(400);
+
+    const success = isStarred();
     console.log('[Snow-we] dodax 星クリック完了, スター済み:', success);
     return true;
   }
@@ -1546,17 +1569,30 @@ function checkIncomeNG(profileText) {
 function checkShortTenureNG(profileText) {
   if (!profileText) return null;
 
-  // 会社エントリーの目印（部署名・役職名とは区別できる）
-  const companyRe = /株式会社|有限会社|合同会社|ホールディングス|LLC|Inc\b|Corp\b|Ltd\b|銀行[^員振]|証券[^取]|生命保険|損害保険|病院|クリニック/;
+  // 会社エントリーの目印（㈱・（株）・\(株\) を追加）
+  const companyRe = /株式会社|有限会社|合同会社|ホールディングス|LLC|Inc\b|Corp\b|Ltd\b|銀行[^員振]|証券[^取]|生命保険|損害保険|病院|クリニック|㈱|（株）|\(株\)/;
 
   // 1行から在籍期間（ヶ月換算）を取り出す
+  // Bizreach形式: （X年Xヶ月）/ doda-x形式: 行頭に "0.3年", "6ヶ月", "各1年" など
   function parseTenureMonths(str) {
-    const m1 = str.match(/[（(](\d+)年(?:(\d+)ヶ月)?[）)]/);
+    const m1 = str.match(/[（(](\d+)年(?:(\d+)[ヶか]月)?[）)]/);
     if (m1) return parseInt(m1[1], 10) * 12 + parseInt(m1[2] || '0', 10);
-    const m2 = str.match(/[（(](\d+)ヶ月[）)]/);
+    const m2 = str.match(/[（(](\d+)[ヶか]月[）)]/);
     if (m2) return parseInt(m2[1], 10);
+    // doda-x: 行頭が小数・整数の年数
+    const m3 = str.match(/^(\d+(?:\.\d+)?)年/);
+    if (m3) return Math.round(parseFloat(m3[1]) * 12);
+    // doda-x: 行頭が月数
+    const m4 = str.match(/^(\d+)[ヶか]月/);
+    if (m4) return parseInt(m4[1], 10);
+    // 各X年 形式
+    const m5 = str.match(/各(\d+(?:\.\d+)?)年/);
+    if (m5) return Math.round(parseFloat(m5[1]) * 12);
     return null;
   }
+
+  // doda-x: 行頭が在籍期間で始まる行かどうか
+  const dodaxTenureRe = /^(?:各\d+(?:\.\d+)?年|\d+(?:\.\d+)?年|\d+[ヶか]月)/;
 
   const lines = profileText.split('\n').map(l => l.trim()).filter(Boolean);
 
@@ -1577,20 +1613,49 @@ function checkShortTenureNG(profileText) {
     const roleRe = /部長|課長|係長|主任|マネージャー|ディレクター|リーダー|担当|チーフ|シニア|ジュニア|エンジニア|営業部|開発部|総務部|人事部|経営企画|事業部|本部|センター|グループ|チーム|課$|室$|部$/;
     if (roleRe.test(line)) continue;
 
-    // ③ 直前行を確認
+    // ③ doda-x形式の在籍期間行（行頭が数字+年/月）
+    if (dodaxTenureRe.test(line)) {
+      // シーケンスの2行目以降はすでに合計済みのためスキップ
+      if (i > 0 && dodaxTenureRe.test(lines[i - 1])) continue;
+
+      // 直近5行以内に会社名があるか確認（在籍中フラグも拾う）
+      let companyLine = null;
+      let isCurrent = false;
+      for (let k = i - 1; k >= Math.max(0, i - 5); k--) {
+        if (lines[k].includes('現在') || lines[k].includes('在籍中') || lines[k].includes('現職')) {
+          isCurrent = true;
+        }
+        if (companyRe.test(lines[k])) { companyLine = lines[k]; break; }
+        if (dodaxTenureRe.test(lines[k])) break; // 別シーケンスに入ったら停止
+      }
+      if (!companyLine || isCurrent) continue;
+
+      // 連続する在籍期間行を合計して会社全体の在籍期間を算出
+      let companyTotal = total;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (!dodaxTenureRe.test(lines[j]) || lines[j].includes('現在') || lines[j].includes('在籍中')) break;
+        const t = parseTenureMonths(lines[j]);
+        if (t) companyTotal += t;
+      }
+      if (companyTotal >= 24) continue;
+      console.log(`[Snow-we] 短期在籍NG(dodax): 合計${companyTotal}ヶ月 / 会社: "${companyLine.substring(0, 50)}"`);
+      return 'NG';
+    }
+
+    // ④ Bizreach形式: 直前行を確認
     const prevLine = i > 0 ? lines[i - 1] : '';
     if (companyRe.test(prevLine)) {
       const prevTenure = parseTenureMonths(prevLine);
       if (prevTenure !== null && prevTenure >= 24) {
-        // 直前が長期在籍の会社エントリー → 今行は部署・役職変更のサブエントリー → スキップ
+        // 直前が長期在籍の会社エントリー → 部署・役職変更のサブエントリー → スキップ
         continue;
       }
-      // 直前が会社名のみ行（在籍期間なし）かつ今行に役職・部署なし → 新規会社の短期在籍 → NG
+      // 直前が会社名のみ行（在籍期間なし）かつ今行に役職・部署なし → NG
       console.log(`[Snow-we] 短期在籍NG: ${total}ヶ月 / 会社名行: "${prevLine.substring(0, 50)}"`);
       return 'NG';
     }
 
-    // ③ 前後に会社名なし → 部署・役職・プロジェクト期間のサブエントリー → スキップ
+    // 前後に会社名なし → 部署・役職・プロジェクト期間のサブエントリー → スキップ
   }
   return null;
 }
