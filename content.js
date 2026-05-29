@@ -1714,15 +1714,14 @@ function setBatchBadge(el, cls, text, tooltip) {
 // 次ページボタンを探す
 function findNextPageButton() {
   const nextTexts = ['次へ', '次のページ', '>', '›', 'Next'];
-  // ページネーションエリアを優先して探す
   const paginationArea = document.querySelector(
     '[class*="pagination"],[class*="pager"],[class*="page-nav"],[aria-label*="ページ"]'
   ) || document.body;
 
+  // 1. テキストベースの「次へ」ボタンを探す
   for (const el of paginationArea.querySelectorAll('a,button,[role="button"]')) {
     const t = (el.innerText || el.getAttribute('aria-label') || '').trim();
     if (nextTexts.some(kw => t === kw || t.includes(kw))) {
-      // 無効化・現在ページでないことを確認
       if (!el.disabled && !el.classList.contains('disabled') &&
           !el.getAttribute('aria-disabled') &&
           !el.classList.contains('active') && !el.classList.contains('current')) {
@@ -1730,6 +1729,39 @@ function findNextPageButton() {
       }
     }
   }
+
+  // 2. 数字ページネーション: アクティブページ番号+1のボタンを探す（doda-x等）
+  const pageButtons = Array.from(paginationArea.querySelectorAll('a,button,[role="button"]'))
+    .filter(el => /^\d+$/.test((el.innerText || '').trim()));
+
+  if (pageButtons.length > 0) {
+    // 現在のアクティブページを特定
+    let currentPage = null;
+    const activeBtn = pageButtons.find(el =>
+      el.classList.contains('active') || el.classList.contains('current') ||
+      el.classList.contains('is-active') || el.classList.contains('selected') ||
+      el.getAttribute('aria-current') === 'page' ||
+      el.getAttribute('aria-selected') === 'true' ||
+      getComputedStyle(el).fontWeight >= 700
+    );
+    if (activeBtn) {
+      currentPage = parseInt((activeBtn.innerText || '').trim(), 10);
+    } else {
+      // URLからページ番号を推定（page=X / p=X）
+      const m = location.href.match(/[?&](?:page|p)=(\d+)/);
+      currentPage = m ? parseInt(m[1], 10) : 1;
+    }
+
+    const nextBtn = pageButtons.find(el =>
+      parseInt((el.innerText || '').trim(), 10) === currentPage + 1 &&
+      !el.disabled && !el.getAttribute('aria-disabled')
+    );
+    if (nextBtn) {
+      console.log(`[Snow-we] 数字ページネーション: ${currentPage} → ${currentPage + 1}`);
+      return nextBtn;
+    }
+  }
+
   return null;
 }
 
