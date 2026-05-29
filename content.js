@@ -948,9 +948,11 @@ async function triggerAutoAdd() {
     // ─── AI判定（1人ずつ）───
     setBatchBadge(el, 'checking', '🤖 判定中...');
     showAutoStatus(`🤖 ${pending.length + 1}人目 AI判定中... ✅${addedCount}人追加`);
-    let overall;
+    let overall, judgeReason;
     try {
-      overall = await judgeSingleCandidate(apiKey, profileText, criteria);
+      const result = await judgeSingleCandidate(apiKey, profileText, criteria);
+      overall = result.verdict;
+      judgeReason = result.reason || '';
     } catch (err) {
       console.error('[Snow-we] judgeSingleCandidate error:', err);
       setBatchBadge(el, 'warn', `⚠️ 判定失敗: ${(err.message || '').slice(0, 30)}`);
@@ -962,7 +964,8 @@ async function triggerAutoAdd() {
 
     setBatchBadge(el,
       overall === 'OK' ? 'ok' : overall === 'NG' ? 'ng' : 'warn',
-      overall === 'OK' ? '✅ スカウト候補' : overall === 'NG' ? '❌ 見送り' : '⚠️ 要確認');
+      overall === 'OK' ? '✅ スカウト候補' : overall === 'NG' ? '❌ 見送り' : '⚠️ 要確認',
+      judgeReason);
 
     const shouldAdd = getPlatform() === 'bizreach' ? overall === 'OK' : (overall === 'OK' || overall === '要確認');
     if (shouldAdd) {
@@ -1386,10 +1389,16 @@ async function clickAddButton(cardEl, tagName) {
     const starBtn = searchRoot.querySelector('.c-star-cts');
     if (!starBtn) { console.warn('[Snow-we] dodax 星ボタン未発見'); return false; }
 
+    const icon = starBtn.querySelector('i');
+    // aria属性・コンテナクラス・アイコンクラスの複数手段でスター済みを判定
     const isStarred = () => {
-      const ic = starBtn.querySelector('i');
-      return !!(ic && ic.className.includes('icon-star') && !ic.className.includes('icon-star_border'));
+      if (starBtn.getAttribute('aria-pressed') === 'true' ||
+          starBtn.getAttribute('aria-checked') === 'true') return true;
+      if (/\b(?:active|starred|is-active|is-starred|on)\b/.test(starBtn.className)) return true;
+      if (!icon) return false;
+      return icon.className.includes('icon-star') && !icon.className.includes('icon-star_border');
     };
+    console.log(`[Snow-we] dodax 星診断 btn:"${starBtn.className}" icon:"${icon?.className || 'なし'}" aria-pressed:"${starBtn.getAttribute('aria-pressed')}" → starred:${isStarred()}`);
     if (isStarred()) { console.log('[Snow-we] dodax すでにスター済み、スキップ'); return false; }
 
     // Try 1: React fiber の onClick を直接呼び出す（React 17+ 対応）
@@ -1409,7 +1418,6 @@ async function clickAddButton(cardEl, tagName) {
       } catch (_) {}
       return false;
     };
-    const icon = starBtn.querySelector('i');
     tryFiberClick(starBtn) || (icon && tryFiberClick(icon));
     await sleep(400);
     if (isStarred()) { console.log('[Snow-we] dodax 星クリック成功(fiber)'); return true; }
@@ -1660,7 +1668,7 @@ function checkShortTenureNG(profileText) {
   return null;
 }
 
-// 1候補者のAI判定（Haiku使用：高速・低コスト）
+// 1候補者のAI判定
 async function judgeSingleCandidate(apiKey, profileText, criteria) {
   const criteriaLines = buildCriteriaText(criteria, getPlatform());
   const prompt = `転職エージェントの一次選定アシスタントです。
@@ -1671,26 +1679,31 @@ ${criteriaLines}
 【候補者情報】
 ${profileText}
 
-JSON1行のみで出力:
-{"o":"OK"} または {"o":"NG"} または {"o":"要確認"}`;
+JSON1行のみで出力（rは判定理由を20字以内で）:
+{"o":"OK","r":"理由"} または {"o":"NG","r":"理由"} または {"o":"要確認","r":"理由"}`;
 
   const data = await claudeFetch(apiKey, {
     model: 'claude-sonnet-4-6',
-    max_tokens: 30,
+    max_tokens: 80,
     messages: [{ role: 'user', content: prompt }]
   });
   const text = (data.content?.[0]?.text || '').trim();
-  const match = text.match(/"o"\s*:\s*"([^"]+)"/);
-  return match ? match[1] : '要確認';
+  const verdictMatch = text.match(/"o"\s*:\s*"([^"]+)"/);
+  const reasonMatch  = text.match(/"r"\s*:\s*"([^"]+)"/);
+  const verdict = verdictMatch ? verdictMatch[1] : '要確認';
+  const reason  = reasonMatch  ? reasonMatch[1]  : '';
+  console.log(`[Snow-we] AI判定: ${verdict}${reason ? ` / ${reason}` : ''}`);
+  return { verdict, reason };
 }
 
 // バッジをセット（バッチ用）
-function setBatchBadge(el, cls, text) {
+function setBatchBadge(el, cls, text, tooltip) {
   el.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
   if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
   const badge = document.createElement('div');
   badge.className = `snow-we-badge batch ${cls}`;
   badge.textContent = text;
+  if (tooltip) badge.title = tooltip; // ホバーで判定理由を表示
   el.appendChild(badge);
 }
 
