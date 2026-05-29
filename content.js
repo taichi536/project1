@@ -1472,17 +1472,33 @@ async function handleAddDialog(tagName) {
 }
 
 // プロフィールテキストから年収（万円）を抽出する
+// カンマ区切り（1,000 ～ 1,199万円）に対応。範囲の場合は下限値を使用
 function extractIncomeFromText(text) {
-  // 「現年収」「年収」「想定年収」などに続く数値を優先的に拾う
-  const patterns = [
-    /現年収[^\d]*(\d{3,4})万/,
-    /年収[^\d]*(\d{3,4})万/,
-    /(\d{3,4})万円?(?:程度|前後|台)?(?:\s|　|$|\/|・)/,
+  const num = '(?:\\d{1,2},\\d{3}|\\d{3,4})'; // 1,000 or 1000 形式
+  const parseNum = s => parseInt(s.replace(/,/g, ''), 10);
+
+  // 「現年収」「年収」に続く数値（範囲 or 単値）を優先
+  const labelPatterns = [
+    new RegExp(`現年収[^\\d]*(${num})\\s*[〜~～]`),
+    new RegExp(`現年収[^\\d]*(${num})万`),
+    new RegExp(`年収[^\\d]*(${num})\\s*[〜~～]`),
+    new RegExp(`年収[^\\d]*(${num})万`),
   ];
-  for (const re of patterns) {
+  for (const re of labelPatterns) {
     const m = text.match(re);
-    if (m) return parseInt(m[1], 10);
+    if (m) return parseNum(m[1]);
   }
+
+  // 範囲形式（下限を採用）: 1,000 ～ 1,199万円 → 1000
+  const rangeRe = new RegExp(`(${num})\\s*[〜~～]\\s*${num}万`);
+  const rangeM = text.match(rangeRe);
+  if (rangeM) return parseNum(rangeM[1]);
+
+  // 単値: 800万円
+  const singleRe = new RegExp(`(${num})万円?(?:程度|前後|台)?(?:\\s|　|$|\\/|・)`);
+  const singleM = text.match(singleRe);
+  if (singleM) return parseNum(singleM[1]);
+
   return null;
 }
 
@@ -1905,8 +1921,10 @@ function extractAllCandidateCards() {
   return cards.slice(0, 700).map(el => {
     const text = (el.innerText || '').trim();
     const ageMatch = text.match(/(\d{2})歳/);
-    const incomeMatch = text.match(/(\d{3,4})[〜~～](\d{3,4})万円/) ||
-                        text.match(/(\d{3,4})万円/) ||
+    // カンマ区切り対応（1,000 ～ 1,199万円 → 1000）
+    const numPat = '(?:\\d{1,2},\\d{3}|\\d{3,4})';
+    const incomeMatch = text.match(new RegExp(`(${numPat})\\s*[〜~～]\\s*${numPat}万`)) ||
+                        text.match(new RegExp(`(${numPat})万円?`)) ||
                         text.match(/(\d{4})万/);
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
@@ -1914,7 +1932,7 @@ function extractAllCandidateCards() {
       el,
       text,
       age:        ageMatch   ? parseInt(ageMatch[1]) : null,
-      incomeText: incomeMatch ? incomeMatch[0]       : null,
+      incomeText: incomeMatch ? incomeMatch[1].replace(/,/g, '') + '万' : null,
       summary:    lines.slice(0, 12).join(' / ')
     };
   });
