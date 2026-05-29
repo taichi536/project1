@@ -1019,18 +1019,34 @@ async function triggerAutoAdd() {
   const nextPage = findNextPageButton();
   if (nextPage) {
     showAutoStatus(`🤖 次ページへ移動中... (累計✅${addedCount}人追加)`);
-    // sessionStorageに再開フラグを設定（タブを閉じると自動消去されるため幽霊起動しない）
+    // 進捗を保存（フルページロード時の再開用 + SPA直接続行用）
+    await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: false });
     try {
       sessionStorage.setItem('snowWeAutoAdd', JSON.stringify({ resume: true, added: addedCount, processed: totalProcessed }));
     } catch (_) {}
-    await sleep(1000);
+
+    const prevUrl = location.href;
+    await sleep(500);
     nextPage.click();
+
+    // SPA ナビゲーション検出: URLが変わったら同一コンテキストで続行（window.loadは発火しない）
+    for (let w = 0; w < 24; w++) {
+      await sleep(250);
+      if (location.href !== prevUrl) {
+        showAutoStatus(`🤖 次ページ読込中... (累計✅${addedCount}人追加)`);
+        await sleep(2000); // 新コンテンツの描画を待つ
+        try { sessionStorage.removeItem('snowWeAutoAdd'); } catch (_) {}
+        await triggerAutoAdd(); // SPA: 同一コンテキストで次ページ処理
+        return;
+      }
+    }
+    // URLが変わらなかった = フルページロード → window.load で sessionStorage から再開される
+    await saveAutoAddProgress({ running: false });
   } else {
     // 全ページ完了
     showAutoStatus(`🤖 完了！ ✅${addedCount}人を検討リストに追加 (全${totalProcessed}人中)`, 8000);
+    await saveAutoAddProgress({ running: false });
   }
-  // chrome.storage.localのrunningフラグは使わない
-  await saveAutoAddProgress({ running: false });
 }
 
 // RDSのプロフィール/レジュメタブに切り替える
@@ -1742,7 +1758,7 @@ function findNextPageButton() {
       el.classList.contains('is-active') || el.classList.contains('selected') ||
       el.getAttribute('aria-current') === 'page' ||
       el.getAttribute('aria-selected') === 'true' ||
-      getComputedStyle(el).fontWeight >= 700
+      parseInt(getComputedStyle(el).fontWeight) >= 700
     );
     if (activeBtn) {
       currentPage = parseInt((activeBtn.innerText || '').trim(), 10);
