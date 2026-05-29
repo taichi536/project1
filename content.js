@@ -196,9 +196,17 @@ function highlightAddButton(cardEl) {
     return;
   }
 
+  // doda-x: 星ボタンをハイライト
+  if (platform === 'dodax') {
+    const searchRoot = cardEl.closest('li, [class*="result"], [class*="member"], [class*="item"]') || cardEl;
+    const starBtn = searchRoot.querySelector('.c-star-cts');
+    if (!starBtn) return;
+    starBtn.classList.add('snow-we-btn-highlight');
+    return;
+  }
+
   const btnTextMap = {
     ambi:     'この検討人材リストに追加',
-    dodax:    'タグ',
     rds:      '検討中リスト追加',
   };
   const label = btnTextMap[platform];
@@ -1371,10 +1379,25 @@ async function clickAddButton(cardEl, tagName) {
     return result;
   }
 
+  // doda-x: 星ボタン（c-star-cts）をクリック
+  if (platform === 'dodax') {
+    const searchRoot = cardEl.closest('li, [class*="result"], [class*="member"], [class*="item"]') || cardEl;
+    const starBtn = searchRoot.querySelector('.c-star-cts');
+    if (!starBtn) { console.warn('[Snow-we] dodax 星ボタン未発見'); return false; }
+    const icon = starBtn.querySelector('i');
+    if (icon && icon.className.includes('icon-star') && !icon.className.includes('icon-star_border')) {
+      console.log('[Snow-we] dodax すでにスター済み、スキップ');
+      return false;
+    }
+    starBtn.click();
+    await sleep(600);
+    console.log('[Snow-we] dodax 星クリック完了');
+    return true;
+  }
+
   const labelMap = {
     rds:      '検討中リスト追加',
     ambi:     'この検討人材リストに追加',
-    dodax:    'タグ',
     green:    '気になる',
     mynavi:   '検討リスト',
   };
