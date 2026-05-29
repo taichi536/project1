@@ -1826,8 +1826,8 @@ function findNextPageButton() {
   const isResultCountEl = (el) => {
     for (let p = el.parentElement, i = 0; p && i < 5; p = p.parentElement, i++) {
       const cls = (p.className || '').toLowerCase();
-      // 件数表示コンテナのクラス名パターン
-      if (cls.includes('cnt') || cls.includes('count') || cls.includes('result') ||
+      // 件数表示コンテナのクラス名パターン（'result'は検索結果リストと区別できないため除外）
+      if (cls.includes('cnt') || cls.includes('count') ||
           cls.includes('total') || cls.includes('件数') || cls.includes('hits')) return true;
     }
     return false;
