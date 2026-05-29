@@ -311,6 +311,128 @@ def run_screening_alerts(tickers: list[str] | None = None):
         print("  → 合格銘柄なし、通知なし")
 
 
+_MOMENTUM_HOLDINGS_FILE = Path(__file__).parent / ".momentum_holdings.json"
+_MOMENTUM_STOP_LOSS_PCT = float(os.getenv("MOMENTUM_STOP_LOSS_PCT", "10.0"))  # 買値から-X%で損切り
+_MOMENTUM_ENTRY_FILE = Path(__file__).parent / ".momentum_entries.json"  # 買値記録
+
+
+def _load_momentum_holdings() -> list:
+    if _MOMENTUM_HOLDINGS_FILE.exists():
+        try:
+            return json.loads(_MOMENTUM_HOLDINGS_FILE.read_text())
+        except Exception:
+            pass
+    return []
+
+
+def _load_momentum_entries() -> dict:
+    if _MOMENTUM_ENTRY_FILE.exists():
+        try:
+            return json.loads(_MOMENTUM_ENTRY_FILE.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def run_momentum_stop_loss():
+    """モメンタム保有銘柄の損切り・緊急撤退監視（毎日実行）"""
+    from modules.notifier import send_momentum_rebalance_alert
+
+    holdings = _load_momentum_holdings()
+    if not holdings:
+        print("[モメンタム監視] 保有銘柄なし、スキップ")
+        return
+
+    print(f"[モメンタム監視] 保有銘柄: {holdings}")
+    entries = _load_momentum_entries()
+    state = _load_state()
+    today = datetime.now().strftime("%Y-%m-%d")
+    notified = state.get("momentum_stop_notified", {})
+
+    emergency_exit = []
+    stop_loss_triggers = []
+    above_ma_count = 0
+
+    for ticker in holdings:
+        try:
+            df = fetch_ohlcv(ticker, period="14mo")
+            if df is None or df.empty:
+                continue
+            current = float(df["Close"].iloc[-1])
+
+            # 200日MAチェック（緊急撤退判定用）
+            if len(df) >= 200:
+                ma200 = float(df["Close"].rolling(200).mean().iloc[-1])
+                if current > ma200:
+                    above_ma_count += 1
+
+            # 損切りチェック（買値から-MOMENTUM_STOP_LOSS_PCT%）
+            entry_price = entries.get(ticker)
+            if entry_price:
+                entry_price = float(entry_price)
+                drop_pct = (current - entry_price) / entry_price * 100
+                threshold = -_MOMENTUM_STOP_LOSS_PCT
+                if drop_pct <= threshold and notified.get(ticker) != today:
+                    print(f"  ⚠️ {ticker}: 買値{entry_price:.0f}→現在{current:.0f} ({drop_pct:+.1f}%) 損切りライン到達")
+                    stop_loss_triggers.append((ticker, drop_pct))
+                    notified[ticker] = today
+                else:
+                    print(f"  {ticker}: {current:.0f} ({drop_pct:+.1f}%)")
+            else:
+                print(f"  {ticker}: {current:.0f} (買値未記録)")
+
+        except Exception as e:
+            print(f"  {ticker}: エラー - {e}")
+
+    # 緊急撤退判定: 保有銘柄の半数以上が200日MA以下
+    if holdings and above_ma_count < len(holdings) / 2:
+        emergency_exit = holdings
+        print(f"  🚨 緊急撤退シグナル: {above_ma_count}/{len(holdings)}銘柄のみMA上位")
+
+    # 通知送信
+    if stop_loss_triggers:
+        sell_tickers = [t for t, _ in stop_loss_triggers]
+        from modules.notifier import _telegram, _slack
+        import re
+        now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")
+        msg_lines = [f"⚠️ <b>損切りアラート</b> {now_str}\n"]
+        for t, pct in stop_loss_triggers:
+            msg_lines.append(f"🔴 {t}: {pct:+.1f}% → 売却を検討してください")
+        message = "\n".join(msg_lines)
+        tg = os.getenv("TELEGRAM_BOT_TOKEN")
+        chat = os.getenv("TELEGRAM_CHAT_ID")
+        if tg and chat:
+            from modules.notifier import _telegram as _tg
+            _tg(tg, chat, message)
+        sw = os.getenv("SLACK_WEBHOOK_URL")
+        if sw:
+            from modules.notifier import _slack as _sl
+            _sl(sw, re.sub(r"<b>(.*?)</b>", r"*\1*", message))
+
+    if emergency_exit and state.get("emergency_exit_notified") != today:
+        now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")
+        import re
+        msg = (f"🚨 <b>緊急撤退アラート</b> {now_str}\n\n"
+               f"保有銘柄の過半数が200日MAを下回りました。\n"
+               f"下落相場に入った可能性があります。\n\n"
+               f"⚡ 全銘柄売却を強く推奨します:\n"
+               + "\n".join(f"🔴 {t}" for t in emergency_exit))
+        tg = os.getenv("TELEGRAM_BOT_TOKEN")
+        chat = os.getenv("TELEGRAM_CHAT_ID")
+        if tg and chat:
+            from modules.notifier import _telegram as _tg
+            _tg(tg, chat, msg)
+        sw = os.getenv("SLACK_WEBHOOK_URL")
+        if sw:
+            from modules.notifier import _slack as _sl
+            _sl(sw, re.sub(r"<b>(.*?)</b>", r"*\1*", msg))
+        state["emergency_exit_notified"] = today
+        print(f"  🚨 緊急撤退通知送信")
+
+    state["momentum_stop_notified"] = notified
+    _save_state(state)
+
+
 def run_momentum_rebalance():
     """月次モメンタムリバランス通知（毎月1日頃に実行）"""
     from modules.universe import UNIVERSE
@@ -349,13 +471,7 @@ def run_momentum_rebalance():
     new_top = list(qualified.head(TOP_N).index)
 
     # 前回の推奨を読み込む
-    state_file = Path(__file__).parent / ".momentum_holdings.json"
-    prev_holdings = []
-    if state_file.exists():
-        try:
-            prev_holdings = json.loads(state_file.read_text())
-        except Exception:
-            pass
+    prev_holdings = _load_momentum_holdings()
 
     buy = [t for t in new_top if t not in prev_holdings]
     sell = [t for t in prev_holdings if t not in new_top]
@@ -366,7 +482,19 @@ def run_momentum_rebalance():
     print(f"  推奨TOP{TOP_N}: {new_top}")
     print(f"  買い: {buy} / 売り: {sell} / 継続: {hold}")
 
-    state_file.write_text(json.dumps(new_top, ensure_ascii=False))
+    # 保有銘柄と買値を保存
+    _MOMENTUM_HOLDINGS_FILE.write_text(json.dumps(new_top, ensure_ascii=False))
+    entries = _load_momentum_entries()
+    for t in buy:
+        try:
+            df = fetch_ohlcv(t, period="5d")
+            if df is not None and not df.empty:
+                entries[t] = float(df["Close"].iloc[-1])
+        except Exception:
+            pass
+    for t in sell:
+        entries.pop(t, None)
+    _MOMENTUM_ENTRY_FILE.write_text(json.dumps(entries, ensure_ascii=False))
 
     if buy or sell:
         result = send_momentum_rebalance_alert(buy=buy, sell=sell, hold=hold, rankings=rankings)
@@ -446,10 +574,14 @@ def main():
         if args.mode in ("all", "screening"):
             run_screening_alerts(tickers)
 
+        # モメンタム保有銘柄の損切り・緊急撤退監視（毎日実行）
+        if args.mode in ("all", "momentum", "stoploss"):
+            run_momentum_stop_loss()
+
         # 月次モメンタムリバランス（毎月1〜3日に1回実行）
         if args.mode in ("all", "momentum"):
-            now = datetime.now()
-            if args.mode == "momentum" or now.day <= 3:
+            now_dt = datetime.now()
+            if args.mode == "momentum" or now_dt.day <= 3:
                 run_momentum_rebalance()
 
         print(f"\n次回チェック: {args.loop}分後" if args.loop > 0 else "\n完了")
