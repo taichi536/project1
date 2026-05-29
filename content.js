@@ -1314,6 +1314,24 @@ async function clickBizreachStar(starBtn) {
   return false;
 }
 
+// API成功後に星のDOM状態を強制的にONにする（Angularをバイパスしているため手動補正）
+function forceBizreachStarOn(starBtn) {
+  const toggle = starBtn.querySelector('b-ui-icon-toggle') || starBtn;
+  toggle.checked = true;
+  toggle.setAttribute('checked', 'true');
+  try {
+    const ngApi = window.ng;
+    if (ngApi) {
+      for (const el of [toggle, starBtn]) {
+        const comp = ngApi.getComponent?.(el);
+        if (!comp) continue;
+        comp.checked = true;
+        ngApi.applyChanges?.(el);
+      }
+    }
+  } catch (_) {}
+}
+
 // Bizreach カード要素から resume の数値IDを取得する
 function getBizreachResumeNumericId(cardEl) {
   let el = cardEl;
@@ -1373,16 +1391,13 @@ async function clickAddButton(cardEl, tagName) {
       catch (_) { starredIds = new Set(); }
       if (starredIds.has(resumeNumericId)) {
         console.log('[Snow-we] セッション内スター済みスキップ:', resumeNumericId);
-        const toggle = starBtn.querySelector('b-ui-icon-toggle') || starBtn;
-        toggle.setAttribute('checked', 'true');
+        forceBizreachStarOn(starBtn);
         return false;
       }
       const apiOk = await callBizreachFavoriteApi(resumeNumericId);
       if (apiOk) {
         console.log('[Snow-we] APIで星追加成功:', resumeNumericId);
-        // DOM星状態を更新（Angularをバイパスしているため手動で反映）
-        const toggle = starBtn.querySelector('b-ui-icon-toggle') || starBtn;
-        toggle.setAttribute('checked', 'true');
+        forceBizreachStarOn(starBtn);
         starredIds.add(resumeNumericId);
         try { sessionStorage.setItem('snowWeBizreachStarred', JSON.stringify([...starredIds])); } catch (_) {}
         return true;
