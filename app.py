@@ -20,7 +20,7 @@ from modules.diary import add_trade, get_trades, add_review, get_reviews, trade_
 from modules.ai_analysis import analyze_five_forces, analyze_chart_ai
 from modules.news_fetcher import fetch_market_news, score_macro_relevance
 from modules.macro_analysis import get_macro_context, analyze_news_sentiment, quick_market_sentiment, fetch_live_market_data, get_market_sentiment_rule, get_sector_impact
-from modules.backtest import run_backtest, run_batch_backtest, STRATEGIES
+from modules.backtest import run_backtest, run_batch_backtest, run_momentum_portfolio_backtest, STRATEGIES
 from modules.portfolio import build_portfolio_summary
 from modules.charts import build_backtest_chart, build_correlation_heatmap, build_portfolio_pie
 from modules.notifier import send_signal_alert, send_screening_alert, send_stop_loss_alert, send_strong_buy_alert
@@ -1782,7 +1782,7 @@ elif page == "🔬 バックテスト":
     st.title("🔬 バックテスト")
     st.markdown("過去データで売買戦略の有効性を検証します")
 
-    bt_tab_single, bt_tab_batch = st.tabs(["📈 単一銘柄", "📊 一括バックテスト"])
+    bt_tab_single, bt_tab_batch, bt_tab_momentum = st.tabs(["📈 単一銘柄", "📊 一括バックテスト", "🚀 モメンタム戦略"])
 
     # ── 共通パラメータ（両タブで使う）──────────────────────────────────────
     with st.expander("⚙️ バックテスト設定（期間・戦略・資金）", expanded=False):
@@ -2062,6 +2062,103 @@ elif page == "🔬 バックテスト":
                     with st.expander(f"⚠️ エラー {len(batch_result['errors'])}件"):
                         for ticker, err in batch_result["errors"]:
                             st.text(f"{ticker}: {err}")
+
+    # ── モメンタム戦略タブ ────────────────────────────────────────────────────
+    with bt_tab_momentum:
+        st.markdown("### 🚀 モメンタムランキング戦略")
+        st.markdown("毎月末に「最も強い銘柄トップN」だけ保有する戦略です。月1回の入れ替えで運用します。")
+
+        from modules.universe import UNIVERSE as _MOM_UNIVERSE
+
+        _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+        _mom_preset = _mc1.selectbox("銘柄ユニバース", list(_MOM_UNIVERSE.keys()), key="mom_preset")
+        _mom_period = _mc2.selectbox("検証期間", ["3y", "5y"], index=1,
+                                     format_func=lambda x: {"3y": "3年", "5y": "5年"}[x],
+                                     key="mom_period")
+        _mom_top_n = _mc3.number_input("保有銘柄数", value=5, min_value=3, max_value=20, key="mom_topn",
+                                       help="毎月上位N銘柄だけ保有します")
+        _mom_lookback = _mc4.selectbox("モメンタム期間", [3, 6, 12], index=1,
+                                       format_func=lambda x: f"{x}ヶ月", key="mom_lookback")
+        _mc5, _mc6, _, _ = st.columns(4)
+        _mom_ma = _mc5.number_input("MAフィルター（日）", value=200, min_value=50, max_value=300, key="mom_ma",
+                                    help="この日数の移動平均より上の銘柄のみ買い対象")
+        _mom_cash = _mc6.number_input("初期資金 (円)", value=1_000_000, min_value=100_000, step=100_000, key="mom_cash")
+
+        _mom_tickers = [t if t.endswith(".T") or not t.isdigit() else t + ".T"
+                        for t in _MOM_UNIVERSE[_mom_preset]["tickers"]]
+
+        st.caption(f"対象: {_mom_preset} / {len(_mom_tickers)}銘柄 / 上位{_mom_top_n}銘柄保有 / {_mom_lookback}ヶ月モメンタム")
+
+        _mom_btn = st.button("▶ モメンタム戦略バックテスト実行", type="primary", key="mom_btn")
+
+        if _mom_btn:
+            with st.spinner(f"{len(_mom_tickers)}銘柄のデータ取得・シミュレーション中（1〜2分かかります）..."):
+                try:
+                    _mom_result = run_momentum_portfolio_backtest(
+                        tickers=_mom_tickers,
+                        fetch_fn=fetch_ohlcv,
+                        initial_cash=_mom_cash,
+                        top_n=int(_mom_top_n),
+                        lookback_months=int(_mom_lookback),
+                        ma_period=int(_mom_ma),
+                        fee_rate=0.002,
+                        period=_mom_period,
+                    )
+                    st.session_state["mom_result"] = _mom_result
+                except Exception as e:
+                    st.error(f"エラー: {e}")
+
+        _mom_result = st.session_state.get("mom_result")
+        if _mom_result:
+            m = _mom_result["metrics"]
+            _beat = m["総リターン(%)"] > m["B&Hリターン(%)"]
+
+            st.markdown("### 📊 結果サマリー")
+            _rc1, _rc2, _rc3, _rc4, _rc5 = st.columns(5)
+            _rc1.metric("最終資産", f"¥{m['最終資産']:,.0f}")
+            _rc2.metric("総リターン", f"{m['総リターン(%)']:+.1f}%",
+                        f"B&H: {m['B&Hリターン(%)']:+.1f}%",
+                        delta_color="normal" if _beat else "inverse")
+            _rc3.metric("最大DD", f"{m['最大ドローダウン(%)']:.1f}%")
+            _rc4.metric("シャープ", f"{m['シャープレシオ']:.2f}")
+            _rc5.metric("戦略優位", "✅ B&H超え" if _beat else "❌ B&H未満")
+
+            st.markdown(f"リバランス回数: **{m['リバランス回数']}回** / 総取引: **{m['総取引回数']}回**")
+
+            # ポートフォリオ推移チャート
+            pv = _mom_result["portfolio"]
+            if not pv.empty:
+                import plotly.graph_objects as go
+                fig_m = go.Figure()
+                fig_m.add_trace(go.Scatter(x=pv.index, y=pv["総資産"],
+                                           name="モメンタム戦略", line=dict(color="#26a69a", width=2)))
+                bh_line = [_mom_cash * (1 + m["B&Hリターン(%)"] / 100 * i / len(pv))
+                           for i in range(len(pv))]
+                fig_m.add_trace(go.Scatter(x=pv.index, y=bh_line,
+                                           name="B&H（ユニバース均等）",
+                                           line=dict(color="#888", width=1, dash="dash")))
+                fig_m.update_layout(title="ポートフォリオ推移", yaxis_title="資産額（円）",
+                                    height=350, plot_bgcolor="rgba(0,0,0,0)",
+                                    paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#ccc"))
+                st.plotly_chart(fig_m, use_container_width=True)
+
+            # 現在のランキング
+            st.markdown("### 📋 現在のモメンタムランキング（今月の推奨）")
+            if not _mom_result["ranking"].empty:
+                st.dataframe(_mom_result["ranking"].head(15), hide_index=True, width="stretch")
+                top_now = _mom_result["ranking"][_mom_result["ranking"]["推奨"] == "✅ 買い"]["銘柄"].tolist()
+                if top_now:
+                    st.success(f"**今月の推奨銘柄（上位{_mom_top_n}）**: {' / '.join(top_now)}")
+
+            # 取引履歴
+            if not _mom_result["trades"].empty:
+                with st.expander(f"📝 取引履歴 ({len(_mom_result['trades'])}件)"):
+                    st.dataframe(_mom_result["trades"], hide_index=True, width="stretch")
+
+            if _mom_result["errors"]:
+                with st.expander(f"⚠️ データ取得エラー {len(_mom_result['errors'])}件"):
+                    for t, e in _mom_result["errors"][:10]:
+                        st.text(f"{t}: {e}")
 
 
 # ─── ポートフォリオ最適化 ─────────────────────────────────────────────────────

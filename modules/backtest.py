@@ -350,3 +350,151 @@ def run_batch_backtest(
     }
 
     return {"summary": summary, "rows": df_rows, "errors": errors}
+
+
+def run_momentum_portfolio_backtest(
+    tickers: list[str],
+    fetch_fn,
+    initial_cash: float = 1_000_000,
+    top_n: int = 5,
+    lookback_months: int = 6,
+    ma_period: int = 200,
+    fee_rate: float = 0.002,
+    period: str = "5y",
+) -> dict:
+    """
+    モメンタムランキングによるポートフォリオバックテスト。
+    毎月末にリバランスし、過去lookback_months月のリターン上位top_n銘柄を保有。
+    200日MA以上の銘柄のみ買い対象。
+    """
+    # 全銘柄データ取得
+    all_dfs = {}
+    errors = []
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = {ex.submit(fetch_fn, t, period): t for t in tickers}
+        for fut in as_completed(futures):
+            t = futures[fut]
+            try:
+                df = fut.result()
+                if df is not None and not df.empty and len(df) > ma_period:
+                    all_dfs[t] = df[["Close"]].copy()
+            except Exception as e:
+                errors.append((t, str(e)))
+
+    if len(all_dfs) < 2:
+        raise ValueError("十分なデータを取得できませんでした")
+
+    # 全銘柄の終値マトリクス
+    prices = pd.DataFrame({t: df["Close"].squeeze() for t, df in all_dfs.items()})
+    prices = prices.sort_index().ffill()
+
+    lookback_days = lookback_months * 21
+
+    # 月末リバランス日
+    rebalance_dates = prices.resample("ME").last().index
+
+    cash = initial_cash
+    holdings: dict[str, float] = {}  # {ticker: shares}
+    pv_records = []
+    trades_log = []
+    monthly_holdings = []
+
+    for rb_date in rebalance_dates:
+        hist = prices.loc[:rb_date].dropna(how="all")
+        if len(hist) < lookback_days + 20:
+            continue
+
+        cur = hist.iloc[-1]
+        past_idx = max(0, len(hist) - lookback_days)
+        past = hist.iloc[past_idx]
+
+        # モメンタムスコア（過去lookback_months月リターン）
+        momentum = ((cur / past) - 1) * 100
+
+        # 200日MAフィルター
+        ma = hist.tail(ma_period).mean()
+        qualified = momentum[cur > ma].dropna().sort_values(ascending=False)
+        new_top = list(qualified.head(top_n).index)
+
+        # 現在のポートフォリオ時価
+        pv = cash + sum(holdings.get(t, 0) * cur.get(t, 0) for t in holdings)
+
+        # 売却: 新トップ外の銘柄
+        for t in list(holdings.keys()):
+            if t not in new_top:
+                price = cur.get(t)
+                if price and not pd.isna(price) and holdings[t] > 0:
+                    proceeds = holdings[t] * price * (1 - fee_rate)
+                    cash += proceeds
+                    trades_log.append({"日付": rb_date, "銘柄": t, "種別": "売り",
+                                       "価格": round(price, 2), "モメンタム(%)": round(momentum.get(t, 0), 1)})
+                del holdings[t]
+
+        # 購入: 新トップの未保有銘柄
+        alloc = pv / top_n  # 1銘柄あたりの目標金額
+        for t in new_top:
+            if t not in holdings:
+                price = cur.get(t)
+                if price and not pd.isna(price) and cash > price:
+                    buy_val = min(alloc, cash * 0.99)
+                    shares = buy_val / (price * (1 + fee_rate))
+                    if shares > 0:
+                        cash -= shares * price * (1 + fee_rate)
+                        holdings[t] = shares
+                        trades_log.append({"日付": rb_date, "銘柄": t, "種別": "買い",
+                                           "価格": round(price, 2), "モメンタム(%)": round(momentum.get(t, 0), 1)})
+
+        pv_after = cash + sum(holdings.get(t, 0) * cur.get(t, 0) for t in holdings)
+        pv_records.append({"日付": rb_date, "総資産": pv_after})
+        monthly_holdings.append({"日付": rb_date, "保有銘柄": list(holdings.keys())})
+
+    if not pv_records:
+        raise ValueError("シミュレーションデータが不足しています")
+
+    pv_df = pd.DataFrame(pv_records).set_index("日付")
+
+    # B&H比較（ユニバース全銘柄均等投資）
+    first_prices = prices.iloc[0].dropna()
+    shares_bh = (initial_cash / len(first_prices)) / first_prices
+    bh_final = (shares_bh * prices.iloc[-1].reindex(first_prices.index).fillna(prices.iloc[-1])).sum()
+    bh_return = (bh_final - initial_cash) / initial_cash * 100
+
+    final_value = pv_df["総資産"].iloc[-1]
+    total_return = (final_value - initial_cash) / initial_cash * 100
+
+    rolling_max = pv_df["総資産"].cummax()
+    drawdown = (pv_df["総資産"] - rolling_max) / rolling_max * 100
+    max_dd = drawdown.min()
+
+    monthly_ret = pv_df["総資産"].pct_change().dropna()
+    sharpe = (monthly_ret.mean() / monthly_ret.std() * (12 ** 0.5)) if monthly_ret.std() > 0 else 0
+
+    # 現在のランキング（最新月末時点）
+    latest = prices.iloc[-1]
+    past_latest = prices.iloc[max(0, len(prices) - lookback_days)]
+    mom_latest = ((latest / past_latest) - 1) * 100
+    ma_latest = prices.tail(ma_period).mean()
+    qualified_now = mom_latest[latest > ma_latest].dropna().sort_values(ascending=False)
+    ranking_df = pd.DataFrame({
+        "銘柄": qualified_now.index,
+        "モメンタム(%)": qualified_now.values.round(1),
+        "推奨": ["✅ 買い" if i < top_n else "" for i in range(len(qualified_now))],
+    }).reset_index(drop=True)
+
+    return {
+        "portfolio": pv_df,
+        "trades": pd.DataFrame(trades_log) if trades_log else pd.DataFrame(),
+        "monthly_holdings": monthly_holdings,
+        "ranking": ranking_df,
+        "errors": errors,
+        "metrics": {
+            "最終資産": round(final_value, 0),
+            "総リターン(%)": round(total_return, 2),
+            "B&Hリターン(%)": round(bh_return, 2),
+            "最大ドローダウン(%)": round(max_dd, 2),
+            "シャープレシオ": round(sharpe, 2),
+            "総取引回数": len(trades_log),
+            "リバランス回数": len(pv_records),
+            "保有銘柄数": top_n,
+        },
+    }
