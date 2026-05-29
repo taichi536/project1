@@ -1103,14 +1103,11 @@ async function getFullProfile(cardEl, fallbackText) {
     // ess-resume-list-item の内側にある実際のコンテンツ要素をクリック
     const clickTarget = cardEl.querySelector('.candidate-list-item-content, b-ui-cassette-content, [class*="cassette-content"], [class*="resume-item"]') || cardEl;
     clickTarget.click();
-    await sleep(1800); // Angular ルーティング完了まで待機
+    await sleep(2200); // Angular ルーティング完了まで待機
 
     let panel = findBizreachDetailPanel();
-    // パネルが見つからない場合は追加で待機して再試行
-    if (!panel) {
-      await sleep(1000);
-      panel = findBizreachDetailPanel();
-    }
+    if (!panel) { await sleep(1200); panel = findBizreachDetailPanel(); }
+    if (!panel) { await sleep(1500); panel = findBizreachDetailPanel(); }
 
     // カードテキストは年収・学歴・会社名などを含むため常に先頭に含める
     const cardSummary = fallbackText.substring(0, 600);
@@ -2081,14 +2078,30 @@ function findAMBIDetailPanel() {
 // Bizreach詳細パネルを特定する（カードクリックで開く右パネル）
 // -------------------------------------------------------
 function findBizreachDetailPanel() {
+  // 方法1: Bizreach固有のAngularコンポーネント名で直接特定
+  const componentSelectors = [
+    'ess-resume-detail', 'ess-resume-view', 'ess-resume-detail-content',
+    '[class*="resume-detail"]', '[class*="resume-view"]', '[class*="candidate-detail"]',
+  ];
+  for (const sel of componentSelectors) {
+    const el = document.querySelector(sel);
+    if (el) {
+      const t = (el.innerText || '').trim();
+      if (t.length > 100) return el;
+    }
+  }
+
+  // 方法2: キーワード＋位置ヒューリスティック（位置条件を緩和）
   const viewportWidth = window.innerWidth;
+  const keywords = ['在籍企業名', '学歴', '経験職種', '希望年収', '経験業種', '職務経歴', '資格', '年収', '在籍', '職歴'];
   const candidates = [];
   document.querySelectorAll('div, section, article, main').forEach(el => {
     const rect = el.getBoundingClientRect();
     const t = (el.innerText || '').trim();
-    if (rect.left > viewportWidth * 0.4 && rect.width > 280 && t.length > 200 && t.length < 20000) {
-      const hasKeyword = ['在籍企業名', '学歴', '経験職種', '希望年収', '経験業種', '職務経歴', '資格'].some(kw => t.includes(kw));
-      if (hasKeyword) candidates.push({ el, score: t.length });
+    // 位置条件を 0.4 → 0.25 に緩和（レイアウト差異を吸収）
+    if (rect.left > viewportWidth * 0.25 && rect.width > 250 && t.length > 150 && t.length < 25000) {
+      const matchCount = keywords.filter(kw => t.includes(kw)).length;
+      if (matchCount >= 2) candidates.push({ el, score: t.length + matchCount * 500 });
     }
   });
   if (candidates.length === 0) return null;
