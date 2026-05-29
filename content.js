@@ -1893,7 +1893,7 @@ function buildCriteriaText(criteria, platform) {
   lines.push(`【絶対NG】`);
   lines.push(`- 職歴にアクセンチュアが含まれる場合は即NG`);
   lines.push(`- 職歴にベイカレントが含まれる場合は原則即NG。ただし43歳以上かつ財務・経理・FP&A等の職歴がある場合は「要確認」`);
-  lines.push(`- 職種・職歴に秘書が含まれる場合は即NG`);
+  lines.push(`- 秘書が実際の職歴・業務内容・職種として含まれる場合は即NG。ただし「総務・法務・知財・秘書」のようなカテゴリ名に秘書が含まれるだけで、実際の職種（「/」以降や業務内容）が法務・総務・人事等の場合はNG対象外`);
   lines.push(`- ITエンジニア系で保守運用のみの場合は即NG`);
 
   if (isBizreach) {
