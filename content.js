@@ -1029,8 +1029,9 @@ async function triggerAutoAdd() {
 
     // <a href> でかつ別URLへのリンクならlocation.href移動（フルページロード確定・最も確実）
     const nextHref = nextPage.href || nextPage.getAttribute('href');
+    const baseHref = (u) => u.split('#')[0];
     if (nextHref && nextHref !== '#' && !nextHref.startsWith('javascript') &&
-        nextHref !== location.href) {
+        nextHref !== location.href && baseHref(nextHref) !== baseHref(location.href)) {
       console.log(`[Snow-we] 次ページ: location.href移動 → ${nextHref}`);
       location.href = nextHref;
       return; // フルページロード後にsessionStorageから再開される
