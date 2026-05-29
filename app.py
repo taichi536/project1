@@ -1786,17 +1786,27 @@ elif page == "🔬 バックテスト":
 
     # ── 共通パラメータ（両タブで使う）──────────────────────────────────────
     with st.expander("⚙️ バックテスト設定（期間・戦略・資金）", expanded=False):
-        _btc1, _btc2, _btc3, _btc4 = st.columns(4)
-        bt_period = _btc1.selectbox("検証期間", ["1y", "2y", "3y", "5y"], index=2,
+        _btc0, _btc1, _btc2, _btc3 = st.columns(4)
+        bt_interval_label = _btc0.selectbox("足種", ["日足", "週足"], key="bt_interval",
+                                            help="週足はノイズが少なく、年3〜6回の高品質な取引になります")
+        bt_interval = "1wk" if bt_interval_label == "週足" else "1d"
+        _period_opts = ["2y", "3y", "5y"] if bt_interval == "1wk" else ["1y", "2y", "3y", "5y"]
+        _period_def = 1 if bt_interval == "1wk" else 2
+        bt_period = _btc1.selectbox("検証期間", _period_opts, index=_period_def,
                                     format_func=lambda x: {"1y": "1年", "2y": "2年", "3y": "3年", "5y": "5年"}[x])
         bt_strategy_label = _btc2.selectbox("戦略", list(STRATEGIES.keys()))
         bt_cash = _btc3.number_input("初期資金 (円)", value=1_000_000, min_value=100_000, step=100_000)
+        _btc4, _btc5, _btc6, _btc7 = st.columns(4)
         bt_stop_atr = _btc4.slider("損切り幅 (ATR倍)", min_value=1.0, max_value=4.0, value=2.0, step=0.5,
                                    help="ATR（平均値動き幅）×倍数で損切りライン設定。2.0推奨")
-        _btc5, _btc6, _btc7, _btc8 = st.columns(4)
-        bt_short = _btc5.number_input("短期MA", value=25, min_value=5, max_value=50)
-        bt_long = _btc6.number_input("長期MA", value=75, min_value=20, max_value=200)
+        _short_def = 13 if bt_interval == "1wk" else 25
+        _long_def = 26 if bt_interval == "1wk" else 75
+        bt_short = _btc5.number_input("短期MA", value=_short_def, min_value=3, max_value=100,
+                                      help="週足推奨: 13（約3ヶ月）/ 日足推奨: 25")
+        bt_long = _btc6.number_input("長期MA", value=_long_def, min_value=5, max_value=300,
+                                     help="週足推奨: 26（約6ヶ月）/ 日足推奨: 75")
         bt_rsi_buy = _btc7.number_input("RSI買いライン", value=45, min_value=10, max_value=60)
+        _btc8, _btc9, _btc10, _btc11 = st.columns(4)
         bt_rsi_sell = _btc8.number_input("RSI売りライン", value=55, min_value=40, max_value=90)
         _btc9, _btc10, _btc11, _ = st.columns(4)
         bt_take_atr = _btc9.slider("利確幅 (ATR倍)", min_value=0.0, max_value=6.0, value=0.0, step=0.5,
@@ -1819,7 +1829,7 @@ elif page == "🔬 バックテスト":
         if bt_btn and bt_ticker:
             _bt_prog = st.progress(0, text="📥 株価データ取得中...")
             try:
-                df_raw = fetch_ohlcv(bt_ticker, period=bt_period)
+                df_raw = fetch_ohlcv(bt_ticker, period=bt_period, interval=bt_interval)
                 _bt_prog.progress(40, text="📐 テクニカル指標計算中...")
                 result = run_backtest(
                         df_raw,
@@ -1979,7 +1989,7 @@ elif page == "🔬 バックテスト":
                             add_script_run_ctx(threading.current_thread(), _ctx)
                         except Exception:
                             pass
-                    df = fetch_ohlcv(ticker, period=period)
+                    df = fetch_ohlcv(ticker, period=period, interval=bt_interval)
                     completed[0] += 1
                     return df
 
