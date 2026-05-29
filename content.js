@@ -1037,12 +1037,17 @@ async function triggerAutoAdd() {
       return; // フルページロード後にsessionStorageから再開される
     }
 
-    // href なし（SPA内クリック）→ クリック後URL変化を検出
+    // href なし（SPA内クリック）→ クリック後URL変化またはDOM変化を検出
+    const getCardFingerprint = () => {
+      const first = document.querySelector('li[id^="search-result-"]');
+      return first ? (first.innerText || '').substring(0, 120) : '';
+    };
     const prevUrl = location.href;
+    const prevFingerprint = getCardFingerprint();
     nextPage.click();
 
-    // SPA ナビゲーション検出: URLが変わったら同一コンテキストで続行
-    for (let w = 0; w < 32; w++) {
+    // SPA ナビゲーション検出: URLまたはカードDOM内容が変わったら続行（doda-x等URLが変わらないSPA対応）
+    for (let w = 0; w < 40; w++) {
       await sleep(250);
       if (location.href !== prevUrl) {
         showAutoStatus(`🤖 次ページ読込中... (累計✅${addedCount}人追加)`);
@@ -1051,8 +1056,17 @@ async function triggerAutoAdd() {
         await triggerAutoAdd();
         return;
       }
+      const fp = getCardFingerprint();
+      if (fp && fp !== prevFingerprint) {
+        console.log('[Snow-we] 次ページ: DOM内容変化検出（URL変化なしSPA）');
+        showAutoStatus(`🤖 次ページ読込中... (累計✅${addedCount}人追加)`);
+        await sleep(2000);
+        await triggerAutoAdd();
+        return;
+      }
     }
-    // URLが変わらなかった = フルページロード済みのはず
+    // タイムアウト：URL変化もDOM変化もなし
+    console.warn('[Snow-we] 次ページ遷移タイムアウト（URL・DOM変化なし）');
     await saveAutoAddProgress({ running: false });
   } else {
     showAutoStatus(`🤖 完了！ ✅${addedCount}人を検討リストに追加 (全${totalProcessed}人中)`, 8000);
