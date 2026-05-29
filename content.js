@@ -572,7 +572,8 @@ document.addEventListener('click', e => {
 async function loadAllCandidatesIntoDOM() {
   const platform = getPlatform();
   const LOAD_MORE_TEXTS = ['さらに読み込む', 'もっと見る', 'Load more', '次の候補者'];
-  const MAX_LOADS = 15;
+  const MAX_LOADS = 40;
+  const TARGET_COUNT = 700; // 600人目標 + バッファ
 
   function findLoadMoreBtn() {
     for (const el of document.querySelectorAll('button, a, div[role="button"], span')) {
@@ -591,18 +592,20 @@ async function loadAllCandidatesIntoDOM() {
   let loaded = 0;
 
   for (let i = 0; i < MAX_LOADS; i++) {
-    await scrollToBottom();
-    const btn = findLoadMoreBtn();
-    if (!btn) break;
-
     const countBefore = findCandidateCardsByPlatform().length;
-    showAutoStatus(`📥 さらに読み込み中... (${loaded + 1}回目)`);
-    btn.click();
+    if (countBefore >= TARGET_COUNT) break; // 目標人数に達したら終了
+
+    showAutoStatus(`📥 さらに読み込み中... (${countBefore}人 読み込み済み)`);
+    await scrollToBottom();
+
+    const btn = findLoadMoreBtn();
+    if (btn) btn.click();
+
     await new Promise(r => setTimeout(r, 2000));
     const countAfter = findCandidateCardsByPlatform().length;
 
     loaded++;
-    if (countAfter <= countBefore) break; // 増えなければ終了
+    if (countAfter <= countBefore) break; // 増えなければ終了（全員読み込み済み）
   }
 
   // 判定後バッジが見えるよう先頭に戻る
@@ -1862,7 +1865,7 @@ window.addEventListener('load', () => {
 function extractAllCandidateCards() {
   const cards = findCandidateCardsByPlatform();
 
-  return cards.slice(0, 200).map(el => {
+  return cards.slice(0, 700).map(el => {
     const text = (el.innerText || '').trim();
     const ageMatch = text.match(/(\d{2})歳/);
     const incomeMatch = text.match(/(\d{3,4})[〜~～](\d{3,4})万円/) ||
