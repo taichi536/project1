@@ -1314,22 +1314,17 @@ async function clickBizreachStar(starBtn) {
   return false;
 }
 
-// API成功後に星のDOM状態を強制的にONにする（Angularをバイパスしているため手動補正）
+// API成功後に星のDOM状態を強制的にONにする
+// b-ui-icon-toggle: checked属性 + 内部 b-ui-icon のCSSクラスを onicon に切り替える
 function forceBizreachStarOn(starBtn) {
   const toggle = starBtn.querySelector('b-ui-icon-toggle') || starBtn;
-  toggle.checked = true;
   toggle.setAttribute('checked', 'true');
-  try {
-    const ngApi = window.ng;
-    if (ngApi) {
-      for (const el of [toggle, starBtn]) {
-        const comp = ngApi.getComponent?.(el);
-        if (!comp) continue;
-        comp.checked = true;
-        ngApi.applyChanges?.(el);
-      }
-    }
-  } catch (_) {}
+  const icon = toggle.querySelector('b-ui-icon');
+  if (icon) {
+    const offIcon = toggle.getAttribute('officon') || 'star';
+    const onIcon  = toggle.getAttribute('onicon')  || 'star-fill';
+    icon.className = icon.className.replace(`bui-icon-${offIcon}`, `bui-icon-${onIcon}`);
+  }
 }
 
 // Bizreach カード要素から resume の数値IDを取得する
