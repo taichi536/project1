@@ -983,10 +983,10 @@ async function triggerAutoAdd() {
       || document.querySelector('cdk-virtual-scroll-viewport');
     if (viewport) {
       const prevTop = viewport.scrollTop;
-      // 70%分スクロール（バッチ境界の隙間を防ぐため30%のオーバーラップを確保）
-      const scrollBy = Math.floor((viewport.clientHeight || 800) * 0.7);
+      // 90%分スクロール（カードクリックなし→スクロール位置が安定するため重複を減らせる）
+      const scrollBy = Math.floor((viewport.clientHeight || 800) * 0.9);
       viewport.scrollTop += scrollBy;
-      await sleep(1000); // Angular CDK のレンダリング待機
+      await sleep(800); // Angular CDK のレンダリング待機
       if (viewport.scrollTop > prevTop + 50) {
         // まだスクロールできる = 未処理の候補者が残っている
         showAutoStatus(`🤖 次の候補者を処理中... (累計✅${addedCount}人追加)`);
@@ -1094,45 +1094,12 @@ async function getFullProfile(cardEl, fallbackText) {
     return fallbackText.substring(0, 900);
   }
 
-  // Bizreach: カードクリックで右パネルが開くので読んだ後に閉じる
+  // Bizreach: カードクリックはAngularルーティングでCDK仮想スクロールを破壊するため
+  // パネルを開かずカードテキストのみ使用する（年収・会社名・年齢は既に含まれている）
   if (platform === 'bizreach') {
-    // クリック前にスクロール位置を保存（Angular ルーティングで位置がズレるため）
-    const viewport = document.querySelector('cdk-virtual-scroll-viewport');
-    const savedTop = viewport ? viewport.scrollTop : 0;
-
-    // ess-resume-list-item の内側にある実際のコンテンツ要素をクリック
-    const clickTarget = cardEl.querySelector('.candidate-list-item-content, b-ui-cassette-content, [class*="cassette-content"], [class*="resume-item"]') || cardEl;
-    clickTarget.click();
-    await sleep(2200); // Angular ルーティング完了まで待機
-
-    let panel = findBizreachDetailPanel();
-    if (!panel) { await sleep(1200); panel = findBizreachDetailPanel(); }
-    if (!panel) { await sleep(1500); panel = findBizreachDetailPanel(); }
-
-    // カードテキストは年収・学歴・会社名などを含むため常に先頭に含める
-    const cardSummary = fallbackText.substring(0, 600);
-    let bizResult = cardSummary;
-    if (panel) {
-      const full = extractMainText(panel, 4400);
-      if (full.length > 200) {
-        // カードテキスト（年収・学歴等）＋パネル詳細テキストを結合
-        bizResult = cardSummary + '\n---\n' + full;
-        console.log('[Snow-we] Bizreachプロフィール取得成功:', full.length, '文字（カード+パネル結合）');
-      } else {
-        console.warn('[Snow-we] Bizreachパネルテキスト不足 → カードテキストのみ:', full.length, '文字');
-      }
-    } else {
-      console.warn('[Snow-we] Bizreach右パネル未検出 → カードテキストのみ');
-    }
-
-    // Escapeキーでパネルを閉じてスクロール位置を復元
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
-    await sleep(500);
-    if (viewport && Math.abs(viewport.scrollTop - savedTop) > 30) {
-      viewport.scrollTop = savedTop;
-      await sleep(300);
-    }
-    return bizResult;
+    const text = fallbackText.substring(0, 900);
+    console.log('[Snow-we] Bizreachカードテキスト取得:', text.length, '文字');
+    return text;
   }
 
   // その他：プロフィールURLをフェッチして全文取得
