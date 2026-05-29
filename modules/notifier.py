@@ -276,3 +276,38 @@ def send_stop_loss_alert(
         results["slack"] = _slack(sw, plain)
 
     return results
+
+
+def send_momentum_rebalance_alert(
+    buy: list,
+    sell: list,
+    hold: list,
+    rankings: list,
+    telegram_token: str | None = None,
+    telegram_chat_id: str | None = None,
+    slack_webhook: str | None = None,
+) -> dict:
+    """月次モメンタムリバランス通知"""
+    now = datetime.now().strftime("%Y年%m月%d日")
+    lines = [f"📊 <b>月次リバランス通知</b> {now}\n"]
+    if buy:
+        lines.append(f"✅ <b>今月買う銘柄:</b> {' / '.join(buy)}")
+    if sell:
+        lines.append(f"🔴 <b>今月売る銘柄:</b> {' / '.join(sell)}")
+    if hold:
+        lines.append(f"🔵 <b>継続保有:</b> {' / '.join(hold)}")
+    lines.append("\n📈 <b>モメンタムランキング TOP10:</b>")
+    for i, (t, m) in enumerate(rankings[:10], 1):
+        mark = "✅" if i <= 5 else "  "
+        lines.append(f"{mark} {i}. {t}  {m:+.1f}%")
+    message = "\n".join(lines)
+    results = {}
+    tg_token = telegram_token or os.getenv("TELEGRAM_BOT_TOKEN")
+    tg_chat = telegram_chat_id or os.getenv("TELEGRAM_CHAT_ID")
+    if tg_token and tg_chat:
+        results["telegram"] = _telegram(tg_token, tg_chat, message)
+    sw = slack_webhook or os.getenv("SLACK_WEBHOOK_URL")
+    if sw:
+        plain = re.sub(r"<b>(.*?)</b>", r"*\1*", message)
+        results["slack"] = _slack(sw, plain)
+    return results

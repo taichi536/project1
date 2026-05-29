@@ -27,7 +27,7 @@ load_dotenv()
 from modules.data_fetcher import fetch_ohlcv, fetch_earnings_date
 from modules.technical import compute_all
 from modules.signals import evaluate_signals, overall_signal
-from modules.notifier import send_signal_alert, send_screening_alert, send_stop_loss_alert, send_strong_buy_alert, send_strong_sell_alert
+from modules.notifier import send_signal_alert, send_screening_alert, send_stop_loss_alert, send_strong_buy_alert, send_strong_sell_alert, send_momentum_rebalance_alert
 from modules.screening import screen_single
 from modules.diary import get_trades, calc_pnl
 from modules.dashboard import load_watchlist
@@ -311,9 +311,73 @@ def run_screening_alerts(tickers: list[str] | None = None):
         print("  → 合格銘柄なし、通知なし")
 
 
+def run_momentum_rebalance():
+    """月次モメンタムリバランス通知（毎月1日頃に実行）"""
+    from modules.universe import UNIVERSE
+    from modules.data_fetcher import fetch_ohlcv, normalize_ticker
+    import pandas as pd
+
+    UNIVERSE_KEY = "🇯🇵 日本株メジャー"
+    TOP_N = 5
+    LOOKBACK_DAYS = 126  # 約6ヶ月
+    MA_PERIOD = 200
+
+    tickers_raw = UNIVERSE[UNIVERSE_KEY]["tickers"]
+    tickers = [normalize_ticker(t) for t in tickers_raw]
+
+    print(f"[月次リバランス] {UNIVERSE_KEY} {len(tickers)}銘柄のモメンタム計算中...")
+
+    prices = {}
+    for t in tickers:
+        try:
+            df = fetch_ohlcv(t, period="14mo")
+            if df is not None and not df.empty and len(df) > MA_PERIOD:
+                prices[t] = df["Close"].squeeze()
+        except Exception as e:
+            print(f"  {t}: 取得失敗 ({e})")
+
+    if len(prices) < 2:
+        print("  データ不足のためスキップ")
+        return
+
+    price_df = pd.DataFrame(prices).ffill()
+    cur = price_df.iloc[-1]
+    past = price_df.iloc[max(0, len(price_df) - LOOKBACK_DAYS)]
+    momentum = ((cur / past) - 1) * 100
+    ma200 = price_df.tail(MA_PERIOD).mean()
+    qualified = momentum[cur > ma200].dropna().sort_values(ascending=False)
+    new_top = list(qualified.head(TOP_N).index)
+
+    # 前回の推奨を読み込む
+    state_file = Path(__file__).parent / ".momentum_holdings.json"
+    prev_holdings = []
+    if state_file.exists():
+        try:
+            prev_holdings = json.loads(state_file.read_text())
+        except Exception:
+            pass
+
+    buy = [t for t in new_top if t not in prev_holdings]
+    sell = [t for t in prev_holdings if t not in new_top]
+    hold = [t for t in new_top if t in prev_holdings]
+
+    rankings = list(zip(qualified.index.tolist(), qualified.values.tolist()))
+
+    print(f"  推奨TOP{TOP_N}: {new_top}")
+    print(f"  買い: {buy} / 売り: {sell} / 継続: {hold}")
+
+    state_file.write_text(json.dumps(new_top, ensure_ascii=False))
+
+    if buy or sell:
+        result = send_momentum_rebalance_alert(buy=buy, sell=sell, hold=hold, rankings=rankings)
+        print(f"  → 通知送信: {result}")
+    else:
+        print("  → 変更なし、通知スキップ")
+
+
 def main():
     parser = argparse.ArgumentParser(description="株式アラートランナー")
-    parser.add_argument("--mode", choices=["all", "signal", "stoploss", "screening", "watchlist"],
+    parser.add_argument("--mode", choices=["all", "signal", "stoploss", "screening", "watchlist", "momentum"],
                         default="all")
     parser.add_argument("--loop", type=int, default=0,
                         help="繰り返し間隔（分）。省略か0で1回のみ実行")
@@ -381,6 +445,12 @@ def main():
             run_stop_loss_check()
         if args.mode in ("all", "screening"):
             run_screening_alerts(tickers)
+
+        # 月次モメンタムリバランス（毎月1〜3日に1回実行）
+        if args.mode in ("all", "momentum"):
+            now = datetime.now()
+            if args.mode == "momentum" or now.day <= 3:
+                run_momentum_rebalance()
 
         print(f"\n次回チェック: {args.loop}分後" if args.loop > 0 else "\n完了")
 
