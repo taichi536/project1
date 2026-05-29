@@ -1389,9 +1389,23 @@ async function clickAddButton(cardEl, tagName) {
       console.log('[Snow-we] dodax すでにスター済み、スキップ');
       return false;
     }
-    starBtn.click();
-    await sleep(600);
-    console.log('[Snow-we] dodax 星クリック完了');
+    // React系フレームワーク対応: mousedown→mouseup→click をすべて dispatch
+    const opts = { bubbles: true, cancelable: true, view: window };
+    const target = icon || starBtn;
+    target.dispatchEvent(new MouseEvent('mousedown', opts));
+    target.dispatchEvent(new MouseEvent('mouseup', opts));
+    target.dispatchEvent(new MouseEvent('click', opts));
+    await sleep(300);
+    // フォールバック：親要素にも同じシーケンス
+    if (icon && icon.className.includes('icon-star_border')) {
+      starBtn.dispatchEvent(new MouseEvent('mousedown', opts));
+      starBtn.dispatchEvent(new MouseEvent('mouseup', opts));
+      starBtn.dispatchEvent(new MouseEvent('click', opts));
+      await sleep(300);
+    }
+    const afterIcon = starBtn.querySelector('i');
+    const success = !!(afterIcon && afterIcon.className.includes('icon-star') && !afterIcon.className.includes('icon-star_border'));
+    console.log('[Snow-we] dodax 星クリック完了, スター済み:', success);
     return true;
   }
 
