@@ -1199,22 +1199,39 @@ function findProfileUrl(cardEl) {
     if (href.startsWith(location.origin) && !href.includes('#')) return href;
   }
 
-  // doda-x: data属性から候補者IDを探してURLを構築
+  // doda-x: React fiberのpropsからmemberId/candidateIdを探してURLを構築
   if (platform === 'dodax') {
-    for (let el = cardEl, depth = 0; el && depth < 4; el = el.parentElement, depth++) {
-      for (const attr of el.attributes) {
-        const v = attr.value;
-        if (/^\d{6,12}$/.test(v)) {
-          const url = `${location.origin}/member_search/detail/${v}`;
-          console.log(`[Snow-we] findProfileUrl: doda-x data属性から構築 ${attr.name}=${v} → ${url}`);
-          return url;
+    const tryFiberForId = (el) => {
+      try {
+        const fKey = Object.keys(el).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'));
+        if (!fKey) return null;
+        let fiber = el[fKey];
+        for (let depth = 0; fiber && depth < 20; fiber = fiber.return, depth++) {
+          const props = fiber.memoizedProps || {};
+          // memberId / candidateId / userId 等を探す
+          for (const key of Object.keys(props)) {
+            const v = props[key];
+            if (typeof v === 'string' && /^\d{6,12}$/.test(v) &&
+                /id|member|candidate|user|resume/i.test(key)) {
+              return v;
+            }
+            if (typeof v === 'number' && v > 100000 && /id|member|candidate|user|resume/i.test(key)) {
+              return String(v);
+            }
+          }
         }
-      }
+      } catch (_) {}
+      return null;
+    };
+    const memberId = tryFiberForId(cardEl) ||
+                     tryFiberForId(cardEl.firstElementChild) ||
+                     tryFiberForId(cardEl.querySelector('.c-star-cts') || cardEl);
+    if (memberId) {
+      const url = `${location.origin}/member_search/detail/${memberId}`;
+      console.log(`[Snow-we] findProfileUrl: doda-x fiberからID取得 memberId=${memberId} → ${url}`);
+      return url;
     }
-    // data属性もなければDOM構造をログに出力（次の調査用）
-    const attrs = Array.from(cardEl.attributes).map(a => `${a.name}="${a.value.substring(0, 30)}"`).join(' ');
-    const innerLinks = Array.from(cardEl.querySelectorAll('a[href]')).map(l => l.href.substring(0, 60));
-    console.log(`[Snow-we] findProfileUrl: doda-x DOM調査 attrs=[${attrs}] links=[${innerLinks.join(', ')}]`);
+    console.log(`[Snow-we] findProfileUrl: doda-x ID未取得 cardId=${cardEl.id}`);
   }
 
   console.log(`[Snow-we] findProfileUrl: URL未発見 platform=${platform} cardTag=${cardEl.tagName} cardClass=${cardEl.className.substring(0, 50)}`);
@@ -1805,28 +1822,40 @@ function findNextPageButton() {
   }
 
   // 2. 数字ページネーション: アクティブページ番号+1を探す（doda-x等SPA）
-  // div/span/li も含めて幅広く検索（Reactのカスタムページネーション対応）
+  // 結果件数表示（0件・531件・30件表示等）を除外し、ページボタンのみを対象にする
+  const isResultCountEl = (el) => {
+    for (let p = el.parentElement, i = 0; p && i < 5; p = p.parentElement, i++) {
+      const cls = (p.className || '').toLowerCase();
+      // 件数表示コンテナのクラス名パターン
+      if (cls.includes('cnt') || cls.includes('count') || cls.includes('result') ||
+          cls.includes('total') || cls.includes('件数') || cls.includes('hits')) return true;
+    }
+    return false;
+  };
+
   const allNumericEls = Array.from(document.querySelectorAll('a,button,[role="button"],span,div,li'))
     .filter(el => {
       const t = (el.innerText || '').trim();
-      return /^\d{1,3}$/.test(t) && el.children.length === 0; // 直接テキストのみの要素
+      const n = parseInt(t, 10);
+      if (!/^\d{1,3}$/.test(t) || el.children.length !== 0) return false;
+      if (n < 1) return false; // 0 は件数表示の可能性が高いので除外
+      if (isInModal(el)) return false;
+      if (isResultCountEl(el)) return false;
+      return true;
     });
 
-  console.log(`[Snow-we] 数字ページ候補要素数: ${allNumericEls.length}`, allNumericEls.slice(0, 5).map(e => `${e.tagName}:${(e.innerText||'').trim()}:${e.className.substring(0,30)}`));
+  console.log(`[Snow-we] 数字ページ候補要素数: ${allNumericEls.length}`, allNumericEls.slice(0, 8).map(e => `${e.tagName}:${(e.innerText||'').trim()}:${e.className.substring(0,30)}`));
 
   if (allNumericEls.length > 0) {
-    // 現在のアクティブページを特定
     let currentPage = null;
 
-    // アクティブページの検出（複数の方法を試す）
     const activeEl = allNumericEls.find(el => {
       if (el.classList.contains('active') || el.classList.contains('current') ||
           el.classList.contains('is-active') || el.classList.contains('is-current') ||
           el.classList.contains('selected') || el.classList.contains('is-selected')) return true;
       if (el.getAttribute('aria-current') === 'page' || el.getAttribute('aria-selected') === 'true') return true;
-      if (el.getAttribute('aria-disabled') === 'true' || el.disabled) return true; // 現在ページは無効化されることがある
+      if (el.getAttribute('aria-disabled') === 'true' || el.disabled) return true;
       if (parseInt(getComputedStyle(el).fontWeight) >= 700) return true;
-      // 親要素のクラスも確認
       const parent = el.parentElement;
       if (parent && (parent.classList.contains('active') || parent.classList.contains('current') ||
           parent.classList.contains('is-active') || parent.classList.contains('is-current'))) return true;
