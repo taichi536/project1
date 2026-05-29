@@ -1467,51 +1467,40 @@ async function clickAddButton(cardEl, tagName) {
     console.log(`[Snow-we] dodax 星診断 btn:"${starBtn.className}" icon:"${icon?.className || 'なし'}" aria-pressed:"${starBtn.getAttribute('aria-pressed')}" → starred:${isStarred()}`);
     if (isStarred()) { console.log('[Snow-we] dodax すでにスター済み、スキップ'); return false; }
 
-    // Try 1: React fiber の onClick/onPointerDown を直接呼び出す
-    const tryFiberClick = (el) => {
-      try {
-        const fKey = Object.keys(el).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'));
-        if (!fKey) return false;
-        let fiber = el[fKey];
-        while (fiber) {
-          const props = fiber.memoizedProps;
-          if (props) {
-            const handler = props.onClick || props.onPointerDown || props.onMouseDown;
-            if (typeof handler === 'function') {
-              handler({ type: 'click', bubbles: true, cancelable: true, target: el, currentTarget: el, preventDefault: () => {}, stopPropagation: () => {} });
-              return true;
-            }
-          }
-          fiber = fiber.return;
-        }
-      } catch (_) {}
-      return false;
-    };
-    // starBtn → icon → starBtnの親 の順で試す
-    const fiberOk = tryFiberClick(starBtn) || (icon && tryFiberClick(icon)) ||
-                    (starBtn.parentElement && tryFiberClick(starBtn.parentElement));
-    console.log('[Snow-we] dodax fiber click:', fiberOk);
-    await sleep(600);
-    if (isStarred()) { console.log('[Snow-we] dodax 星クリック成功(fiber)'); return true; }
-
-    // Try 2: PointerEvent → MouseEvent の順でネイティブイベントを発火
+    // fiber walkは使わない（親カードのonClick=ページ遷移を誤発火させるため）
+    // ネイティブイベントのみ使用 → ReactのルートへのイベントデリゲーションでstopPropagationが効く
+    const currentUrl = location.href;
     const opts = { bubbles: true, cancelable: true, view: window };
     const target = icon || starBtn;
-    try { target.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1 })); } catch (_) {}
-    try { target.dispatchEvent(new PointerEvent('pointerup',   { ...opts, pointerId: 1 })); } catch (_) {}
+
+    // Try 1: PointerEvent シーケンス（React はpointerイベントを優先）
+    try { target.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, isPrimary: true })); } catch (_) {}
+    try { target.dispatchEvent(new PointerEvent('pointerup',   { ...opts, pointerId: 1, isPrimary: true })); } catch (_) {}
+    target.dispatchEvent(new MouseEvent('click', opts));
+    await sleep(600);
+    // ページ遷移してしまった場合は中断
+    if (location.href !== currentUrl) {
+      console.warn('[Snow-we] dodax 星クリック後にページ遷移が発生 → 中断');
+      return false;
+    }
+    if (isStarred()) { console.log('[Snow-we] dodax 星クリック成功(pointer)'); return true; }
+
+    // Try 2: starBtn直接 .click()
+    starBtn.click();
+    await sleep(600);
+    if (location.href !== currentUrl) { console.warn('[Snow-we] dodax 遷移発生'); return false; }
+    if (isStarred()) { console.log('[Snow-we] dodax 星クリック成功(native click)'); return true; }
+
+    // Try 3: MouseEvent シーケンス
     target.dispatchEvent(new MouseEvent('mousedown', opts));
     target.dispatchEvent(new MouseEvent('mouseup',   opts));
     target.dispatchEvent(new MouseEvent('click',     opts));
     await sleep(600);
-    if (isStarred()) { console.log('[Snow-we] dodax 星クリック成功(pointer+mouse)'); return true; }
-
-    // Try 3: starBtn 自身の .click()
-    starBtn.click();
-    await sleep(600);
+    if (location.href !== currentUrl) { console.warn('[Snow-we] dodax 遷移発生'); return false; }
 
     const success = isStarred();
     console.log('[Snow-we] dodax 星クリック完了, スター済み:', success);
-    return true;
+    return success;
   }
 
   const labelMap = {
