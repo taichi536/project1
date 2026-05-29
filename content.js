@@ -1019,31 +1019,41 @@ async function triggerAutoAdd() {
   const nextPage = findNextPageButton();
   if (nextPage) {
     showAutoStatus(`🤖 次ページへ移動中... (累計✅${addedCount}人追加)`);
-    // 進捗を保存（フルページロード時の再開用 + SPA直接続行用）
+    // 進捗を保存（フルページロード時・SPA再開用）
     await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: false });
     try {
       sessionStorage.setItem('snowWeAutoAdd', JSON.stringify({ resume: true, added: addedCount, processed: totalProcessed }));
     } catch (_) {}
 
+    await sleep(300);
+
+    // <a href> でかつ別URLへのリンクならlocation.href移動（フルページロード確定・最も確実）
+    const nextHref = nextPage.href || nextPage.getAttribute('href');
+    if (nextHref && nextHref !== '#' && !nextHref.startsWith('javascript') &&
+        nextHref !== location.href) {
+      console.log(`[Snow-we] 次ページ: location.href移動 → ${nextHref}`);
+      location.href = nextHref;
+      return; // フルページロード後にsessionStorageから再開される
+    }
+
+    // href なし（SPA内クリック）→ クリック後URL変化を検出
     const prevUrl = location.href;
-    await sleep(500);
     nextPage.click();
 
-    // SPA ナビゲーション検出: URLが変わったら同一コンテキストで続行（window.loadは発火しない）
-    for (let w = 0; w < 24; w++) {
+    // SPA ナビゲーション検出: URLが変わったら同一コンテキストで続行
+    for (let w = 0; w < 32; w++) {
       await sleep(250);
       if (location.href !== prevUrl) {
         showAutoStatus(`🤖 次ページ読込中... (累計✅${addedCount}人追加)`);
-        await sleep(2000); // 新コンテンツの描画を待つ
+        await sleep(2500);
         try { sessionStorage.removeItem('snowWeAutoAdd'); } catch (_) {}
-        await triggerAutoAdd(); // SPA: 同一コンテキストで次ページ処理
+        await triggerAutoAdd();
         return;
       }
     }
-    // URLが変わらなかった = フルページロード → window.load で sessionStorage から再開される
+    // URLが変わらなかった = フルページロード済みのはず
     await saveAutoAddProgress({ running: false });
   } else {
-    // 全ページ完了
     showAutoStatus(`🤖 完了！ ✅${addedCount}人を検討リストに追加 (全${totalProcessed}人中)`, 8000);
     await saveAutoAddProgress({ running: false });
   }
@@ -1158,10 +1168,29 @@ function findProfileUrl(cardEl) {
 
   const platformPatterns = patterns[platform] || [];
 
+  const matchesPattern = (href) => {
+    if (!href || href === '#' || href.startsWith('javascript')) return false;
+    return platformPatterns.length === 0 || platformPatterns.some(p => p.test(href));
+  };
+
+  // カード内部のリンクを検索
   for (const link of cardEl.querySelectorAll('a[href]')) {
-    const href = link.href || '';
-    if (!href || href === '#' || href.startsWith('javascript')) continue;
-    if (platformPatterns.some(p => p.test(href))) return href;
+    if (matchesPattern(link.href)) return link.href;
+  }
+
+  // Reactカードではカード要素がリンクの子要素になることがある → 祖先を遡って検索
+  for (let el = cardEl.parentElement, depth = 0; el && depth < 5; el = el.parentElement, depth++) {
+    if (el.tagName === 'A' && el.href && matchesPattern(el.href)) {
+      console.log(`[Snow-we] findProfileUrl: 祖先<a>で発見 depth=${depth} href=${el.href.substring(0, 70)}`);
+      return el.href;
+    }
+    for (const link of el.querySelectorAll(':scope > a[href], :scope > * > a[href]')) {
+      if (matchesPattern(link.href)) {
+        console.log(`[Snow-we] findProfileUrl: 祖先内リンク発見 depth=${depth} href=${link.href.substring(0, 70)}`);
+        return link.href;
+      }
+    }
+    if (['UL', 'OL', 'MAIN', 'BODY', 'SECTION', 'ARTICLE'].includes(el.tagName)) break;
   }
 
   // フォールバック：カード内の最初の内部リンク
@@ -1170,6 +1199,7 @@ function findProfileUrl(cardEl) {
     if (href.startsWith(location.origin) && !href.includes('#')) return href;
   }
 
+  console.log(`[Snow-we] findProfileUrl: URL未発見 platform=${platform} cardTag=${cardEl.tagName} cardClass=${cardEl.className.substring(0, 50)}`);
   return null;
 }
 
@@ -1730,52 +1760,72 @@ function setBatchBadge(el, cls, text, tooltip) {
 // 次ページボタンを探す
 function findNextPageButton() {
   const nextTexts = ['次へ', '次のページ', '>', '›', 'Next'];
-  const paginationArea = document.querySelector(
-    '[class*="pagination"],[class*="pager"],[class*="page-nav"],[aria-label*="ページ"]'
-  ) || document.body;
 
-  // 1. テキストベースの「次へ」ボタンを探す
-  for (const el of paginationArea.querySelectorAll('a,button,[role="button"]')) {
+  // 1. テキストベースの「次へ」ボタン（ページ全体から探す）
+  for (const el of document.querySelectorAll('a,button,[role="button"],span,div,li')) {
     const t = (el.innerText || el.getAttribute('aria-label') || '').trim();
     if (nextTexts.some(kw => t === kw || t.includes(kw))) {
       if (!el.disabled && !el.classList.contains('disabled') &&
-          !el.getAttribute('aria-disabled') &&
+          el.getAttribute('aria-disabled') !== 'true' &&
           !el.classList.contains('active') && !el.classList.contains('current')) {
+        console.log('[Snow-we] テキスト次ページボタン発見:', t, el.tagName, el.className.substring(0, 40));
         return el;
       }
     }
   }
 
-  // 2. 数字ページネーション: アクティブページ番号+1のボタンを探す（doda-x等）
-  const pageButtons = Array.from(paginationArea.querySelectorAll('a,button,[role="button"]'))
-    .filter(el => /^\d+$/.test((el.innerText || '').trim()));
+  // 2. 数字ページネーション: アクティブページ番号+1を探す（doda-x等SPA）
+  // div/span/li も含めて幅広く検索（Reactのカスタムページネーション対応）
+  const allNumericEls = Array.from(document.querySelectorAll('a,button,[role="button"],span,div,li'))
+    .filter(el => {
+      const t = (el.innerText || '').trim();
+      return /^\d{1,3}$/.test(t) && el.children.length === 0; // 直接テキストのみの要素
+    });
 
-  if (pageButtons.length > 0) {
+  console.log(`[Snow-we] 数字ページ候補要素数: ${allNumericEls.length}`, allNumericEls.slice(0, 5).map(e => `${e.tagName}:${(e.innerText||'').trim()}:${e.className.substring(0,30)}`));
+
+  if (allNumericEls.length > 0) {
     // 現在のアクティブページを特定
     let currentPage = null;
-    const activeBtn = pageButtons.find(el =>
-      el.classList.contains('active') || el.classList.contains('current') ||
-      el.classList.contains('is-active') || el.classList.contains('selected') ||
-      el.getAttribute('aria-current') === 'page' ||
-      el.getAttribute('aria-selected') === 'true' ||
-      parseInt(getComputedStyle(el).fontWeight) >= 700
-    );
-    if (activeBtn) {
-      currentPage = parseInt((activeBtn.innerText || '').trim(), 10);
+
+    // アクティブページの検出（複数の方法を試す）
+    const activeEl = allNumericEls.find(el => {
+      if (el.classList.contains('active') || el.classList.contains('current') ||
+          el.classList.contains('is-active') || el.classList.contains('is-current') ||
+          el.classList.contains('selected') || el.classList.contains('is-selected')) return true;
+      if (el.getAttribute('aria-current') === 'page' || el.getAttribute('aria-selected') === 'true') return true;
+      if (el.getAttribute('aria-disabled') === 'true' || el.disabled) return true; // 現在ページは無効化されることがある
+      if (parseInt(getComputedStyle(el).fontWeight) >= 700) return true;
+      // 親要素のクラスも確認
+      const parent = el.parentElement;
+      if (parent && (parent.classList.contains('active') || parent.classList.contains('current') ||
+          parent.classList.contains('is-active') || parent.classList.contains('is-current'))) return true;
+      return false;
+    });
+
+    if (activeEl) {
+      currentPage = parseInt((activeEl.innerText || '').trim(), 10);
+      console.log(`[Snow-we] アクティブページ検出: ${currentPage} class="${activeEl.className}" parent="${activeEl.parentElement?.className?.substring(0,40)}"`);
     } else {
-      // URLからページ番号を推定（page=X / p=X）
       const m = location.href.match(/[?&](?:page|p)=(\d+)/);
       currentPage = m ? parseInt(m[1], 10) : 1;
+      console.log(`[Snow-we] URLからページ推定: ${currentPage} url="${location.href.substring(0, 80)}"`);
     }
 
-    const nextBtn = pageButtons.find(el =>
-      parseInt((el.innerText || '').trim(), 10) === currentPage + 1 &&
-      !el.disabled && !el.getAttribute('aria-disabled')
-    );
+    const nextBtn = allNumericEls.find(el => {
+      const n = parseInt((el.innerText || '').trim(), 10);
+      if (n !== currentPage + 1) return false;
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+      if (el.classList.contains('active') || el.classList.contains('current') ||
+          el.classList.contains('is-active') || el.classList.contains('is-current')) return false;
+      return true;
+    });
+
     if (nextBtn) {
-      console.log(`[Snow-we] 数字ページネーション: ${currentPage} → ${currentPage + 1}`);
+      console.log(`[Snow-we] 数字ページネーション: ${currentPage} → ${currentPage + 1} tag=${nextBtn.tagName} href=${nextBtn.href || 'なし'}`);
       return nextBtn;
     }
+    console.log(`[Snow-we] 次ページボタン未発見 currentPage=${currentPage}`);
   }
 
   return null;
@@ -1959,8 +2009,9 @@ function buildCriteriaText(criteria, platform) {
   }
 
   lines.push(`\n【職種判定】候補者の経歴から以下のどちらかに分類して、対応する基準を適用してください。`);
-  lines.push(`- 「ITエンジニア系」: ソフトウェア開発・インフラ・クラウド・システム構築・SE・データエンジニア等のIT技術職`);
+  lines.push(`- 「ITエンジニア系」: 自らコードを書く・インフラを構築する・システムを実装するIT技術職。ソフトウェアエンジニア・SRE・インフラエンジニア・クラウドエンジニア・データエンジニア（ETL/パイプライン実装）・組み込みエンジニア・SE（システム設計〜開発実装担当）等`);
   lines.push(`- 「文系職」: コンサル・営業・マーケ・経営企画・財務・人事・その他ビジネス職。研究職（基礎研究・応用研究・バイオ・化学・材料等）も文系職として扱うこと`);
+  lines.push(`- ★重要★ 以下は「文系職」として判定すること: DXコンサル・ITコンサル・システム営業・IT営業・PMO・プロジェクトマネージャー（開発未経験）・データアナリスト（BI/Tableauツール活用）・デジタルマーケター・Web担当。「IT系の仕事をしている」だけでは「ITエンジニア系」にならない`);
 
   lines.push(`\n【文系職の年収基準】`);
   lines.push(`- 20代: 500万円未満 → NG`);
