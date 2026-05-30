@@ -579,6 +579,10 @@ document.addEventListener('click', e => {
 // -------------------------------------------------------
 async function loadAllCandidatesIntoDOM() {
   const platform = getPlatform();
+  // BizreachはCDK仮想スクロールのため window.scrollTo では新カードをロードできない
+  // 仮想スクロールの制御はtriggerAutoAdd内の再帰スクロールループで行う
+  if (platform === 'bizreach') return;
+
   const LOAD_MORE_TEXTS = ['さらに読み込む', 'もっと見る', 'Load more', '次の候補者'];
   const MAX_LOADS = 40;
   const TARGET_COUNT = 700; // 600人目標 + バッファ
@@ -991,24 +995,52 @@ async function triggerAutoAdd() {
 
   // ビズリーチ：仮想スクロールで次バッチへ
   if (getPlatform() === 'bizreach') {
-    // candidate-list-item-content を含む cdk-virtual-scroll-viewport を特定
-    const viewport = document.querySelector('.candidate-list-item-content')
-      ?.closest('cdk-virtual-scroll-viewport')
-      || document.querySelector('cdk-virtual-scroll-viewport');
-    if (viewport) {
-      const prevTop = viewport.scrollTop;
-      // 90%分スクロール（カードクリックなし→スクロール位置が安定するため重複を減らせる）
-      const scrollBy = Math.floor((viewport.clientHeight || 800) * 0.9);
-      viewport.scrollTop += scrollBy;
-      await sleep(800); // Angular CDK のレンダリング待機
-      if (viewport.scrollTop > prevTop + 50) {
-        // まだスクロールできる = 未処理の候補者が残っている
-        showAutoStatus(`🤖 次の候補者を処理中... (累計✅${addedCount}人追加)`);
-        await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
-        await triggerAutoAdd();
-        return;
+    // CDK仮想スクロール：viewport要素またはwindowスクロールの両方に対応
+    const viewport = document.querySelector('cdk-virtual-scroll-viewport');
+
+    // 現在DOMに存在するカードのIDテキスト指紋（新カード出現を検出するため）
+    const getCardFingerprint = () => {
+      const items = document.querySelectorAll('ess-resume-list-item');
+      if (!items.length) return '';
+      // 最初と最後のカードのテキスト先頭30字を組み合わせる
+      const first = (items[0].innerText || '').substring(0, 30);
+      const last = (items[items.length - 1].innerText || '').substring(0, 30);
+      return `${items.length}|${first}|${last}`;
+    };
+
+    const prevFingerprint = getCardFingerprint();
+    const prevViewportTop = viewport ? viewport.scrollTop : -1;
+    const prevWindowTop = window.scrollY;
+    const scrollAmt = (viewport && viewport.clientHeight > 50) ? viewport.clientHeight : (window.innerHeight || 800);
+
+    // viewportスクロールを試みる（windowスクロール型CDKも想定してwindow.scrollByも実行）
+    if (viewport) viewport.scrollTop += scrollAmt;
+    window.scrollBy({ top: scrollAmt, behavior: 'smooth' });
+
+    // Angular CDKがDOMを更新するまで最大10秒待機（指紋変化 or スクロール量確認）
+    let scrolled = false;
+    for (let w = 0; w < 40; w++) {
+      await sleep(250);
+      const newFp = getCardFingerprint();
+      const newViewportTop = viewport ? viewport.scrollTop : -1;
+      const newWindowTop = window.scrollY;
+      if (newFp !== prevFingerprint ||
+          newViewportTop > prevViewportTop + 50 ||
+          newWindowTop > prevWindowTop + 50) {
+        scrolled = true;
+        break;
       }
     }
+
+    if (scrolled) {
+      await sleep(600); // Angular CDKのレンダリング完了を待つ
+      showAutoStatus(`🤖 次の候補者を処理中... (累計✅${addedCount}人追加)`);
+      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+      await triggerAutoAdd();
+      return;
+    }
+
+    // スクロールしても変化なし＝全候補者処理完了
     sessionStorage.removeItem(BATCH_SESSION_KEY);
     showAutoStatus(`🤖 完了！ ✅${addedCount}人を検討リストに追加 (全${totalProcessed}人中)`, 8000);
     await saveAutoAddProgress({ running: false });
