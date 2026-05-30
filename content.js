@@ -1163,6 +1163,40 @@ async function tryClickRDSResumeTab() {
 }
 
 
+// Bizreach APIレスポンスJSONからプロフィールテキストを抽出する
+function extractBizreachProfileText(data) {
+  if (!data || typeof data !== 'object') return '';
+  const lines = [];
+
+  // 再帰的に文字列値を収集（ラベルフィールドを特定して整形）
+  const labelKeys = /name|title|company|school|university|education|career|skill|summary|description|reason|position|department|industry|role|job|work|experience|history|business|project|achievement|pr|appeal|content|detail|年収|会社|学歴|職歴|スキル|経験|業務|担当|在籍|退職|勤務|期間|役職|従業員|年齢|出身|卒業|大学|高校/i;
+  const skipKeys = /id$|Id$|flag|flg|bool|count|num|code|status|type|sort|order|page|limit|offset|created|updated|deleted|token|hash|url|path|icon|image|avatar|photo|thumb|color|style|class|version|timestamp/i;
+
+  function collect(obj, depth) {
+    if (depth > 8) return;
+    if (Array.isArray(obj)) {
+      obj.forEach(item => collect(item, depth + 1));
+      return;
+    }
+    if (typeof obj === 'object' && obj !== null) {
+      for (const [k, v] of Object.entries(obj)) {
+        if (skipKeys.test(k)) continue;
+        if (typeof v === 'string' && v.trim().length > 1) {
+          if (labelKeys.test(k) || v.length > 10) lines.push(v.trim());
+        } else if (typeof v === 'number' && labelKeys.test(k)) {
+          lines.push(`${k}: ${v}`);
+        } else {
+          collect(v, depth + 1);
+        }
+      }
+    }
+  }
+
+  collect(data, 0);
+  const result = [...new Set(lines)].join('\n');
+  return result.substring(0, 5000);
+}
+
 async function getFullProfile(cardEl, fallbackText) {
   const platform = getPlatform();
 
@@ -1186,11 +1220,57 @@ async function getFullProfile(cardEl, fallbackText) {
     return fallbackText.substring(0, 900);
   }
 
-  // Bizreach: カードクリックはAngularルーティングでCDK仮想スクロールを破壊するため
-  // パネルを開かずカードテキストのみ使用する（年収・会社名・年齢は既に含まれている）
+  // Bizreach: APIでフルプロフィール取得（カードクリックはCDK仮想スクロールを破壊するため使用不可）
   if (platform === 'bizreach') {
+    const resumeId = getBizreachResumeNumericId(cardEl);
+    if (resumeId) {
+      let xsrfToken = '';
+      for (const part of document.cookie.split(';')) {
+        const [k, ...vParts] = part.trim().split('=');
+        if (k === 'XSRF-TOKEN') { xsrfToken = decodeURIComponent(vParts.join('=')); break; }
+      }
+      const headers = { 'Accept': 'application/json' };
+      if (xsrfToken) headers['X-XSRF-TOKEN'] = xsrfToken;
+      const endpoints = [
+        `${location.origin}/v1/api/resume/${resumeId}`,
+        `${location.origin}/v1/api/resumes/${resumeId}`,
+        `${location.origin}/v1/api/scout/resume/${resumeId}`,
+      ];
+      for (const endpoint of endpoints) {
+        try {
+          const res = await fetch(endpoint, { credentials: 'include', headers });
+          if (res.ok) {
+            const contentType = res.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+              const data = await res.json();
+              const profileText = extractBizreachProfileText(data);
+              if (profileText && profileText.length > 300) {
+                console.log(`[Snow-we] Bizreachプロフィール取得成功 (${endpoint}):`, profileText.length, '文字');
+                return profileText;
+              }
+            } else if (contentType.includes('text/html')) {
+              const html = await res.text();
+              const doc = new DOMParser().parseFromString(html, 'text/html');
+              doc.querySelectorAll('script,style,noscript,nav,header,footer').forEach(e => e.remove());
+              const text = (doc.body?.innerText || doc.body?.textContent || '').replace(/\s+/g, ' ').trim();
+              if (text.length > 300) {
+                console.log(`[Snow-we] BizreachプロフィールHTML取得成功 (${endpoint}):`, text.length, '文字');
+                return text.substring(0, 5000);
+              }
+            }
+            console.log(`[Snow-we] Bizreachプロフィール取得: テキスト不足 (${endpoint}) status=${res.status}`);
+            break;
+          } else {
+            console.log(`[Snow-we] Bizreachプロフィール取得: status=${res.status} (${endpoint})`);
+          }
+        } catch (e) {
+          console.warn(`[Snow-we] Bizreachプロフィール取得失敗 (${endpoint}):`, e.message);
+        }
+      }
+    }
+    // フォールバック：カードテキスト
     const text = fallbackText.substring(0, 900);
-    console.log('[Snow-we] Bizreachカードテキスト取得:', text.length, '文字');
+    console.log('[Snow-we] Bizreachカードテキスト取得(fallback):', text.length, '文字');
     return text;
   }
 
