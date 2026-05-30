@@ -183,7 +183,7 @@ class JQuantsClient:
 
     def _headers(self) -> dict:
         if self._api_key:
-            return {"x-api-key": self._api_key}
+            return {"Authorization": f"Bearer {self._api_key}"}
         if not self._id_token or datetime.now() > (self._token_expiry or datetime.min):
             self._get_id_token()
         return {"Authorization": f"Bearer {self._id_token}"}
@@ -210,7 +210,9 @@ class JQuantsClient:
         return token
 
     def get_price_range(self, code: str, date_from: str, date_to: str) -> pd.DataFrame:
-        """期間指定で株価取得（v1: /prices/daily_quotes）"""
+        """期間指定で株価取得"""
+        if self._api_key:
+            return self._get_price_range_v2(code, date_from, date_to)
         return self._get_price_range_v1(code, date_from, date_to)
 
     def _get_price_range_v2(self, code: str, date_from: str, date_to: str) -> pd.DataFrame:
