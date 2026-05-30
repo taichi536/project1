@@ -2071,7 +2071,10 @@ elif page == "🔬 バックテスト":
         from modules.universe import UNIVERSE as _MOM_UNIVERSE
 
         _mc1, _mc2, _mc3, _mc4 = st.columns(4)
-        _mom_preset = _mc1.selectbox("銘柄ユニバース", list(_MOM_UNIVERSE.keys()), key="mom_preset")
+        _jq_options = ["🇯🇵 TOPIX100 (J-Quants)", "🇯🇵 TOPIX500 (J-Quants)"]
+        _mom_preset = _mc1.selectbox("銘柄ユニバース",
+                                     _jq_options + list(_MOM_UNIVERSE.keys()),
+                                     key="mom_preset")
         _mom_period = _mc2.selectbox("検証期間", ["3y", "5y"], index=1,
                                      format_func=lambda x: {"3y": "3年", "5y": "5年"}[x],
                                      key="mom_period")
@@ -2084,12 +2087,24 @@ elif page == "🔬 バックテスト":
                                     help="この日数の移動平均より上の銘柄のみ買い対象")
         _mom_cash = _mc6.number_input("初期資金 (円)", value=1_000_000, min_value=100_000, step=100_000, key="mom_cash")
 
-        _mom_tickers = [t if t.endswith(".T") or not t.isdigit() else t + ".T"
-                        for t in _MOM_UNIVERSE[_mom_preset]["tickers"]]
+        if _mom_preset in _jq_options:
+            from modules.universe import get_jquants_universe_tickers
+            _scale = "TOPIX100" if "TOPIX100" in _mom_preset else "TOPIX500"
+            with st.spinner(f"J-Quantsから{_scale}銘柄リストを取得中..."):
+                _jq_tickers = get_jquants_universe_tickers(_scale)
+            if _jq_tickers:
+                _mom_tickers = [t + ".T" for t in _jq_tickers]
+            else:
+                st.warning("J-Quantsから銘柄リストを取得できませんでした。固定ユニバースを使用します。")
+                _mom_tickers = [t if t.endswith(".T") or not t.isdigit() else t + ".T"
+                                for t in _MOM_UNIVERSE["🇯🇵 日本株メジャー"]["tickers"]]
+        else:
+            _mom_tickers = [t if t.endswith(".T") or not t.isdigit() else t + ".T"
+                            for t in _MOM_UNIVERSE[_mom_preset]["tickers"]]
 
         st.caption(f"対象: {_mom_preset} / {len(_mom_tickers)}銘柄 / 上位{_mom_top_n}銘柄保有 / {_mom_lookback}ヶ月モメンタム")
-
-        _mom_btn = st.button("▶ モメンタム戦略バックテスト実行", type="primary", key="mom_btn")
+        if len(_mom_tickers) > 50:
+            st.info(f"💡 {len(_mom_tickers)}銘柄のバックテストは5〜10分かかります。")
 
         if _mom_btn:
             with st.spinner(f"{len(_mom_tickers)}銘柄のデータ取得・シミュレーション中（1〜2分かかります）..."):
