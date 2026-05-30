@@ -257,8 +257,8 @@ class JQuantsClient:
             raise RuntimeError(f"J-Quants master error {resp.status_code}: {resp.text[:200]}")
         data = resp.json().get("data", [])
         return {
-            row["Code"][:4]: row.get("CompanyName", "")
-            for row in data if row.get("Code") and row.get("CompanyName")
+            row["Code"][:4]: row.get("CoName", "")
+            for row in data if row.get("Code") and row.get("CoName")
         }
 
     def get_trading_calendar(self, date_from: str, date_to: str) -> set[str]:
