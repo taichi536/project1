@@ -182,32 +182,26 @@ class JQuantsClient:
         self._token_expiry: datetime | None = None
 
     def _headers(self) -> dict:
+        if self._api_key:
+            return {"x-api-key": self._api_key}
         if not self._id_token or datetime.now() > (self._token_expiry or datetime.min):
             self._get_id_token()
         return {"Authorization": f"Bearer {self._id_token}"}
 
     def _get_id_token(self) -> str:
-        if self._api_key:
-            # v2: APIキーをIDトークンに交換
-            resp = requests.post(f"{self.BASE_V2}/token/auth",
-                                 json={"apikey": self._api_key}, timeout=10)
+        # v1: メール/パスワード → リフレッシュトークン → IDトークン
+        if not self._refresh_token:
+            resp = requests.post(f"{self.BASE_V1}/token/auth_user",
+                                 json={"mailaddress": self.email, "password": self.password},
+                                 timeout=10)
             if not resp.ok:
-                raise RuntimeError(f"J-Quants v2 auth error {resp.status_code}: {resp.text[:200]}")
-            token = resp.json().get("idToken") or resp.json().get("token")
-        else:
-            # v1: メール/パスワード → リフレッシュトークン → IDトークン
-            if not self._refresh_token:
-                resp = requests.post(f"{self.BASE_V1}/token/auth_user",
-                                     json={"mailaddress": self.email, "password": self.password},
-                                     timeout=10)
-                if not resp.ok:
-                    raise RuntimeError(f"J-Quants auth error {resp.status_code}: {resp.text[:200]}")
-                self._refresh_token = resp.json()["refreshToken"]
-            resp = requests.post(f"{self.BASE_V1}/token/auth_refresh",
-                                 params={"refreshtoken": self._refresh_token}, timeout=10)
-            if not resp.ok:
-                raise RuntimeError(f"J-Quants refresh error {resp.status_code}: {resp.text[:200]}")
-            token = resp.json()["idToken"]
+                raise RuntimeError(f"J-Quants auth error {resp.status_code}: {resp.text[:200]}")
+            self._refresh_token = resp.json()["refreshToken"]
+        resp = requests.post(f"{self.BASE_V1}/token/auth_refresh",
+                             params={"refreshtoken": self._refresh_token}, timeout=10)
+        if not resp.ok:
+            raise RuntimeError(f"J-Quants refresh error {resp.status_code}: {resp.text[:200]}")
+        token = resp.json()["idToken"]
         self._id_token = token
         self._token_expiry = datetime.now() + timedelta(hours=23)
         return token
