@@ -1010,30 +1010,35 @@ async function triggerAutoAdd() {
 
     const prevFingerprint = getCardFingerprint();
     const prevViewportTop = viewport ? viewport.scrollTop : -1;
-    const prevWindowTop = window.scrollY;
     const scrollAmt = (viewport && viewport.clientHeight > 50) ? viewport.clientHeight : (window.innerHeight || 800);
 
-    // viewportスクロールを試みる（windowスクロール型CDKも想定してwindow.scrollByも実行）
-    if (viewport) viewport.scrollTop += scrollAmt;
-    window.scrollBy({ top: scrollAmt, behavior: 'smooth' });
+    // scrollBy() を優先（ネイティブscrollイベントを発火→AngularCDKがDOMを再レンダリング）
+    // scrollTop += はscrollイベントを発火しない場合があるためフォールバックにとどめる
+    if (viewport) {
+      if (typeof viewport.scrollBy === 'function') {
+        viewport.scrollBy(0, scrollAmt);
+      } else {
+        viewport.scrollTop += scrollAmt;
+        viewport.dispatchEvent(new Event('scroll', { bubbles: true }));
+      }
+    }
 
-    // Angular CDKがDOMを更新するまで最大10秒待機（指紋変化 or スクロール量確認）
+    // Angular CDKがDOMを更新するまで最大10秒待機（指紋変化 or scrollTop変化を検出）
     let scrolled = false;
     for (let w = 0; w < 40; w++) {
       await sleep(250);
       const newFp = getCardFingerprint();
       const newViewportTop = viewport ? viewport.scrollTop : -1;
-      const newWindowTop = window.scrollY;
-      if (newFp !== prevFingerprint ||
-          newViewportTop > prevViewportTop + 50 ||
-          newWindowTop > prevWindowTop + 50) {
+      if (newFp !== prevFingerprint || newViewportTop > prevViewportTop + 50) {
         scrolled = true;
         break;
       }
     }
 
+    console.log(`[Snow-we] Bizreach scroll: prevTop=${prevViewportTop} newTop=${viewport?.scrollTop} scrolled=${scrolled} fp_changed=${getCardFingerprint() !== prevFingerprint}`);
+
     if (scrolled) {
-      await sleep(600); // Angular CDKのレンダリング完了を待つ
+      await sleep(800); // Angular CDKのレンダリング完了を待つ
       showAutoStatus(`🤖 次の候補者を処理中... (累計✅${addedCount}人追加)`);
       await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
       await triggerAutoAdd();
