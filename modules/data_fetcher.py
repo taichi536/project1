@@ -210,9 +210,7 @@ class JQuantsClient:
         return token
 
     def get_price_range(self, code: str, date_from: str, date_to: str) -> pd.DataFrame:
-        """期間指定で株価取得（v2: /equities/bars/daily, v1: /prices/daily_quotes）"""
-        if self._api_key:
-            return self._get_price_range_v2(code, date_from, date_to)
+        """期間指定で株価取得（v1: /prices/daily_quotes）"""
         return self._get_price_range_v1(code, date_from, date_to)
 
     def _get_price_range_v2(self, code: str, date_from: str, date_to: str) -> pd.DataFrame:
@@ -250,15 +248,11 @@ class JQuantsClient:
 
 
 def _get_jquants_client() -> JQuantsClient | None:
-    # 方法1: APIキー（最新方式・ダッシュボードの「API Key」）
-    api_key = os.getenv("JQUANTS_API_KEY")
-    if api_key:
-        return JQuantsClient(api_key=api_key)
-    # 方法2: リフレッシュトークン
-    refresh_token = os.getenv("JQUANTS_REFRESH_TOKEN")
+    # J-Quantsダッシュボードの「APIキー」はリフレッシュトークン
+    refresh_token = os.getenv("JQUANTS_API_KEY") or os.getenv("JQUANTS_REFRESH_TOKEN")
     if refresh_token:
         return JQuantsClient(refresh_token=refresh_token)
-    # 方法3: メール＋パスワード（旧方式）
+    # メール＋パスワード方式
     email = os.getenv("JQUANTS_EMAIL")
     password = os.getenv("JQUANTS_PASSWORD")
     if email and password:
