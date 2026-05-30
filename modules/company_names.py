@@ -225,17 +225,25 @@ def _save_cache(cache: dict):
 def get_company_name(ticker: str, use_api: bool = True) -> str:
     """
     銘柄コードから社名を返す。
-    優先順位: ハードコード → キャッシュ → yfinance API
-    取得できない場合はtickerをそのまま返す。
+    優先順位: ハードコード → J-Quantsマスター → yfinanceキャッシュ → yfinance API
     """
     raw = ticker.strip().upper()
-    # 4桁数字はゼロ埋めなしで検索
     key = raw.replace(".T", "")
 
     if key in _KNOWN_NAMES:
         return _KNOWN_NAMES[key]
     if raw in _KNOWN_NAMES:
         return _KNOWN_NAMES[raw]
+
+    # J-Quantsマスター（日本株のみ）
+    if key.isdigit():
+        try:
+            from modules.data_fetcher import fetch_jquants_company_master
+            master = fetch_jquants_company_master()
+            if key in master and master[key]:
+                return master[key]
+        except Exception:
+            pass
 
     cache = _load_cache()
     if raw in cache:
@@ -246,11 +254,8 @@ def get_company_name(ticker: str, use_api: bool = True) -> str:
 
     try:
         normalized = normalize_ticker(raw)
-        info = yf.Ticker(normalized).fast_info
-        # fast_infoに社名はないのでinfoを使う（低速だがキャッシュするので1回だけ）
         full_info = yf.Ticker(normalized).info
         name = full_info.get("shortName") or full_info.get("longName") or raw
-        # 長い社名は短縮
         if len(name) > 12:
             name = name[:11] + "…"
         cache[raw] = name

@@ -249,6 +249,37 @@ class JQuantsClient:
             df = df[cols]
         return df
 
+    def get_company_master(self) -> dict[str, str]:
+        """銘柄コード→社名の辞書を返す（/equities/master）"""
+        resp = requests.get(f"{self.BASE_V2}/equities/master",
+                            headers=self._headers(), timeout=30)
+        if not resp.ok:
+            raise RuntimeError(f"J-Quants master error {resp.status_code}: {resp.text[:200]}")
+        data = resp.json().get("data", [])
+        return {
+            row["Code"][:4]: row.get("CompanyName", "")
+            for row in data if row.get("Code") and row.get("CompanyName")
+        }
+
+    def get_trading_calendar(self, date_from: str, date_to: str) -> set[str]:
+        """取引日の日付セットを返す（/markets/calendar）"""
+        resp = requests.get(f"{self.BASE_V2}/markets/calendar",
+                            headers=self._headers(),
+                            params={"from": date_from, "to": date_to}, timeout=15)
+        if not resp.ok:
+            raise RuntimeError(f"J-Quants calendar error {resp.status_code}: {resp.text[:200]}")
+        data = resp.json().get("data", [])
+        return {row["Date"] for row in data if row.get("HolidayDivision") == "1"}
+
+    def get_earnings_calendar(self, code: str) -> list[dict]:
+        """決算発表予定日を返す（/equities/earnings-calendar）"""
+        resp = requests.get(f"{self.BASE_V2}/equities/earnings-calendar",
+                            headers=self._headers(),
+                            params={"code": code}, timeout=10)
+        if not resp.ok:
+            return []
+        return resp.json().get("data", [])
+
 
 def _get_jquants_client() -> JQuantsClient | None:
     # JQUANTS_API_KEYはdirect API key（Bearer token）として使用
@@ -265,6 +296,58 @@ def _get_jquants_client() -> JQuantsClient | None:
     if email and password:
         return JQuantsClient(email=email, password=password)
     return None
+
+
+_COMPANY_MASTER_CACHE_FILE = Path(__file__).parent.parent / ".jquants_company_master.json"
+_CALENDAR_CACHE_FILE = Path(__file__).parent.parent / ".jquants_calendar.json"
+
+
+def fetch_jquants_company_master() -> dict[str, str]:
+    """J-Quantsから全上場銘柄の社名を取得（週1回更新キャッシュ）"""
+    import time
+    if _COMPANY_MASTER_CACHE_FILE.exists():
+        try:
+            cached = json.loads(_COMPANY_MASTER_CACHE_FILE.read_text())
+            if time.time() - cached.get("_fetched_at", 0) < 86400 * 7:
+                return {k: v for k, v in cached.items() if k != "_fetched_at"}
+        except Exception:
+            pass
+    client = _get_jquants_client()
+    if not client:
+        return {}
+    try:
+        master = client.get_company_master()
+        master["_fetched_at"] = time.time()
+        _COMPANY_MASTER_CACHE_FILE.write_text(json.dumps(master, ensure_ascii=False))
+        return {k: v for k, v in master.items() if k != "_fetched_at"}
+    except Exception:
+        return {}
+
+
+def fetch_jquants_is_trading_day(check_date: str) -> bool | None:
+    """J-Quantsで取引日かどうか確認。取得できない場合はNoneを返す"""
+    import time
+    from datetime import timedelta
+    date_from = (datetime.strptime(check_date, "%Y-%m-%d") - timedelta(days=5)).strftime("%Y-%m-%d")
+    date_to = (datetime.strptime(check_date, "%Y-%m-%d") + timedelta(days=5)).strftime("%Y-%m-%d")
+    cache_key = f"{date_from}_{date_to}"
+    if _CALENDAR_CACHE_FILE.exists():
+        try:
+            cached = json.loads(_CALENDAR_CACHE_FILE.read_text())
+            if cached.get("_key") == cache_key:
+                return check_date in cached.get("trading_days", [])
+        except Exception:
+            pass
+    client = _get_jquants_client()
+    if not client:
+        return None
+    try:
+        trading_days = client.get_trading_calendar(date_from, date_to)
+        _CALENDAR_CACHE_FILE.write_text(json.dumps(
+            {"_key": cache_key, "trading_days": list(trading_days)}, ensure_ascii=False))
+        return check_date in trading_days
+    except Exception:
+        return None
 
 
 # ── Alpaca Markets API（米国株リアルタイム・無料登録必須） ─────────────────
