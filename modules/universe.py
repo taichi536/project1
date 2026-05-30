@@ -343,3 +343,35 @@ UNIVERSE: dict[str, dict] = {
 def get_ticker_name(category: str, ticker: str) -> str:
     names = UNIVERSE.get(category, {}).get("ticker_names", {})
     return names.get(ticker, ticker)
+
+
+def get_jquants_universe_tickers(scale: str = "TOPIX100") -> list[str]:
+    """
+    J-Quantsマスターから動的にティッカーリストを取得。
+    scale: "TOPIX100" (Core30+Large70), "TOPIX500" (Core30+Large70+Mid400)
+    """
+    try:
+        from modules.data_fetcher import fetch_jquants_universe
+        scale_map = {
+            "TOPIX100": ["TOPIX Core30", "TOPIX Large70"],
+            "TOPIX500": ["TOPIX Core30", "TOPIX Large70", "TOPIX Mid400"],
+        }
+        cats = scale_map.get(scale, ["TOPIX Core30", "TOPIX Large70"])
+        stocks = fetch_jquants_universe(scale_cats=cats, market="プライム")
+        return [s["code"] for s in stocks]
+    except Exception:
+        return []
+
+
+def get_jquants_universe_with_sector(scale: str = "TOPIX100") -> list[dict]:
+    """銘柄リストをセクター情報付きで返す"""
+    try:
+        from modules.data_fetcher import fetch_jquants_universe
+        scale_map = {
+            "TOPIX100": ["TOPIX Core30", "TOPIX Large70"],
+            "TOPIX500": ["TOPIX Core30", "TOPIX Large70", "TOPIX Mid400"],
+        }
+        cats = scale_map.get(scale, ["TOPIX Core30", "TOPIX Large70"])
+        return fetch_jquants_universe(scale_cats=cats, market="プライム")
+    except Exception:
+        return []

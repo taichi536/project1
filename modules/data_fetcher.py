@@ -300,6 +300,62 @@ def _get_jquants_client() -> JQuantsClient | None:
 
 _COMPANY_MASTER_CACHE_FILE = Path(__file__).parent.parent / ".jquants_company_master.json"
 _CALENDAR_CACHE_FILE = Path(__file__).parent.parent / ".jquants_calendar.json"
+_UNIVERSE_CACHE_FILE = Path(__file__).parent.parent / ".jquants_universe.json"
+
+
+def _fetch_jquants_full_master() -> list[dict]:
+    """J-Quantsから全銘柄マスターを取得（生データ）"""
+    import time
+    if _UNIVERSE_CACHE_FILE.exists():
+        try:
+            cached = json.loads(_UNIVERSE_CACHE_FILE.read_text())
+            if time.time() - cached.get("_fetched_at", 0) < 86400 * 7:
+                return cached.get("data", [])
+        except Exception:
+            pass
+    client = _get_jquants_client()
+    if not client:
+        return []
+    try:
+        resp = requests.get(f"{client.BASE_V2}/equities/master",
+                            headers=client._headers(), timeout=30)
+        if not resp.ok:
+            return []
+        data = resp.json().get("data", [])
+        _UNIVERSE_CACHE_FILE.write_text(json.dumps(
+            {"_fetched_at": time.time(), "data": data}, ensure_ascii=False))
+        return data
+    except Exception:
+        return []
+
+
+def fetch_jquants_universe(
+    scale_cats: list[str] | None = None,
+    market: str = "プライム",
+) -> list[dict]:
+    """
+    J-Quantsマスターから銘柄ユニバースを生成。
+    戻り値: [{"code": "7203", "name": "トヨタ自動車", "sector": "自動車・輸送機", "scale": "TOPIX Core30"}, ...]
+    scale_cats: None=全て, ["TOPIX Core30", "TOPIX Large70"] など
+    """
+    data = _fetch_jquants_full_master()
+    result = []
+    for row in data:
+        if not row.get("Code"):
+            continue
+        if market and row.get("MktNm") != market:
+            continue
+        scale = row.get("ScaleCat", "")
+        if scale_cats and scale not in scale_cats:
+            continue
+        code = row["Code"][:4]
+        result.append({
+            "code": code,
+            "name": row.get("CoName", code),
+            "sector": row.get("S17Nm", "その他"),
+            "scale": scale,
+        })
+    return result
 
 
 def fetch_jquants_company_master() -> dict[str, str]:

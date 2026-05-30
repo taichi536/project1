@@ -435,15 +435,26 @@ def run_momentum_rebalance():
     from modules.company_names import get_company_name
     import pandas as pd
 
-    UNIVERSE_KEY = "🇯🇵 日本株メジャー"
     TOP_N = 5
     LOOKBACK_DAYS = 126  # 約6ヶ月
     MA_PERIOD = 200
+    MAX_PER_SECTOR = 2  # 同セクターから最大2銘柄
 
-    tickers_raw = UNIVERSE[UNIVERSE_KEY]["tickers"]
+    # J-QuantsでTOPIX100を動的取得、失敗時は固定ユニバース
+    from modules.universe import get_jquants_universe_with_sector
+    jq_stocks = get_jquants_universe_with_sector("TOPIX100")
+    if jq_stocks:
+        tickers_raw = [s["code"] for s in jq_stocks]
+        sector_map = {s["code"]: s["sector"] for s in jq_stocks}
+        universe_label = f"TOPIX100 ({len(tickers_raw)}銘柄)"
+    else:
+        UNIVERSE_KEY = "🇯🇵 日本株メジャー"
+        tickers_raw = UNIVERSE[UNIVERSE_KEY]["tickers"]
+        sector_map = {}
+        universe_label = UNIVERSE_KEY
     tickers = [normalize_ticker(t) for t in tickers_raw]
 
-    print(f"[月次リバランス] {UNIVERSE_KEY} {len(tickers)}銘柄のモメンタム計算中...")
+    print(f"[月次リバランス] {universe_label} モメンタム計算中...")
 
     prices = {}
     latest_prices = {}
@@ -466,7 +477,17 @@ def run_momentum_rebalance():
     momentum = ((cur / past) - 1) * 100
     ma200 = price_df.tail(MA_PERIOD).mean()
     qualified = momentum[cur > ma200].dropna().sort_values(ascending=False)
-    new_top = list(qualified.head(TOP_N).index)
+
+    # セクター分散: 同業種はMAX_PER_SECTOR銘柄まで
+    new_top = []
+    sector_count: dict[str, int] = {}
+    for t in qualified.index:
+        sector = sector_map.get(t.replace(".T", ""), "不明")
+        if sector_count.get(sector, 0) < MAX_PER_SECTOR:
+            new_top.append(t)
+            sector_count[sector] = sector_count.get(sector, 0) + 1
+        if len(new_top) >= TOP_N:
+            break
 
     # 社名取得
     def label(t):
@@ -481,11 +502,13 @@ def run_momentum_rebalance():
     sell = [t for t in prev_holdings if t not in new_top]
     hold = [t for t in new_top if t in prev_holdings]
 
-    # 社名＋株価つきのランキング
+    # 社名＋株価＋セクターつきのランキング
     rankings = [
         (label(t), float(m), latest_prices.get(t, 0))
         for t, m in zip(qualified.index.tolist(), qualified.values.tolist())
     ]
+
+    print(f"  セクター分布: { {s: c for s, c in sector_count.items()} }")
 
     buy_labels = [label(t) for t in buy]
     sell_labels = [label(t) for t in sell]
