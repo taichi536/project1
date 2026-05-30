@@ -1778,12 +1778,12 @@ ${criteriaLines}
 【候補者情報】
 ${profileText}
 
-JSON1行のみで出力（rは判定理由を50字以内で）:
-{"o":"OK","r":"理由"} または {"o":"NG","r":"理由"} または {"o":"要確認","r":"理由"}`;
+JSON1行のみで出力（rを先に書いてからoを確定すること。rは判定理由を50字以内で）:
+{"r":"理由","o":"OK"} または {"r":"理由","o":"NG"} または {"r":"理由","o":"要確認"}`;
 
   const data = await claudeFetch(apiKey, {
     model: 'claude-sonnet-4-6',
-    max_tokens: 150,
+    max_tokens: 250,
     messages: [{ role: 'user', content: prompt }]
   });
   const text = (data.content?.[0]?.text || '').trim();
