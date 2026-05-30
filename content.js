@@ -1667,15 +1667,14 @@ function checkIncomeNG(profileText) {
 }
 
 // 在籍期間チェック：過去職歴に2年（24ヶ月）未満の会社エントリーがある場合NG
-// 同一企業内の部署・役職変更で経歴を分割した場合の誤NG判定を防ぐ：
-//   直前行が長期在籍（≥24ヶ月）の会社エントリーなら「サブエントリー」とみなしスキップ
+// ・出向先・兼務先はカウントしない（出向元の在籍期間に含む）
+// ・同一会社を複数行に分けて記入している場合は合算する
 function checkShortTenureNG(profileText) {
   if (!profileText) return null;
 
   const companyRe = /株式会社|有限会社|合同会社|ホールディングス|LLC|Inc\b|Corp\b|Ltd\b|銀行[^員振]|証券[^取]|生命保険|損害保険|病院|クリニック|㈱|（株）|\(株\)/;
+  const shukkoRe  = /出向|兼務|派遣先/; // 出向・兼務行はスキップ
 
-  // テキスト表記から在籍期間（ヶ月）を取り出す
-  // 対応形式: （X年Xヶ月）/ 0.3年 / 6ヶ月 / 各1年
   function parseTenureMonths(str) {
     const m1 = str.match(/[（(](\d+)年(?:(\d+)[ヶか]月)?[）)]/);
     if (m1) return parseInt(m1[1], 10) * 12 + parseInt(m1[2] || '0', 10);
@@ -1690,7 +1689,6 @@ function checkShortTenureNG(profileText) {
     return null;
   }
 
-  // 詳細プロフィールページ形式: "2014年11月 〜 2015年8月" → ヶ月数
   function parseDateRangeMonths(str) {
     const m = str.match(/(\d{4})年(\d{1,2})月\s*[〜~～]\s*(\d{4})年(\d{1,2})月/);
     if (!m) return null;
@@ -1701,17 +1699,42 @@ function checkShortTenureNG(profileText) {
   const dodaxTenureRe = /^(?:各\d+(?:\.\d+)?年|\d+(?:\.\d+)?年|\d+[ヶか]月)/;
   const lines = profileText.split('\n').map(l => l.trim()).filter(Boolean);
 
+  // 同一会社の全出現箇所から在籍期間を合算（複数行記入対応）
+  // 現職（現在/在籍中）が含まれる場合は Infinity を返す（チェック対象外）
+  function getTotalTenureForCompanyLine(companyLineStr) {
+    if (!companyLineStr) return 0;
+    const key = companyLineStr.replace(/\s+/g, '').substring(0, Math.min(8, companyLineStr.replace(/\s+/g, '').length));
+    if (key.length < 3) return 0;
+    let total = 0;
+    for (let k = 0; k < lines.length; k++) {
+      const l = lines[k];
+      if (!l.replace(/\s+/g, '').includes(key.substring(0, Math.min(6, key.length)))) continue;
+      if (shukkoRe.test(l)) continue;
+      if (l.includes('現在') || l.includes('在籍中')) return Infinity;
+      const inlineT = parseTenureMonths(l);
+      if (inlineT !== null && inlineT > 0) total += inlineT;
+      for (let j = k + 1; j < Math.min(k + 8, lines.length); j++) {
+        if (lines[j].includes('現在') || lines[j].includes('在籍中')) return Infinity;
+        if (companyRe.test(lines[j]) && !shukkoRe.test(lines[j])) break;
+        const t = parseTenureMonths(lines[j]);
+        if (t !== null && t > 0) total += t;
+      }
+    }
+    return total;
+  }
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.includes('現在') || line.includes('在籍中')) continue;
+    if (shukkoRe.test(line)) continue; // 出向・兼務行は全てスキップ
 
     // ── A: 日付範囲形式（"YYYY年MM月 〜 YYYY年MM月"）──
-    // 詳細プロフィールページで職歴が "会社名 2014年11月 〜 2015年8月" 形式で表示される場合
     const dateMonths = parseDateRangeMonths(line);
     if (dateMonths !== null && dateMonths < 24) {
       const prevLine2 = i > 0 ? lines[i - 1] : '';
       const nextLine2 = i < lines.length - 1 ? lines[i + 1] : '';
-      if (companyRe.test(line) || companyRe.test(prevLine2) || companyRe.test(nextLine2)) {
+      if (!shukkoRe.test(prevLine2) && !shukkoRe.test(nextLine2) &&
+          (companyRe.test(line) || companyRe.test(prevLine2) || companyRe.test(nextLine2))) {
         console.log(`[Snow-we] 短期在籍NG(date): ${dateMonths}ヶ月 / "${line.substring(0, 60)}"`);
         return 'NG';
       }
@@ -1721,19 +1744,21 @@ function checkShortTenureNG(profileText) {
     const total = parseTenureMonths(line);
     if (total === null || total <= 0 || total >= 24) continue;
 
-    // ① 同行に会社名 → 会社レベルの短期在籍 → NG
+    // ① 同行に会社名 → 全プロフィール合算チェック後NG
     if (companyRe.test(line)) {
-      console.log(`[Snow-we] 短期在籍NG: ${total}ヶ月 / "${line.substring(0, 50)}"`);
+      const fullTotal = getTotalTenureForCompanyLine(line);
+      if (fullTotal >= 24) continue;
+      console.log(`[Snow-we] 短期在籍NG: ${fullTotal || total}ヶ月 / "${line.substring(0, 50)}"`);
       return 'NG';
     }
 
-    // ② 同行に部署・役職キーワードがあればサブエントリー → スキップ
+    // ② 同行に部署・役職キーワード → サブエントリー
     const roleRe = /部長|課長|係長|主任|マネージャー|ディレクター|リーダー|担当|チーフ|シニア|ジュニア|エンジニア|営業部|開発部|総務部|人事部|経営企画|事業部|本部|センター|グループ|チーム|課$|室$|部$/;
     if (roleRe.test(line)) continue;
 
     // ③ doda-x形式の在籍期間行（行頭が数字+年/月）
     if (dodaxTenureRe.test(line)) {
-      if (i > 0 && dodaxTenureRe.test(lines[i - 1])) continue; // シーケンス2行目以降はスキップ
+      if (i > 0 && dodaxTenureRe.test(lines[i - 1])) continue;
 
       let companyLine = null;
       let isCurrent = false;
@@ -1743,6 +1768,7 @@ function checkShortTenureNG(profileText) {
         if (dodaxTenureRe.test(lines[k])) break;
       }
       if (!companyLine || isCurrent) continue;
+      if (shukkoRe.test(companyLine)) continue; // 出向先会社はスキップ
 
       let companyTotal = total;
       for (let j = i + 1; j < lines.length; j++) {
@@ -1751,6 +1777,11 @@ function checkShortTenureNG(profileText) {
         if (t) companyTotal += t;
       }
       if (companyTotal >= 24) continue;
+
+      // 同一会社の別エントリーと合算して基準クリアか確認
+      const fullTotal = getTotalTenureForCompanyLine(companyLine);
+      if (fullTotal >= 24) continue;
+
       console.log(`[Snow-we] 短期在籍NG(dodax): 合計${companyTotal}ヶ月 / 会社: "${companyLine.substring(0, 50)}"`);
       return 'NG';
     }
@@ -1758,8 +1789,13 @@ function checkShortTenureNG(profileText) {
     // ④ Bizreach形式: 直前行を確認
     const prevLine = i > 0 ? lines[i - 1] : '';
     if (companyRe.test(prevLine)) {
+      if (shukkoRe.test(prevLine)) continue; // 出向先はスキップ
       const prevTenure = parseTenureMonths(prevLine);
-      if (prevTenure !== null && prevTenure >= 24) continue; // 長期在籍会社のサブエントリー
+      if (prevTenure !== null && prevTenure >= 24) continue;
+
+      const fullTotal = getTotalTenureForCompanyLine(prevLine);
+      if (fullTotal >= 24) continue;
+
       console.log(`[Snow-we] 短期在籍NG: ${total}ヶ月 / 会社名行: "${prevLine.substring(0, 50)}"`);
       return 'NG';
     }
@@ -2150,7 +2186,7 @@ function buildCriteriaText(criteria, platform) {
   }
   // minTenure未設定時はデフォルト2年を適用
   const tenureYears = criteria.minTenure || 2;
-  lines.push(`- 在籍期間: 異なる会社への転職で${tenureYears}年未満の在籍が1社でもある場合はNG。同一会社内での部署異動・職種変更・昇格は同じ会社の在籍としてまとめて計算すること（例：同社に7年いて途中で役職変更した場合は7年として扱う）。在籍期間が読み取れない場合はスキップ`);
+  lines.push(`- 在籍期間: 異なる会社への転職で${tenureYears}年未満の在籍が1社でもある場合はNG。同一会社内での部署異動・職種変更・昇格・同社への複数行記入は同じ会社の在籍としてまとめて計算すること。出向・兼務の場合は出向元（親会社）の在籍期間に含め、出向先の短期在籍は別会社としてカウントしない。在籍期間が読み取れない場合はスキップ`);
   if (criteria.requiredKeywords) lines.push(`- 必須経験: ${criteria.requiredKeywords}`);
   if (criteria.excludeCompanies) lines.push(`- 除外企業（追加）: 職歴に${criteria.excludeCompanies}が含まれる場合は即NG`);
   if (criteria.excludeKeywords)  lines.push(`- 除外: ${criteria.excludeKeywords}`);
