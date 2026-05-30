@@ -2106,6 +2106,8 @@ elif page == "🔬 バックテスト":
         if len(_mom_tickers) > 50:
             st.info(f"💡 {len(_mom_tickers)}銘柄のバックテストは5〜10分かかります。")
 
+        _mom_btn = st.button("▶ モメンタム戦略バックテスト実行", type="primary", key="mom_btn")
+
         if _mom_btn:
             with st.spinner(f"{len(_mom_tickers)}銘柄のデータ取得・シミュレーション中（1〜2分かかります）..."):
                 try:
