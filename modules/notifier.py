@@ -297,9 +297,15 @@ def send_momentum_rebalance_alert(
     if hold:
         lines.append(f"🔵 <b>継続保有:</b> {' / '.join(hold)}")
     lines.append("\n📈 <b>モメンタムランキング TOP10:</b>")
-    for i, (t, m) in enumerate(rankings[:10], 1):
+    for i, entry in enumerate(rankings[:10], 1):
+        if len(entry) == 3:
+            t, m, price = entry
+            price_str = f"  {price:,.0f}円" if price else ""
+        else:
+            t, m = entry
+            price_str = ""
         mark = "✅" if i <= 5 else "  "
-        lines.append(f"{mark} {i}. {t}  {m:+.1f}%")
+        lines.append(f"{mark} {i}. {t}  {m:+.1f}%{price_str}")
     message = "\n".join(lines)
     results = {}
     tg_token = telegram_token or os.getenv("TELEGRAM_BOT_TOKEN")

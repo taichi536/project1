@@ -437,6 +437,7 @@ def run_momentum_rebalance():
     """月次モメンタムリバランス通知（毎月1日頃に実行）"""
     from modules.universe import UNIVERSE
     from modules.data_fetcher import fetch_ohlcv, normalize_ticker
+    from modules.company_names import get_company_name
     import pandas as pd
 
     UNIVERSE_KEY = "🇯🇵 日本株メジャー"
@@ -450,11 +451,13 @@ def run_momentum_rebalance():
     print(f"[月次リバランス] {UNIVERSE_KEY} {len(tickers)}銘柄のモメンタム計算中...")
 
     prices = {}
+    latest_prices = {}
     for t in tickers:
         try:
             df = fetch_ohlcv(t, period="14mo")
             if df is not None and not df.empty and len(df) > MA_PERIOD:
                 prices[t] = df["Close"].squeeze()
+                latest_prices[t] = float(df["Close"].iloc[-1])
         except Exception as e:
             print(f"  {t}: 取得失敗 ({e})")
 
@@ -470,14 +473,28 @@ def run_momentum_rebalance():
     qualified = momentum[cur > ma200].dropna().sort_values(ascending=False)
     new_top = list(qualified.head(TOP_N).index)
 
-    # 前回の推奨を読み込む
-    prev_holdings = _load_momentum_holdings()
+    # 社名取得
+    def label(t):
+        code = t.replace(".T", "")
+        name = get_company_name(t, use_api=False)
+        if name and name.upper() != code:
+            return f"{code} {name}"
+        return code
 
+    prev_holdings = _load_momentum_holdings()
     buy = [t for t in new_top if t not in prev_holdings]
     sell = [t for t in prev_holdings if t not in new_top]
     hold = [t for t in new_top if t in prev_holdings]
 
-    rankings = list(zip(qualified.index.tolist(), qualified.values.tolist()))
+    # 社名＋株価つきのランキング
+    rankings = [
+        (label(t), float(m), latest_prices.get(t, 0))
+        for t, m in zip(qualified.index.tolist(), qualified.values.tolist())
+    ]
+
+    buy_labels = [label(t) for t in buy]
+    sell_labels = [label(t) for t in sell]
+    hold_labels = [label(t) for t in hold]
 
     print(f"  推奨TOP{TOP_N}: {new_top}")
     print(f"  買い: {buy} / 売り: {sell} / 継続: {hold}")
@@ -486,18 +503,15 @@ def run_momentum_rebalance():
     _MOMENTUM_HOLDINGS_FILE.write_text(json.dumps(new_top, ensure_ascii=False))
     entries = _load_momentum_entries()
     for t in buy:
-        try:
-            df = fetch_ohlcv(t, period="5d")
-            if df is not None and not df.empty:
-                entries[t] = float(df["Close"].iloc[-1])
-        except Exception:
-            pass
+        if t in latest_prices:
+            entries[t] = latest_prices[t]
     for t in sell:
         entries.pop(t, None)
     _MOMENTUM_ENTRY_FILE.write_text(json.dumps(entries, ensure_ascii=False))
 
     if buy or sell:
-        result = send_momentum_rebalance_alert(buy=buy, sell=sell, hold=hold, rankings=rankings)
+        result = send_momentum_rebalance_alert(
+            buy=buy_labels, sell=sell_labels, hold=hold_labels, rankings=rankings)
         print(f"  → 通知送信: {result}")
     else:
         print("  → 変更なし、通知スキップ")
