@@ -213,8 +213,8 @@ class JQuantsClient:
         return self._get_price_range_v1(code, date_from, date_to)
 
     def _get_price_range_v2(self, code: str, date_from: str, date_to: str) -> pd.DataFrame:
-        params = {"code": code, "date_from": date_from, "date_to": date_to}
-        resp = requests.get(f"{self.BASE_V2}/prices/daily_quotes",
+        params = {"code": code, "from": date_from, "to": date_to}
+        resp = requests.get(f"{self.BASE_V2}/equities/bars/daily",
                             headers=self._headers(), params=params, timeout=20)
         if not resp.ok:
             raise RuntimeError(f"J-Quants v2 error {resp.status_code}: {resp.text[:200]}")
