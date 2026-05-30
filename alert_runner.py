@@ -559,8 +559,8 @@ def main():
             print("⚠️ 警告: TELEGRAM_BOT_TOKEN または SLACK_WEBHOOK_URL が設定されていません。")
             print("   通知は届きません。環境変数を設定してください。")
 
-        # 休場日チェック（watchlistモード以外）
-        if args.mode != "watchlist" and not is_trading_day():
+        # 休場日チェック（watchlist・momentumモード以外）
+        if args.mode not in ("watchlist", "momentum") and not is_trading_day():
             print("📅 本日は市場休場日のためシグナルチェックをスキップします")
             return
 
