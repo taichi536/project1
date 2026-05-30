@@ -39,20 +39,10 @@ _trader = AutoTrader()
 
 
 def is_trading_day(check_date: date | None = None) -> bool:
-    """日本株の取引日かどうかを判定する。J-Quantsカレンダーを優先使用。"""
+    """日本株の取引日かどうかを判定する。直近データの日付で祝日を判定。"""
     d = check_date or date.today()
     if d.weekday() >= 5:  # 土(5)・日(6)
         return False
-    date_str = d.strftime("%Y-%m-%d")
-    # J-Quantsで正確に判定
-    try:
-        from modules.data_fetcher import fetch_jquants_is_trading_day
-        result = fetch_jquants_is_trading_day(date_str)
-        if result is not None:
-            return result
-    except Exception:
-        pass
-    # フォールバック: 直近データの日付で判定
     try:
         from modules.data_fetcher import fetch_ohlcv
         import pandas as pd
