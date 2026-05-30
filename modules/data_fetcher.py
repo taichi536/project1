@@ -216,17 +216,21 @@ class JQuantsClient:
         return self._get_price_range_v1(code, date_from, date_to)
 
     def _get_price_range_v2(self, code: str, date_from: str, date_to: str) -> pd.DataFrame:
-        params = {"code": code, "from": date_from, "to": date_to}
-        resp = requests.get(f"{self.BASE_V2}/equities/bars/daily",
+        params = {"code": code, "date_from": date_from, "date_to": date_to}
+        resp = requests.get(f"{self.BASE_V2}/prices/daily_quotes",
                             headers=self._headers(), params=params, timeout=20)
-        resp.raise_for_status()
-        data = resp.json().get("data", [])
+        if not resp.ok:
+            raise RuntimeError(f"J-Quants v2 error {resp.status_code}: {resp.text[:200]}")
+
+        body = resp.json()
+        data = body.get("daily_quotes", body.get("data", []))
         df = pd.DataFrame(data)
         if not df.empty:
             df["Date"] = pd.to_datetime(df["Date"])
             df = df.set_index("Date").sort_index()
-            # 調整済み価格を優先使用（株式分割等に対応）
             df = df.rename(columns={
+                "AdjOpen": "Open", "AdjHigh": "High", "AdjLow": "Low",
+                "AdjClose": "Close", "Volume": "Volume",
                 "AdjO": "Open", "AdjH": "High", "AdjL": "Low",
                 "AdjC": "Close", "AdjVo": "Volume",
             })
@@ -250,8 +254,12 @@ class JQuantsClient:
 
 
 def _get_jquants_client() -> JQuantsClient | None:
-    # J-Quantsダッシュボードの「APIキー」はリフレッシュトークン
-    refresh_token = os.getenv("JQUANTS_API_KEY") or os.getenv("JQUANTS_REFRESH_TOKEN")
+    # JQUANTS_API_KEYはdirect API key（Bearer token）として使用
+    api_key = os.getenv("JQUANTS_API_KEY")
+    if api_key:
+        return JQuantsClient(api_key=api_key)
+    # リフレッシュトークン（JWT形式 eyJ...）
+    refresh_token = os.getenv("JQUANTS_REFRESH_TOKEN")
     if refresh_token:
         return JQuantsClient(refresh_token=refresh_token)
     # メール＋パスワード方式
