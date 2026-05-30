@@ -951,12 +951,13 @@ async function triggerAutoAdd() {
 
     // ─── AI判定（1人ずつ）───
     setBatchBadge(el, 'checking', '🤖 判定中...');
-    showAutoStatus(`🤖 ${pending.length + 1}人目 AI判定中... ✅${addedCount}人追加`);
-    let overall, judgeReason;
+    showAutoStatus(`🤖 判定中 (${totalProcessed + 1}人目)... ✅${addedCount}人追加`);
+    let overall, judgeReason, judgeConfidence;
     try {
       const result = await judgeSingleCandidate(apiKey, profileText, criteria);
-      overall = result.verdict;
-      judgeReason = result.reason || '';
+      overall         = result.verdict;
+      judgeReason     = result.reason     || '';
+      judgeConfidence = result.confidence ?? null;
     } catch (err) {
       console.error('[Snow-we] judgeSingleCandidate error:', err);
       setBatchBadge(el, 'warn', `⚠️ 判定失敗: ${(err.message || '').slice(0, 30)}`);
@@ -966,10 +967,19 @@ async function triggerAutoAdd() {
       continue;
     }
 
-    setBatchBadge(el,
-      overall === 'OK' ? 'ok' : overall === 'NG' ? 'ng' : 'warn',
-      overall === 'OK' ? '✅ スカウト候補' : overall === 'NG' ? '❌ 見送り' : '⚠️ 要確認',
-      judgeReason);
+    const isLowConfidence = judgeConfidence != null && judgeConfidence < 60;
+    const badgeCls = isLowConfidence ? 'warn'
+                   : overall === 'OK' ? 'ok'
+                   : overall === 'NG' ? 'ng'
+                   : 'warn';
+    const confLabel = judgeConfidence != null ? ` ${judgeConfidence}%` : '';
+    const badgeText = overall === 'OK' ? `✅ スカウト候補${confLabel}`
+                    : overall === 'NG' ? `❌ 見送り${confLabel}`
+                    : `⚠️ 要確認${confLabel}`;
+    const tooltipText = isLowConfidence
+      ? `[低確信度] ${judgeReason}`
+      : judgeReason;
+    setBatchBadge(el, badgeCls, badgeText, tooltipText);
 
     const shouldAdd = getPlatform() === 'bizreach' ? overall === 'OK' : (overall === 'OK' || overall === '要確認');
     if (shouldAdd) {
@@ -1931,8 +1941,9 @@ ${criteriaLines}
 【候補者情報】
 ${profileText}
 
-JSON1行のみで出力（rを先に書いてからoを確定すること。rは判定理由を50字以内で）:
-{"r":"理由","o":"OK"} または {"r":"理由","o":"NG"} または {"r":"理由","o":"要確認"}`;
+JSON1行のみで出力（rを先に書いてからoを確定し、最後にcで確信度0-100を付けること。rは判定理由を50字以内で）:
+{"r":"理由","o":"OK","c":90} または {"r":"理由","o":"NG","c":85} または {"r":"理由","o":"要確認","c":45}
+※cは判定の確信度（0〜100の整数）。基準に明確に合致/不合致なら80以上、判断が難しければ60未満。`;
 
   const data = await claudeFetch(apiKey, {
     model: 'claude-sonnet-4-6',
@@ -1940,12 +1951,14 @@ JSON1行のみで出力（rを先に書いてからoを確定すること。rは
     messages: [{ role: 'user', content: prompt }]
   });
   const text = (data.content?.[0]?.text || '').trim();
-  const verdictMatch = text.match(/"o"\s*:\s*"([^"]+)"/);
-  const reasonMatch  = text.match(/"r"\s*:\s*"([^"]+)"/);
-  const verdict = verdictMatch ? verdictMatch[1] : '要確認';
-  const reason  = reasonMatch  ? reasonMatch[1]  : '';
-  console.log(`[Snow-we] AI判定: ${verdict}${reason ? ` / ${reason}` : ''}`);
-  return { verdict, reason };
+  const verdictMatch    = text.match(/"o"\s*:\s*"([^"]+)"/);
+  const reasonMatch     = text.match(/"r"\s*:\s*"([^"]+)"/);
+  const confidenceMatch = text.match(/"c"\s*:\s*(\d+)/);
+  const verdict    = verdictMatch    ? verdictMatch[1]        : '要確認';
+  const reason     = reasonMatch     ? reasonMatch[1]         : '';
+  const confidence = confidenceMatch ? parseInt(confidenceMatch[1], 10) : null;
+  console.log(`[Snow-we] AI判定: ${verdict}${confidence != null ? ` (${confidence}%)` : ''}${reason ? ` / ${reason}` : ''}`);
+  return { verdict, reason, confidence };
 }
 
 // バッジをセット（バッチ用）
