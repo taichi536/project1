@@ -10,6 +10,7 @@ const GAS_SECRET        = 'snowwe2024';
 
 const SHEET_DB        = 'スカウト管理DB';
 const SHEET_DASHBOARD = '効果測定';
+const SHEET_FEEDBACK  = 'AI判定フィードバック';
 
 const STATUS_LIST = ['未返信', '返信あり', '面談設定', '書類選考', '一次面接', '最終面接', '内定', '辞退', '見送り'];
 
@@ -27,7 +28,34 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
-    const ss    = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // ── フィードバック保存 ──
+    if (data.action === 'saveFeedback') {
+      let fbSheet = ss.getSheetByName(SHEET_FEEDBACK);
+      if (!fbSheet) {
+        fbSheet = ss.insertSheet(SHEET_FEEDBACK);
+        const headers = ['日時', '担当者', '媒体', 'AI判定', '訂正後', '候補者概要'];
+        fbSheet.getRange(1, 1, 1, headers.length).setValues([headers])
+          .setBackground('#4338CA').setFontColor('#ffffff').setFontWeight('bold');
+        fbSheet.setFrozenRows(1);
+        fbSheet.setColumnWidth(1, 150);
+        fbSheet.setColumnWidth(6, 400);
+      }
+      const ts = data.ts ? new Date(data.ts) : new Date();
+      fbSheet.appendRow([
+        ts,
+        data.recruiter     || '',
+        MEDIA_LABEL[data.platform] || data.platform || '',
+        data.aiVerdict     || '',
+        data.correction    || '',
+        data.profileSummary || '',
+      ]);
+      return ContentService.createTextOutput(JSON.stringify({ ok: true }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ── スカウト管理DB保存 ──
     const sheet = ss.getSheetByName(SHEET_DB);
     if (!sheet) setupSheets();
 

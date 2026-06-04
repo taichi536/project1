@@ -1996,12 +1996,36 @@ JSON1行のみで出力（rを先に書いてからoを確定し、最後にcで
 
 // ── フィードバック保存・読み込み ──────────────────────────────────────
 async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
+  const ts = Date.now();
+
+  // ローカルに保存
   const stored = await chrome.storage.local.get(['snowWeFeedbacks']);
   const feedbacks = stored.snowWeFeedbacks || [];
-  feedbacks.unshift({ profileSummary, aiVerdict, correction, platform, ts: Date.now() });
+  feedbacks.unshift({ profileSummary, aiVerdict, correction, platform, ts });
   if (feedbacks.length > 50) feedbacks.length = 50;
   await chrome.storage.local.set({ snowWeFeedbacks: feedbacks });
   console.log(`[Snow-we] フィードバック保存: AI=${aiVerdict} → 訂正=${correction} (累計${feedbacks.length}件)`);
+
+  // GASスプレッドシートにも送信（設定済みの場合）
+  const { gasSettings, screeningCriteria } = await chrome.storage.local.get(['gasSettings', 'screeningCriteria']);
+  const gasUrl = gasSettings?.dbUrl || gasSettings?.url;
+  const secret = gasSettings?.secret;
+  if (gasUrl && secret) {
+    chrome.runtime.sendMessage({
+      type: 'gasPost',
+      url: gasUrl,
+      payload: {
+        action: 'saveFeedback',
+        secret,
+        recruiter: screeningCriteria?.recruiterName || '',
+        platform,
+        aiVerdict,
+        correction,
+        profileSummary,
+        ts,
+      }
+    });
+  }
 }
 
 async function loadRecentFeedbacks(limit = 10) {
