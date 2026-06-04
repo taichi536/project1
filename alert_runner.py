@@ -4,6 +4,7 @@
 【使い方】
   python alert_runner.py               # 1回だけ実行して終了
   python alert_runner.py --loop 60     # 60分ごとに自動チェック（起動しっぱなし）
+  python alert_runner.py --mode momentum --dry-run  # テスト（保存・通知なし）
 
 【通知されるタイミング】
   - シグナルが変化したとき（例: 様子見 → 買い）
@@ -428,12 +429,15 @@ def run_momentum_stop_loss():
     _save_state(state)
 
 
-def run_momentum_rebalance():
+def run_momentum_rebalance(dry_run: bool = False):
     """月次モメンタムリバランス通知（毎月1日頃に実行）"""
     from modules.universe import UNIVERSE
     from modules.data_fetcher import fetch_ohlcv, normalize_ticker
     from modules.company_names import get_company_name
     import pandas as pd
+
+    if dry_run:
+        print("[月次リバランス] ⚠️ DRY-RUNモード: 状態保存・通知は行いません")
 
     TOP_N = 5
     LOOKBACK_DAYS = 126  # 約6ヶ月
@@ -509,13 +513,16 @@ def run_momentum_rebalance():
     ]
 
     print(f"  セクター分布: { {s: c for s, c in sector_count.items()} }")
+    print(f"  推奨TOP{TOP_N}: {new_top}")
+    print(f"  買い: {buy} / 売り: {sell} / 継続: {hold}")
+
+    if dry_run:
+        print("  [DRY-RUN] 状態ファイルへの保存・Telegram通知をスキップしました")
+        return
 
     buy_labels = [label(t) for t in buy]
     sell_labels = [label(t) for t in sell]
     hold_labels = [label(t) for t in hold]
-
-    print(f"  推奨TOP{TOP_N}: {new_top}")
-    print(f"  買い: {buy} / 売り: {sell} / 継続: {hold}")
 
     # 保有銘柄と買値を保存
     _MOMENTUM_HOLDINGS_FILE.write_text(json.dumps(new_top, ensure_ascii=False))
@@ -543,6 +550,8 @@ def main():
                         help="繰り返し間隔（分）。省略か0で1回のみ実行")
     parser.add_argument("--tickers", type=str, default="",
                         help="対象銘柄をカンマ区切りで指定（省略時はwatchlist.jsonを使用）")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="テストモード: 状態保存・通知を行わず結果のみ表示")
     args = parser.parse_args()
 
     tickers = [t.strip() for t in args.tickers.split(",") if t.strip()] if args.tickers else None
@@ -553,6 +562,8 @@ def main():
         tg = bool(os.getenv("TELEGRAM_BOT_TOKEN"))
         sl = bool(os.getenv("SLACK_WEBHOOK_URL"))
         print(f"通知先: Telegram={'✅' if tg else '❌未設定'} / Slack={'✅' if sl else '❌未設定'}")
+        if args.dry_run:
+            print("⚠️  DRY-RUNモード: 状態保存・通知は行いません")
         print(f"{'='*50}")
 
         if not tg and not sl:
@@ -614,7 +625,7 @@ def main():
         if args.mode in ("all", "momentum"):
             now_dt = datetime.now()
             if args.mode == "momentum" or now_dt.day <= 3:
-                run_momentum_rebalance()
+                run_momentum_rebalance(dry_run=args.dry_run)
 
         print(f"\n次回チェック: {args.loop}分後" if args.loop > 0 else "\n完了")
 
