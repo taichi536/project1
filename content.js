@@ -695,16 +695,10 @@ async function autoScreenCandidates() {
       const el = cards[i].el;
       el.querySelectorAll('.snow-we-badge').forEach(b => b.remove());
 
-      const map = {
-        'OK':   ['ok',   '✅ スカウト候補'],
-        'NG':   ['ng',   '❌ 見送り'],
-        '要確認': ['warn', '⚠️ 要確認'],
-      };
-      const [cls, text] = map[r.overall] || ['warn', '⚠️ 要確認'];
-      const badge = document.createElement('div');
-      badge.className = `snow-we-badge batch ${cls}`; // batch クラスでクリック時消去を防ぐ
-      badge.textContent = text;
-      el.appendChild(badge);
+      const [cls, text] = r.overall === 'OK' ? ['ok', '✅ スカウト候補']
+                        : r.overall === 'NG' ? ['ng', '❌ 見送り']
+                        : ['warn', '⚠️ 要確認'];
+      setBatchBadge(el, cls, text, '', cards[i].summary?.substring(0, 200) || '', r.overall);
 
       // OK候補者の追加ボタンを光らせる
       if (r.overall === 'OK') {
@@ -3008,12 +3002,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (!cards[i]) return;
         const el = cards[i].el;
         el.querySelectorAll('.snow-we-badge').forEach(b => b.remove());
-        const map = { OK: ['ok', '✅ スカウト推奨'], NG: ['ng', '❌ 見送り'], '要確認': ['warn', '⚠️ 要確認'] };
-        const [cls, text] = map[r.overall] || ['warn', '⚠️ 要確認'];
-        const badge = document.createElement('div');
-        badge.className = `snow-we-badge batch ${cls}`;
-        badge.textContent = text;
-        el.appendChild(badge);
+        const [cls, text] = r.overall === 'OK' ? ['ok', '✅ スカウト推奨']
+                          : r.overall === 'NG' ? ['ng', '❌ 見送り']
+                          : ['warn', '⚠️ 要確認'];
+        setBatchBadge(el, cls, text, '', cards[i]?.summary?.substring(0, 200) || '', r.overall);
       });
       sendResponse({ success: true });
     } catch (e) {
