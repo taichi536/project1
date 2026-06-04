@@ -79,6 +79,31 @@ const POSITION_LIST = [
   'インダストリーコンサルタント（消費財・サービス領域）-BUS',
 ];
 
+// ── 自動更新チェック ────────────────────────────────────────────────────
+const GITHUB_MANIFEST_URL =
+  'https://raw.githubusercontent.com/taichi536/project1/main/manifest.json';
+
+async function checkForUpdate() {
+  try {
+    const res = await fetch(GITHUB_MANIFEST_URL + '?_=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const remote = await res.json();
+    const current = chrome.runtime.getManifest().version;
+    if (remote.version && remote.version !== current) {
+      console.log(`[Snow-we] 新バージョン検出: ${current} → ${remote.version} 自動リロード中...`);
+      chrome.runtime.reload();
+    }
+  } catch (_) {
+    // ネットワーク不可時は無視
+  }
+}
+
+// 起動時に1回 + 5分おきに定期チェック（alarms はサービスワーカー終了後も動作）
+chrome.alarms.create('snowWeUpdateCheck', { delayInMinutes: 0.1, periodInMinutes: 5 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'snowWeUpdateCheck') checkForUpdate();
+});
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // GASへのPOST中継
   if (msg.type === 'gasPost') {
