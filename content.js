@@ -46,9 +46,31 @@ function injectStyles() {
       font-family: -apple-system, sans-serif !important;
     }
     .snow-we-badge.checking { background: #6366F1 !important; color: #fff !important; }
-    .snow-we-badge.ok       { background: #059669 !important; color: #fff !important; }
-    .snow-we-badge.ng       { background: #DC2626 !important; color: #fff !important; }
-    .snow-we-badge.warn     { background: #D97706 !important; color: #fff !important; }
+    .snow-we-badge.ok       { background: #059669 !important; color: #fff !important; cursor: pointer !important; pointer-events: auto !important; }
+    .snow-we-badge.ng       { background: #DC2626 !important; color: #fff !important; cursor: pointer !important; pointer-events: auto !important; }
+    .snow-we-badge.warn     { background: #D97706 !important; color: #fff !important; cursor: pointer !important; pointer-events: auto !important; }
+    .snow-we-badge.corrected { background: #6366F1 !important; color: #fff !important; }
+    .snow-we-badge.ok:hover, .snow-we-badge.ng:hover, .snow-we-badge.warn:hover {
+      filter: brightness(1.15) !important;
+    }
+    .snow-we-fb-popup {
+      position: absolute !important; top: 28px !important; right: 6px !important;
+      background: #1e1b4b !important; border-radius: 8px !important; padding: 6px 8px !important;
+      z-index: 9999999 !important; display: flex !important; flex-direction: column !important;
+      gap: 4px !important; box-shadow: 0 4px 16px rgba(0,0,0,.5) !important; min-width: 130px !important;
+    }
+    .snow-we-fb-popup span {
+      color: #a5b4fc !important; font-size: 10px !important; font-weight: 600 !important;
+      padding: 0 2px 2px !important; font-family: -apple-system, sans-serif !important;
+    }
+    .snow-we-fb-row { display: flex !important; gap: 4px !important; }
+    .snow-we-fb-btn {
+      flex: 1 !important; font-size: 11px !important; font-weight: 700 !important;
+      padding: 5px 0 !important; border-radius: 12px !important; border: none !important;
+      cursor: pointer !important; color: #fff !important; font-family: -apple-system, sans-serif !important;
+    }
+    .snow-we-fb-btn.ok { background: #059669 !important; }
+    .snow-we-fb-btn.ng { background: #DC2626 !important; }
     @keyframes snow-we-pulse {
       0%,100% { opacity: 1; } 50% { opacity: .6; }
     }
@@ -979,7 +1001,7 @@ async function triggerAutoAdd() {
     const tooltipText = isLowConfidence
       ? `[低確信度] ${judgeReason}`
       : judgeReason;
-    setBatchBadge(el, badgeCls, badgeText, tooltipText);
+    setBatchBadge(el, badgeCls, badgeText, tooltipText, profileText.substring(0, 200), overall);
 
     const shouldAdd = getPlatform() === 'bizreach' ? overall === 'OK' : (overall === 'OK' || overall === '要確認');
     if (shouldAdd) {
@@ -1933,10 +1955,21 @@ function checkShortTenureNG(profileText) {
 // 1候補者のAI判定
 async function judgeSingleCandidate(apiKey, profileText, criteria) {
   const criteriaLines = buildCriteriaText(criteria, getPlatform());
+
+  // 過去の訂正フィードバックをfew-shot examplesとして組み込む
+  const feedbacks = await loadRecentFeedbacks(10);
+  let fewShotSection = '';
+  if (feedbacks.length > 0) {
+    const examples = feedbacks
+      .map(f => `- 「${f.profileSummary.substring(0, 80)}…」 → 正解: ${f.correction}（AIの誤判定: ${f.aiVerdict}）`)
+      .join('\n');
+    fewShotSection = `\n【過去の訂正例（優先参照）】\n以下はAIが誤判定して人間が訂正した実例です。同様のケースは同じ判断をしてください。\n${examples}\n`;
+  }
+
   const prompt = `転職エージェントの一次選定アシスタントです。
 
 【選定基準】
-${criteriaLines}
+${criteriaLines}${fewShotSection}
 
 【候補者情報】
 ${profileText}
@@ -1961,14 +1994,85 @@ JSON1行のみで出力（rを先に書いてからoを確定し、最後にcで
   return { verdict, reason, confidence };
 }
 
+// ── フィードバック保存・読み込み ──────────────────────────────────────
+async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
+  const stored = await chrome.storage.local.get(['snowWeFeedbacks']);
+  const feedbacks = stored.snowWeFeedbacks || [];
+  feedbacks.unshift({ profileSummary, aiVerdict, correction, platform, ts: Date.now() });
+  if (feedbacks.length > 50) feedbacks.length = 50;
+  await chrome.storage.local.set({ snowWeFeedbacks: feedbacks });
+  console.log(`[Snow-we] フィードバック保存: AI=${aiVerdict} → 訂正=${correction} (累計${feedbacks.length}件)`);
+}
+
+async function loadRecentFeedbacks(limit = 10) {
+  const stored = await chrome.storage.local.get(['snowWeFeedbacks']);
+  return (stored.snowWeFeedbacks || []).slice(0, limit);
+}
+
+// 訂正ポップアップを表示する
+function showFeedbackPopup(badgeEl) {
+  // 既存のポップアップを消す
+  document.querySelectorAll('.snow-we-fb-popup').forEach(p => p.remove());
+
+  const aiVerdict     = badgeEl.dataset.verdict  || '';
+  const profileSummary = badgeEl.dataset.profile || '';
+  const platform      = getPlatform();
+
+  const popup = document.createElement('div');
+  popup.className = 'snow-we-fb-popup';
+  popup.innerHTML = `<span>判定を訂正</span><div class="snow-we-fb-row"></div>`;
+  const row = popup.querySelector('.snow-we-fb-row');
+
+  const options = aiVerdict === 'OK'
+    ? [{ label: '❌ 実はNG', cls: 'ng', value: 'NG' }]
+    : aiVerdict === 'NG'
+    ? [{ label: '✅ 実はOK', cls: 'ok', value: 'OK' }]
+    : [{ label: '✅ OK', cls: 'ok', value: 'OK' }, { label: '❌ NG', cls: 'ng', value: 'NG' }];
+
+  options.forEach(({ label, cls, value }) => {
+    const btn = document.createElement('button');
+    btn.className = `snow-we-fb-btn ${cls}`;
+    btn.textContent = label;
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      popup.remove();
+      await saveFeedback(profileSummary, aiVerdict, value, platform);
+      // バッジを「訂正済み」表示に更新
+      badgeEl.className = badgeEl.className.replace(/\b(ok|ng|warn)\b/, 'corrected');
+      badgeEl.textContent = value === 'OK' ? '↩ 訂正: OK' : '↩ 訂正: NG';
+      badgeEl.style.cursor = 'default';
+      badgeEl.removeEventListener('click', badgeEl._fbHandler);
+    });
+    row.appendChild(btn);
+  });
+
+  // ポップアップ外クリックで閉じる
+  setTimeout(() => {
+    document.addEventListener('click', function closePopup() {
+      popup.remove();
+      document.removeEventListener('click', closePopup);
+    });
+  }, 0);
+
+  badgeEl.parentElement.appendChild(popup);
+}
+
 // バッジをセット（バッチ用）
-function setBatchBadge(el, cls, text, tooltip) {
+function setBatchBadge(el, cls, text, tooltip, profileSummary, aiVerdict) {
   el.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
   if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
   const badge = document.createElement('div');
   badge.className = `snow-we-badge batch ${cls}`;
   badge.textContent = text;
-  if (tooltip) badge.title = tooltip; // ホバーで判定理由を表示
+  if (tooltip) badge.title = tooltip;
+  // ok/ng/warn 判定済みバッジにのみ訂正ハンドラを付与
+  if ((cls === 'ok' || cls === 'ng' || cls === 'warn') && profileSummary) {
+    badge.dataset.verdict = aiVerdict || cls.toUpperCase();
+    badge.dataset.profile = profileSummary;
+    badge._fbHandler = (e) => { e.stopPropagation(); showFeedbackPopup(badge); };
+    badge.addEventListener('click', badge._fbHandler);
+    badge.title = (tooltip ? tooltip + '\n' : '') + '（クリックで判定を訂正）';
+  }
   el.appendChild(badge);
 }
 
