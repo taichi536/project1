@@ -435,22 +435,27 @@ def run_momentum_rebalance(dry_run: bool = False):
     from modules.data_fetcher import fetch_ohlcv, normalize_ticker
     from modules.company_names import get_company_name
     import pandas as pd
+    import numpy as np
 
     if dry_run:
         print("[月次リバランス] ⚠️ DRY-RUNモード: 状態保存・通知は行いません")
 
-    TOP_N = 5
-    LOOKBACK_DAYS = 126  # 約6ヶ月
-    MA_PERIOD = 200
-    MAX_PER_SECTOR = 2  # 同セクターから最大2銘柄
+    TOP_N = 10           # 保有銘柄数
+    LOOKBACK_LONG = 252  # 12ヶ月（モメンタム計算の起点）
+    SKIP_RECENT = 21     # 直近1ヶ月を除外（平均回帰対策）
+    MA_PERIOD = 200      # 200日移動平均フィルター
+    MAX_PER_SECTOR = 3   # 同セクターから最大3銘柄
+    VOL_WINDOW = 60      # ボラティリティ計算期間（日）
+    MIN_WEIGHT = 0.05    # 最小配分5%
+    MAX_WEIGHT = 0.20    # 最大配分20%
 
-    # J-QuantsでTOPIX100を動的取得、失敗時は固定ユニバース
+    # J-QuantsでTOPIX500を動的取得、失敗時は固定ユニバース
     from modules.universe import get_jquants_universe_with_sector
-    jq_stocks = get_jquants_universe_with_sector("TOPIX100")
+    jq_stocks = get_jquants_universe_with_sector("TOPIX500")
     if jq_stocks:
         tickers_raw = [s["code"] for s in jq_stocks]
         sector_map = {s["code"]: s["sector"] for s in jq_stocks}
-        universe_label = f"TOPIX100 ({len(tickers_raw)}銘柄)"
+        universe_label = f"TOPIX500 ({len(tickers_raw)}銘柄)"
     else:
         UNIVERSE_KEY = "🇯🇵 日本株メジャー"
         tickers_raw = UNIVERSE[UNIVERSE_KEY]["tickers"]
@@ -462,10 +467,11 @@ def run_momentum_rebalance(dry_run: bool = False):
 
     prices = {}
     latest_prices = {}
+    needed = LOOKBACK_LONG + SKIP_RECENT + 30  # 余裕を持ったデータ期間
     for t in tickers:
         try:
-            df = fetch_ohlcv(t, period="14mo")
-            if df is not None and not df.empty and len(df) > MA_PERIOD:
+            df = fetch_ohlcv(t, period="16mo")
+            if df is not None and not df.empty and len(df) > needed:
                 prices[t] = df["Close"].squeeze()
                 latest_prices[t] = float(df["Close"].iloc[-1])
         except Exception as e:
@@ -476,9 +482,17 @@ def run_momentum_rebalance(dry_run: bool = False):
         return
 
     price_df = pd.DataFrame(prices).ffill()
+    n = len(price_df)
+
+    # モメンタム: 12ヶ月前〜1ヶ月前のリターン（直近1ヶ月除外）
+    idx_long = max(0, n - LOOKBACK_LONG - SKIP_RECENT)
+    idx_recent = max(0, n - SKIP_RECENT)
+    past_long = price_df.iloc[idx_long]
+    past_recent = price_df.iloc[idx_recent]
+    momentum = ((past_recent / past_long) - 1) * 100
+
+    # 200日移動平均フィルター（現在値が200日MAを上回る銘柄のみ）
     cur = price_df.iloc[-1]
-    past = price_df.iloc[max(0, len(price_df) - LOOKBACK_DAYS)]
-    momentum = ((cur / past) - 1) * 100
     ma200 = price_df.tail(MA_PERIOD).mean()
     qualified = momentum[cur > ma200].dropna().sort_values(ascending=False)
 
@@ -493,6 +507,28 @@ def run_momentum_rebalance(dry_run: bool = False):
         if len(new_top) >= TOP_N:
             break
 
+    # ボラティリティ逆数加重（リスクパリティ）
+    weights = {}
+    if new_top:
+        vols = {}
+        for t in new_top:
+            ret = price_df[t].pct_change().dropna().tail(VOL_WINDOW)
+            if len(ret) > 10:
+                vols[t] = ret.std() * np.sqrt(252)
+        if vols:
+            inv_vol = {t: 1.0 / v for t, v in vols.items() if v > 0}
+            total_inv = sum(inv_vol.values())
+            raw_weights = {t: iv / total_inv for t, iv in inv_vol.items()}
+            # 上限・下限クリップ後に再正規化
+            clipped = {t: max(MIN_WEIGHT, min(MAX_WEIGHT, w)) for t, w in raw_weights.items()}
+            total_clipped = sum(clipped.values())
+            weights = {t: w / total_clipped for t, w in clipped.items()}
+        else:
+            eq = 1.0 / len(new_top)
+            weights = {t: eq for t in new_top}
+    else:
+        weights = {}
+
     # 社名取得
     def label(t):
         code = t.replace(".T", "")
@@ -506,14 +542,18 @@ def run_momentum_rebalance(dry_run: bool = False):
     sell = [t for t in prev_holdings if t not in new_top]
     hold = [t for t in new_top if t in prev_holdings]
 
-    # 社名＋株価＋セクターつきのランキング
+    # 社名＋株価＋配分比率つきのランキング
     rankings = [
-        (label(t), float(m), latest_prices.get(t, 0))
-        for t, m in zip(qualified.index.tolist(), qualified.values.tolist())
+        (label(t), float(momentum.get(t, 0)), latest_prices.get(t, 0), weights.get(t, 0))
+        for t in new_top
     ]
 
     print(f"  セクター分布: { {s: c for s, c in sector_count.items()} }")
     print(f"  推奨TOP{TOP_N}: {new_top}")
+    for t in new_top:
+        w = weights.get(t, 0)
+        m = momentum.get(t, 0)
+        print(f"    {label(t)}: 配分{w*100:.1f}%  モメンタム{m:+.1f}%")
     print(f"  買い: {buy} / 売り: {sell} / 継続: {hold}")
 
     if dry_run:

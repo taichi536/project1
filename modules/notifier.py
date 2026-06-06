@@ -296,16 +296,22 @@ def send_momentum_rebalance_alert(
         lines.append(f"🔴 <b>今月売る銘柄:</b> {' / '.join(sell)}")
     if hold:
         lines.append(f"🔵 <b>継続保有:</b> {' / '.join(hold)}")
-    lines.append("\n📈 <b>モメンタムランキング TOP10:</b>")
+    lines.append(f"\n📈 <b>モメンタムランキング TOP{len(rankings)}:</b>")
     for i, entry in enumerate(rankings[:10], 1):
-        if len(entry) == 3:
+        if len(entry) == 4:
+            t, m, price, weight = entry
+            price_str = f"  {price:,.0f}円" if price else ""
+            weight_str = f"  [{weight*100:.1f}%]" if weight else ""
+        elif len(entry) == 3:
             t, m, price = entry
             price_str = f"  {price:,.0f}円" if price else ""
+            weight_str = ""
         else:
             t, m = entry
             price_str = ""
-        mark = "✅" if i <= 5 else "  "
-        lines.append(f"{mark} {i}. {t}  {m:+.1f}%{price_str}")
+            weight_str = ""
+        mark = "✅"
+        lines.append(f"{mark} {i}. {t}  {m:+.1f}%{price_str}{weight_str}")
     message = "\n".join(lines)
     results = {}
     tg_token = telegram_token or os.getenv("TELEGRAM_BOT_TOKEN")
