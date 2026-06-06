@@ -474,8 +474,8 @@ def run_momentum_rebalance(dry_run: bool = False):
             if df is not None and not df.empty and len(df) > needed:
                 prices[t] = df["Close"].squeeze()
                 latest_prices[t] = float(df["Close"].iloc[-1])
-        except Exception as e:
-            print(f"  {t}: 取得失敗 ({e})")
+        except Exception:
+            pass  # データ不足（新規IPO等）はスキップ
 
     if len(prices) < 2:
         print("  データ不足のためスキップ")

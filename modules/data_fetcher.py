@@ -476,10 +476,17 @@ def fetch_ohlcv(ticker: str, period: str = "6mo", interval: str = "1d") -> pd.Da
             except Exception:
                 pass  # フォールバック
 
-    if _start_date:
-        df = yf.download(t, start=_start_date, interval=interval, auto_adjust=True, progress=False)
-    else:
-        df = yf.download(t, period=period, interval=interval, auto_adjust=True, progress=False)
+    import logging, io, contextlib
+    _yf_logger = logging.getLogger("yfinance")
+    _prev_level = _yf_logger.level
+    _yf_logger.setLevel(logging.CRITICAL)
+    _buf = io.StringIO()
+    with contextlib.redirect_stderr(_buf):
+        if _start_date:
+            df = yf.download(t, start=_start_date, interval=interval, auto_adjust=True, progress=False)
+        else:
+            df = yf.download(t, period=period, interval=interval, auto_adjust=True, progress=False)
+    _yf_logger.setLevel(_prev_level)
     if df.empty:
         raise ValueError(f"データを取得できませんでした: {ticker}")
     df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
