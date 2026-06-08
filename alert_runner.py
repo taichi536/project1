@@ -445,11 +445,11 @@ def run_momentum_rebalance(dry_run: bool = False):
     SKIP_RECENT = 21        # 直近1ヶ月を除外（平均回帰対策）
     QUALITY_LOOKBACK = 63   # 3ヶ月モメンタム（品質フィルター用）
     MA_PERIOD = 200         # 200日移動平均フィルター
-    MAX_PER_SECTOR = 3      # 同セクターから最大3銘柄
+    MAX_PER_SECTOR = 2      # 同セクターから最大2銘柄（テーマ集中を防ぐ）
     VOL_WINDOW = 60         # ボラティリティ計算期間（日）
     MIN_WEIGHT = 0.05       # 最小配分5%
     MAX_WEIGHT = 0.20       # 最大配分20%
-    CORR_THRESHOLD = 0.70   # 相関フィルター閾値
+    CORR_THRESHOLD = 0.55   # 相関フィルター閾値（テーマ相関も排除）
     MIN_TURNOVER = 5e8      # 流動性フィルター: 5億円/日以上
     REGIME_TICKER = "^N225"   # 日経225（yfinanceで安定して取得可能）
 
