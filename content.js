@@ -545,12 +545,15 @@ document.addEventListener('click', e => {
           console.log('[Snow-we] ポジション一覧件数:', positionList.length, '/ 先頭3件:', positionList.slice(0, 3));
           console.log('[Snow-we] メール本文先頭200字:', bodyText.substring(0, 200));
           const sorted = [...positionList].sort((a, b) => b.length - a.length);
-          // 完全一致 → カッコ/ハイフン前のコア部分で照合
+          // 1. 完全一致 → 2. 部署コード除いたタイトル部分で照合 → 3. コア部分（最終手段）
           matched = sorted.find(p => {
             if (!p) return false;
+            // 完全一致
             if (bodyText.includes(p)) return true;
-            const core = p.split(/[（(【]/)[0].split(/\s[-–—]\s|\s[-–—]$/)[0].trim();
-            return core.length >= 6 && bodyText.includes(core);
+            // 「- BUS」「- TEC」等の部署コードを除いたタイトル部分で照合
+            const title = p.replace(/\s*[-–—]\s*[A-Z]{2,}[\s）)]*$/, '').trim();
+            if (title && title.length >= 8 && bodyText.includes(title)) return true;
+            return false;
           }) || '';
         } catch (_) {}
 
