@@ -451,7 +451,7 @@ def run_momentum_rebalance(dry_run: bool = False):
     MAX_WEIGHT = 0.20       # 最大配分20%
     CORR_THRESHOLD = 0.70   # 相関フィルター閾値
     MIN_TURNOVER = 5e8      # 流動性フィルター: 5億円/日以上
-    REGIME_TICKER = "1306.T"  # TOPIXのプロキシETF
+    REGIME_TICKER = "^N225"   # 日経225（yfinanceで安定して取得可能）
 
     # J-QuantsでTOPIX500を動的取得、失敗時は固定ユニバース
     from modules.universe import get_jquants_universe_with_sector
@@ -472,13 +472,18 @@ def run_momentum_rebalance(dry_run: bool = False):
     # ── マーケット・レジームフィルター ──────────────────────────────
     regime_bullish = True
     try:
-        regime_df = fetch_ohlcv(REGIME_TICKER, period="16mo")
-        if regime_df is not None and len(regime_df) >= MA_PERIOD:
-            regime_cur = float(regime_df["Close"].iloc[-1])
-            regime_ma = float(regime_df["Close"].tail(MA_PERIOD).mean())
+        import yfinance as yf
+        regime_raw = yf.download(REGIME_TICKER, period="16mo", interval="1d",
+                                  auto_adjust=True, progress=False)
+        if not regime_raw.empty and len(regime_raw) >= MA_PERIOD:
+            regime_close = regime_raw["Close"].squeeze()
+            regime_cur = float(regime_close.iloc[-1])
+            regime_ma = float(regime_close.tail(MA_PERIOD).mean())
             regime_bullish = regime_cur > regime_ma
             status = "強気" if regime_bullish else "⚠️ 弱気"
-            print(f"  [レジーム] TOPIX ETF {regime_cur:,.0f} / MA200 {regime_ma:,.0f} → {status}")
+            print(f"  [レジーム] 日経225 {regime_cur:,.0f} / MA200 {regime_ma:,.0f} → {status}")
+        else:
+            print("  [レジーム] データ不足、強気と仮定して続行")
     except Exception:
         print("  [レジーム] 取得失敗、強気と仮定して続行")
 
