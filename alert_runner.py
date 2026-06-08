@@ -496,16 +496,40 @@ def run_momentum_rebalance(dry_run: bool = False):
     ma200 = price_df.tail(MA_PERIOD).mean()
     qualified = momentum[cur > ma200].dropna().sort_values(ascending=False)
 
-    # セクター分散: 同業種はMAX_PER_SECTOR銘柄まで
+    CORR_THRESHOLD = 0.70  # これ以上の相関がある銘柄は除外
+    returns_df = price_df.pct_change().dropna()
+
+    # セクター分散 + 相関フィルター
     new_top = []
     sector_count: dict[str, int] = {}
     for t in qualified.index:
-        sector = sector_map.get(t.replace(".T", ""), "不明")
-        if sector_count.get(sector, 0) < MAX_PER_SECTOR:
-            new_top.append(t)
-            sector_count[sector] = sector_count.get(sector, 0) + 1
         if len(new_top) >= TOP_N:
             break
+
+        # セクターチェック
+        sector = sector_map.get(t.replace(".T", ""), "不明")
+        if sector_count.get(sector, 0) >= MAX_PER_SECTOR:
+            continue
+
+        # 相関チェック（既選銘柄と相関が高すぎる場合は除外）
+        too_correlated = False
+        if new_top and t in returns_df.columns:
+            ret_t = returns_df[t].tail(126)
+            for s in new_top:
+                if s not in returns_df.columns:
+                    continue
+                ret_s = returns_df[s].tail(126)
+                common = ret_t.index.intersection(ret_s.index)
+                if len(common) > 30:
+                    corr = ret_t.loc[common].corr(ret_s.loc[common])
+                    if corr > CORR_THRESHOLD:
+                        too_correlated = True
+                        break
+        if too_correlated:
+            continue
+
+        new_top.append(t)
+        sector_count[sector] = sector_count.get(sector, 0) + 1
 
     # ボラティリティ逆数加重（リスクパリティ）
     weights = {}
