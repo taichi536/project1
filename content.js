@@ -481,10 +481,11 @@ document.addEventListener('click', e => {
   if (!btn) return;
   const text = (btn.innerText || '').trim();
 
-  const isScoutBtn   = text === 'スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする');
-  const isConfirmBtn = text === '確認';
-  const isSendBtn    = text === '送信' || text === '送信する';
-  if (!isScoutBtn && !isConfirmBtn && !isSendBtn) return;
+  const isScoutBtn           = text === 'スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする');
+  const isConfirmBtn         = text === '確認';
+  const isSendBtn            = text === '送信' || text === '送信する';
+  const isTemplateConfirmBtn = text === '確定';
+  if (!isScoutBtn && !isConfirmBtn && !isSendBtn && !isTemplateConfirmBtn) return;
 
   console.log('[Snow-we] スカウト系ボタン検知:', JSON.stringify(text));
 
@@ -524,6 +525,70 @@ document.addEventListener('click', e => {
         console.log('[Snow-we] candidateId が取得できなかったため保存スキップ');
       }
     }
+    return;
+  }
+
+  // ── 確定ボタン：テンプレート選択モーダルからポジション照合（RDS等） ──
+  if (isTemplateConfirmBtn) {
+    const raw = sessionStorage.getItem('pendingScout');
+    if (!raw) return;
+    (async () => {
+      try {
+        const pending = JSON.parse(raw);
+        if (pending.templateName) return;
+
+        // 選択中のラジオボタンの行からテンプレート名を取得
+        const checkedRadio = document.querySelector('input[type="radio"]:checked');
+        if (!checkedRadio) return;
+
+        const row = checkedRadio.closest('tr, [role="row"]') || checkedRadio.closest('li, [class*="row"], [class*="item"]');
+        let tmplName = '';
+        if (row) {
+          // tdセルからテンプレート名を取得（ラジオボタンのセルは除外）
+          for (const cell of row.querySelectorAll('td, [role="cell"]')) {
+            if (cell.querySelector('input')) continue;
+            const t = cell.textContent?.trim() || '';
+            if (t.length > 3) { tmplName = t; break; }
+          }
+          // tdが見つからない場合はdivベースで試みる
+          if (!tmplName) {
+            for (const el of row.querySelectorAll('div, span, p')) {
+              if (el.querySelector('input, button')) continue;
+              const t = el.textContent?.trim() || '';
+              if (t.length > 3 && t.length < 80) { tmplName = t; break; }
+            }
+          }
+        }
+        if (!tmplName) return;
+        console.log('[Snow-we] テンプレート名検出:', tmplName);
+
+        const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+        const positionList = res?.positions || [];
+        const normT = s => s
+          .replace(/^[A-Za-z]+[）)]\s*/u, '')
+          .replace(/[（]/g, '(').replace(/[）]/g, ')')
+          .replace(/　/g, ' ').replace(/\s*[-－–—]\s*/g, '-')
+          .trim().toLowerCase();
+
+        const sorted = [...positionList].sort((a, b) => b.length - a.length);
+        const matched = sorted.find(p => {
+          if (!p) return false;
+          if (normT(tmplName) === normT(p)) return true;
+          const title = p.replace(/\s*[-–—]\s*[A-Z]{2,}[\s）)]*$/, '').trim();
+          return title.length >= 8 && normT(tmplName).includes(normT(title));
+        }) || '';
+
+        if (matched) {
+          pending.templateName = matched;
+          sessionStorage.setItem('pendingScout', JSON.stringify(pending));
+          console.log('[Snow-we] テンプレート名からポジション照合成功:', matched);
+        } else {
+          console.log('[Snow-we] テンプレート名照合失敗. tmplName=', tmplName);
+        }
+      } catch (err) {
+        console.log('[Snow-we] 確定ハンドラエラー:', err);
+      }
+    })();
     return;
   }
 
