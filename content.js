@@ -1,4 +1,4 @@
-// content.js v1.5.5
+// content.js v1.5.6
 // 各媒体のプロフィールページからテキストを抽出する
 
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
@@ -574,14 +574,26 @@ document.addEventListener('click', e => {
           .replace(/[（]/g, '(').replace(/[）]/g, ')')
           .replace(/　/g, ' ').replace(/\s*[-－–—]\s*/g, '-')
           .trim().toLowerCase();
+        // 末尾の部署コード・チーム名を除去（大文字小文字・日本語対応）
+        const stripSuffix = p => p
+          .replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '')
+          .replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '')
+          .trim();
 
         const sorted = [...positionList].sort((a, b) => b.length - a.length);
         const matched = sorted.find(p => {
           if (!p) return false;
+          // 1. 完全一致
           if (normT(tmplName) === normT(p)) return true;
-          const title = p.replace(/\s*[-–—]\s*[A-Z]{2,}[\s）)]*$/, '').trim();
-          return title.length >= 8 && normT(tmplName).includes(normT(title));
+          // 2. 部署コード等のサフィックスを除いたタイトルで照合
+          const title = stripSuffix(p);
+          if (title.length >= 8 && normT(tmplName).includes(normT(title))) return true;
+          // 3. " - " で分割した先頭コア部分で照合（最終手段）
+          const core = p.split(/\s[-–—－]\s/)[0].trim();
+          if (core.length >= 8 && normT(tmplName).includes(normT(core))) return true;
+          return false;
         }) || '';
+        console.log('[Snow-we] テンプレート照合試行: tmplName=', tmplName, '/ matched=', matched || 'なし');
 
         if (matched) {
           pending.templateName = matched;
@@ -615,14 +627,18 @@ document.addEventListener('click', e => {
           console.log('[Snow-we] ポジション一覧件数:', positionList.length, '/ 先頭3件:', positionList.slice(0, 3));
           console.log('[Snow-we] メール本文先頭200字:', bodyText.substring(0, 200));
           const sorted = [...positionList].sort((a, b) => b.length - a.length);
-          // 1. 完全一致 → 2. 部署コード除いたタイトル部分で照合 → 3. コア部分（最終手段）
+          const stripSuffix2 = p => p
+            .replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '')
+            .replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '')
+            .trim();
+          // 1. 完全一致 → 2. サフィックス除いたタイトルで照合 → 3. コア部分で照合
           matched = sorted.find(p => {
             if (!p) return false;
-            // 完全一致
             if (bodyText.includes(p)) return true;
-            // 「- BUS」「- TEC」等の部署コードを除いたタイトル部分で照合
-            const title = p.replace(/\s*[-–—]\s*[A-Z]{2,}[\s）)]*$/, '').trim();
+            const title = stripSuffix2(p);
             if (title && title.length >= 8 && bodyText.includes(title)) return true;
+            const core = p.split(/\s[-–—－]\s/)[0].trim();
+            if (core && core.length >= 8 && bodyText.includes(core)) return true;
             return false;
           }) || '';
         } catch (_) {}
