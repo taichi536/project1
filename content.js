@@ -1,4 +1,4 @@
-// content.js v1.5.2
+// content.js v1.5.3
 // 各媒体のプロフィールページからテキストを抽出する
 
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
@@ -7,6 +7,7 @@ const _posReqCache = new Map();
 // Bizreach仮想スクロール対応：バッジ状態レジストリ
 const _bizreachBadgeRegistry = new Map(); // resumeId → {cls, text, tooltip, profileSummary, aiVerdict}
 let _bizreachObserver = null;
+let _reapplyBizreachTimer = null;
 
 
 // -------------------------------------------------------
@@ -2227,22 +2228,30 @@ function setBatchBadge(el, cls, text, tooltip, profileSummary, aiVerdict) {
   }
 }
 
-// Bizreach仮想スクロール: DOM上の全カードにレジストリのバッジを再適用
+// Bizreach仮想スクロール: DOM上の全カードにレジストリのバッジを再適用（デバウンス付き）
 function reapplyBizreachBadges() {
-  document.querySelectorAll('ess-resume-list-item').forEach(el => {
-    if (el.querySelector('.snow-we-badge.batch')) return;
-    const resumeId = getBizreachResumeNumericId(el);
-    if (!resumeId) return;
-    const state = _bizreachBadgeRegistry.get(resumeId);
-    if (!state) return;
-    setBatchBadge(el, state.cls, state.text, state.tooltip, state.profileSummary, state.aiVerdict);
-  });
+  if (_bizreachBadgeRegistry.size === 0) return;
+  clearTimeout(_reapplyBizreachTimer);
+  _reapplyBizreachTimer = setTimeout(() => {
+    document.querySelectorAll('ess-resume-list-item').forEach(el => {
+      if (el.querySelector('.snow-we-badge.batch')) return;
+      const resumeId = getBizreachResumeNumericId(el);
+      if (!resumeId) return;
+      const state = _bizreachBadgeRegistry.get(resumeId);
+      if (!state) return;
+      setBatchBadge(el, state.cls, state.text, state.tooltip, state.profileSummary, state.aiVerdict);
+    });
+  }, 300);
 }
 
-// Bizreach仮想スクロール監視を開始（初回のみ）
+// Bizreach仮想スクロール監視を開始（初回のみ・viewport未検出時は監視しない）
 function startBizreachBadgeObserver() {
   if (_bizreachObserver) return;
-  const target = document.querySelector('cdk-virtual-scroll-viewport') || document.body;
+  const target = document.querySelector('cdk-virtual-scroll-viewport');
+  if (!target) {
+    console.log('[Snow-we] cdk-virtual-scroll-viewport 未検出のため監視スキップ');
+    return;
+  }
   _bizreachObserver = new MutationObserver(() => reapplyBizreachBadges());
   _bizreachObserver.observe(target, { childList: true, subtree: true });
   console.log('[Snow-we] Bizreachバッジ監視開始');
