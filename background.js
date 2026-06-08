@@ -98,8 +98,13 @@ async function checkForUpdate() {
   }
 }
 
-// 起動6秒後に1回チェック、以降5分おきに定期チェック
-chrome.alarms.create('snowWeUpdateCheck', { delayInMinutes: 0.1, periodInMinutes: 5 });
+// アラームが未登録の時だけ作成（サービスワーカー再起動のたびにリセットされるのを防ぐ）
+// → ポップアップを開くたびに6秒後にreloadが走りポップアップが閉じるバグを修正
+chrome.alarms.get('snowWeUpdateCheck', (existing) => {
+  if (!existing) {
+    chrome.alarms.create('snowWeUpdateCheck', { delayInMinutes: 5, periodInMinutes: 5 });
+  }
+});
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'snowWeUpdateCheck') checkForUpdate();
 });
