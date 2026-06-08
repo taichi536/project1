@@ -612,11 +612,13 @@ def run_momentum_rebalance(dry_run: bool = False):
     else:
         weights = {}
 
-    # 社名取得
+    # 社名マップ: jq_stocksから直接取得（API二重呼び出し不要）
+    name_map = {s["code"]: s["name"] for s in jq_stocks} if jq_stocks else {}
+
     def label(t):
         code = t.replace(".T", "")
-        name = get_company_name(t, use_api=False)
-        if name and name.upper() != code:
+        name = name_map.get(code) or get_company_name(t, use_api=False)
+        if name and name != code and name != t:
             return f"{code} {name}"
         return code
 
