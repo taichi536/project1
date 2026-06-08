@@ -304,8 +304,8 @@ function normPos(name) {
   return name
     .replace(/^[A-Za-z]+[）)]\s*/u, '')   // AC）BC）等のプレフィックス除去
     .replace(/[（]/g, '(').replace(/[）]/g, ')')
-    .replace(/　/g, ' ').replace(/[\s]+/g, ' ')
-    .replace(/[-－ー]/g, '-')
+    .replace(/　/g, ' ').replace(/\s+/g, ' ')
+    .replace(/\s*[-－–—]\s*/g, '-')        // 前後スペース込みで各種ハイフン・ダッシュを統一（ーは除外）
     .trim().toLowerCase();
 }
 
