@@ -356,18 +356,24 @@ def run_momentum_portfolio_backtest(
     tickers: list[str],
     fetch_fn,
     initial_cash: float = 1_000_000,
-    top_n: int = 5,
-    lookback_months: int = 6,
+    top_n: int = 10,
+    lookback_months: int = 12,
+    skip_recent_days: int = 21,
     ma_period: int = 200,
+    corr_threshold: float = 0.55,
+    use_regime_filter: bool = True,
+    use_vol_weight: bool = True,
+    min_weight: float = 0.05,
+    max_weight: float = 0.20,
     fee_rate: float = 0.002,
     period: str = "5y",
 ) -> dict:
     """
-    モメンタムランキングによるポートフォリオバックテスト。
-    毎月末にリバランスし、過去lookback_months月のリターン上位top_n銘柄を保有。
-    200日MA以上の銘柄のみ買い対象。
+    改善版モメンタムポートフォリオバックテスト。
+    直近1ヶ月除外・品質フィルター・レジームフィルター・相関フィルター・ボラ逆数加重。
     """
-    # 全銘柄データ取得
+    import yfinance as yf
+
     all_dfs = {}
     errors = []
     with ThreadPoolExecutor(max_workers=8) as ex:
@@ -384,60 +390,129 @@ def run_momentum_portfolio_backtest(
     if len(all_dfs) < 2:
         raise ValueError("十分なデータを取得できませんでした")
 
-    # 全銘柄の終値マトリクス
     prices = pd.DataFrame({t: df["Close"].squeeze() for t, df in all_dfs.items()})
     prices = prices.sort_index().ffill()
 
+    # 日経225レジームデータ取得
+    regime_series = None
+    if use_regime_filter:
+        try:
+            import io, contextlib, logging
+            _yfl = logging.getLogger("yfinance")
+            _yfl.setLevel(logging.CRITICAL)
+            with contextlib.redirect_stderr(io.StringIO()):
+                n225 = yf.download("^N225", period=period, interval="1d",
+                                   auto_adjust=True, progress=False)
+            _yfl.setLevel(logging.WARNING)
+            if not n225.empty:
+                regime_series = n225["Close"].squeeze()
+                regime_series.index = pd.to_datetime(regime_series.index).tz_localize(None)
+        except Exception:
+            pass
+
     lookback_days = lookback_months * 21
+    quality_lookback = 63  # 3ヶ月品質フィルター
 
-    # 月末リバランス日
     rebalance_dates = prices.resample("ME").last().index
-
     cash = initial_cash
-    holdings: dict[str, float] = {}  # {ticker: shares}
+    holdings: dict[str, float] = {}
     pv_records = []
     trades_log = []
     monthly_holdings = []
 
     for rb_date in rebalance_dates:
         hist = prices.loc[:rb_date].dropna(how="all")
-        if len(hist) < lookback_days + 20:
+        if len(hist) < lookback_days + skip_recent_days + 20:
             continue
 
         cur = hist.iloc[-1]
-        past_idx = max(0, len(hist) - lookback_days)
-        past = hist.iloc[past_idx]
+        n = len(hist)
+        past_long = hist.iloc[max(0, n - lookback_days - skip_recent_days)]
+        past_recent = hist.iloc[max(0, n - skip_recent_days)]
+        past_quality = hist.iloc[max(0, n - quality_lookback - skip_recent_days)]
 
-        # モメンタムスコア（過去lookback_months月リターン）
-        momentum = ((cur / past) - 1) * 100
+        momentum = ((past_recent / past_long) - 1) * 100
+        momentum_3m = ((past_recent / past_quality) - 1) * 100
 
-        # 200日MAフィルター
+        # レジームフィルター（弱気相場は全売り・現金保有）
+        if use_regime_filter and regime_series is not None:
+            try:
+                reg_hist = regime_series.loc[:rb_date]
+                if len(reg_hist) >= ma_period:
+                    if float(reg_hist.iloc[-1]) < float(reg_hist.tail(ma_period).mean()):
+                        pv = cash + sum(holdings.get(t, 0) * cur.get(t, 0) for t in holdings)
+                        for t in list(holdings.keys()):
+                            price = cur.get(t)
+                            if price and not pd.isna(price) and holdings[t] > 0:
+                                cash += holdings[t] * price * (1 - fee_rate)
+                                trades_log.append({"日付": rb_date, "銘柄": t, "種別": "売り(レジーム)",
+                                                   "価格": round(price, 2), "モメンタム(%)": 0})
+                            del holdings[t]
+                        pv_records.append({"日付": rb_date, "総資産": cash})
+                        monthly_holdings.append({"日付": rb_date, "保有銘柄": []})
+                        continue
+            except Exception:
+                pass
+
+        # 200日MA + 品質フィルター
         ma = hist.tail(ma_period).mean()
-        qualified = momentum[cur > ma].dropna().sort_values(ascending=False)
-        new_top = list(qualified.head(top_n).index)
+        combined = (cur > ma) & (momentum > 0) & (momentum_3m > 0)
+        qualified = momentum[combined].dropna().sort_values(ascending=False)
 
-        # 現在のポートフォリオ時価
+        # 相関フィルター
+        returns_hist = hist.pct_change().dropna()
+        new_top = []
+        for t in qualified.index:
+            if len(new_top) >= top_n:
+                break
+            if not new_top or t not in returns_hist.columns:
+                new_top.append(t)
+                continue
+            ret_t = returns_hist[t].tail(126)
+            too_corr = any(
+                len(common := ret_t.index.intersection(returns_hist[s].tail(126).index)) > 30
+                and ret_t.loc[common].corr(returns_hist[s].tail(126).loc[common]) > corr_threshold
+                for s in new_top if s in returns_hist.columns
+            )
+            if not too_corr:
+                new_top.append(t)
+
+        # ボラティリティ逆数加重
+        if use_vol_weight and new_top:
+            vols = {t: returns_hist[t].tail(60).std() * np.sqrt(252)
+                    for t in new_top if t in returns_hist.columns
+                    and returns_hist[t].tail(60).std() > 0}
+            if vols:
+                inv = {t: 1.0 / v for t, v in vols.items()}
+                total = sum(inv.values())
+                raw_w = {t: iv / total for t, iv in inv.items()}
+                clipped = {t: max(min_weight, min(max_weight, w)) for t, w in raw_w.items()}
+                total_c = sum(clipped.values())
+                weights = {t: w / total_c for t, w in clipped.items()}
+            else:
+                eq = 1.0 / len(new_top)
+                weights = {t: eq for t in new_top}
+        else:
+            eq = 1.0 / len(new_top) if new_top else 0
+            weights = {t: eq for t in new_top}
+
         pv = cash + sum(holdings.get(t, 0) * cur.get(t, 0) for t in holdings)
 
-        # 売却: 新トップ外の銘柄
         for t in list(holdings.keys()):
             if t not in new_top:
                 price = cur.get(t)
                 if price and not pd.isna(price) and holdings[t] > 0:
-                    proceeds = holdings[t] * price * (1 - fee_rate)
-                    cash += proceeds
+                    cash += holdings[t] * price * (1 - fee_rate)
                     trades_log.append({"日付": rb_date, "銘柄": t, "種別": "売り",
                                        "価格": round(price, 2), "モメンタム(%)": round(momentum.get(t, 0), 1)})
                 del holdings[t]
 
-        # 購入: 新トップの未保有銘柄
-        alloc = pv / top_n  # 1銘柄あたりの目標金額
         for t in new_top:
             if t not in holdings:
                 price = cur.get(t)
                 if price and not pd.isna(price) and cash > price:
-                    buy_val = min(alloc, cash * 0.99)
-                    shares = buy_val / (price * (1 + fee_rate))
+                    alloc = pv * weights.get(t, 1.0 / len(new_top))
+                    shares = min(alloc, cash * 0.99) / (price * (1 + fee_rate))
                     if shares > 0:
                         cash -= shares * price * (1 + fee_rate)
                         holdings[t] = shares
@@ -471,8 +546,10 @@ def run_momentum_portfolio_backtest(
 
     # 現在のランキング（最新月末時点）
     latest = prices.iloc[-1]
-    past_latest = prices.iloc[max(0, len(prices) - lookback_days)]
-    mom_latest = ((latest / past_latest) - 1) * 100
+    n_last = len(prices)
+    past_l = prices.iloc[max(0, n_last - lookback_days - skip_recent_days)]
+    past_r = prices.iloc[max(0, n_last - skip_recent_days)]
+    mom_latest = ((past_r / past_l) - 1) * 100
     ma_latest = prices.tail(ma_period).mean()
     qualified_now = mom_latest[latest > ma_latest].dropna().sort_values(ascending=False)
     ranking_df = pd.DataFrame({

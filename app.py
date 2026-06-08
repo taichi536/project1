@@ -2078,14 +2078,18 @@ elif page == "🔬 バックテスト":
         _mom_period = _mc2.selectbox("検証期間", ["3y", "5y"], index=1,
                                      format_func=lambda x: {"3y": "3年", "5y": "5年"}[x],
                                      key="mom_period")
-        _mom_top_n = _mc3.number_input("保有銘柄数", value=5, min_value=3, max_value=20, key="mom_topn",
+        _mom_top_n = _mc3.number_input("保有銘柄数", value=10, min_value=3, max_value=20, key="mom_topn",
                                        help="毎月上位N銘柄だけ保有します")
-        _mom_lookback = _mc4.selectbox("モメンタム期間", [3, 6, 12], index=1,
+        _mom_lookback = _mc4.selectbox("モメンタム期間", [3, 6, 12], index=2,
                                        format_func=lambda x: f"{x}ヶ月", key="mom_lookback")
-        _mc5, _mc6, _, _ = st.columns(4)
+        _mc5, _mc6, _mc7, _mc8 = st.columns(4)
         _mom_ma = _mc5.number_input("MAフィルター（日）", value=200, min_value=50, max_value=300, key="mom_ma",
                                     help="この日数の移動平均より上の銘柄のみ買い対象")
         _mom_cash = _mc6.number_input("初期資金 (円)", value=1_000_000, min_value=100_000, step=100_000, key="mom_cash")
+        _mom_regime = _mc7.checkbox("レジームフィルター", value=True, key="mom_regime",
+                                    help="日経225が200日MA以下の弱気相場では全売り・現金保有")
+        _mom_corr = _mc8.slider("相関閾値", 0.4, 0.9, 0.55, 0.05, key="mom_corr",
+                                help="この値以上の相関がある銘柄を除外（低いほど厳格）")
 
         if _mom_preset in _jq_options:
             from modules.universe import get_jquants_universe_tickers
@@ -2118,6 +2122,9 @@ elif page == "🔬 バックテスト":
                         top_n=int(_mom_top_n),
                         lookback_months=int(_mom_lookback),
                         ma_period=int(_mom_ma),
+                        corr_threshold=float(_mom_corr),
+                        use_regime_filter=bool(_mom_regime),
+                        use_vol_weight=True,
                         fee_rate=0.002,
                         period=_mom_period,
                     )
