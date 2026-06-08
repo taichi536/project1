@@ -1,5 +1,13 @@
-// content.js v1.5.0
+// content.js v1.5.4
 // 各媒体のプロフィールページからテキストを抽出する
+
+// ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
+const _posReqCache = new Map();
+
+// Bizreach仮想スクロール対応：バッジ状態レジストリ
+const _bizreachBadgeRegistry = new Map(); // resumeId → {cls, text, tooltip, profileSummary, aiVerdict}
+let _bizreachObserver = null;
+let _reapplyBizreachTimer = null;
 
 
 // -------------------------------------------------------
@@ -46,9 +54,31 @@ function injectStyles() {
       font-family: -apple-system, sans-serif !important;
     }
     .snow-we-badge.checking { background: #6366F1 !important; color: #fff !important; }
-    .snow-we-badge.ok       { background: #059669 !important; color: #fff !important; }
-    .snow-we-badge.ng       { background: #DC2626 !important; color: #fff !important; }
-    .snow-we-badge.warn     { background: #D97706 !important; color: #fff !important; }
+    .snow-we-badge.ok       { background: #059669 !important; color: #fff !important; cursor: pointer !important; pointer-events: auto !important; }
+    .snow-we-badge.ng       { background: #DC2626 !important; color: #fff !important; cursor: pointer !important; pointer-events: auto !important; }
+    .snow-we-badge.warn     { background: #D97706 !important; color: #fff !important; cursor: pointer !important; pointer-events: auto !important; }
+    .snow-we-badge.corrected { background: #6366F1 !important; color: #fff !important; }
+    .snow-we-badge.ok:hover, .snow-we-badge.ng:hover, .snow-we-badge.warn:hover {
+      filter: brightness(1.15) !important;
+    }
+    .snow-we-fb-popup {
+      position: absolute !important; top: 28px !important; right: 6px !important;
+      background: #1e1b4b !important; border-radius: 8px !important; padding: 6px 8px !important;
+      z-index: 9999999 !important; display: flex !important; flex-direction: column !important;
+      gap: 4px !important; box-shadow: 0 4px 16px rgba(0,0,0,.5) !important; min-width: 130px !important;
+    }
+    .snow-we-fb-popup span {
+      color: #a5b4fc !important; font-size: 10px !important; font-weight: 600 !important;
+      padding: 0 2px 2px !important; font-family: -apple-system, sans-serif !important;
+    }
+    .snow-we-fb-row { display: flex !important; gap: 4px !important; }
+    .snow-we-fb-btn {
+      flex: 1 !important; font-size: 11px !important; font-weight: 700 !important;
+      padding: 5px 0 !important; border-radius: 12px !important; border: none !important;
+      cursor: pointer !important; color: #fff !important; font-family: -apple-system, sans-serif !important;
+    }
+    .snow-we-fb-btn.ok { background: #059669 !important; }
+    .snow-we-fb-btn.ng { background: #DC2626 !important; }
     @keyframes snow-we-pulse {
       0%,100% { opacity: 1; } 50% { opacity: .6; }
     }
@@ -456,10 +486,11 @@ document.addEventListener('click', e => {
   if (!btn) return;
   const text = (btn.innerText || '').trim();
 
-  const isScoutBtn   = text === 'スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする');
-  const isConfirmBtn = text === '確認';
-  const isSendBtn    = text === '送信' || text === '送信する';
-  if (!isScoutBtn && !isConfirmBtn && !isSendBtn) return;
+  const isScoutBtn           = text === 'スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする');
+  const isConfirmBtn         = text === '確認';
+  const isSendBtn            = text === '送信' || text === '送信する';
+  const isTemplateConfirmBtn = text === '確定';
+  if (!isScoutBtn && !isConfirmBtn && !isSendBtn && !isTemplateConfirmBtn) return;
 
   console.log('[Snow-we] スカウト系ボタン検知:', JSON.stringify(text));
 
@@ -502,6 +533,70 @@ document.addEventListener('click', e => {
     return;
   }
 
+  // ── 確定ボタン：テンプレート選択モーダルからポジション照合（RDS等） ──
+  if (isTemplateConfirmBtn) {
+    const raw = sessionStorage.getItem('pendingScout');
+    if (!raw) return;
+    (async () => {
+      try {
+        const pending = JSON.parse(raw);
+        if (pending.templateName) return;
+
+        // 選択中のラジオボタンの行からテンプレート名を取得
+        const checkedRadio = document.querySelector('input[type="radio"]:checked');
+        if (!checkedRadio) return;
+
+        const row = checkedRadio.closest('tr, [role="row"]') || checkedRadio.closest('li, [class*="row"], [class*="item"]');
+        let tmplName = '';
+        if (row) {
+          // tdセルからテンプレート名を取得（ラジオボタンのセルは除外）
+          for (const cell of row.querySelectorAll('td, [role="cell"]')) {
+            if (cell.querySelector('input')) continue;
+            const t = cell.textContent?.trim() || '';
+            if (t.length > 3) { tmplName = t; break; }
+          }
+          // tdが見つからない場合はdivベースで試みる
+          if (!tmplName) {
+            for (const el of row.querySelectorAll('div, span, p')) {
+              if (el.querySelector('input, button')) continue;
+              const t = el.textContent?.trim() || '';
+              if (t.length > 3 && t.length < 80) { tmplName = t; break; }
+            }
+          }
+        }
+        if (!tmplName) return;
+        console.log('[Snow-we] テンプレート名検出:', tmplName);
+
+        const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+        const positionList = res?.positions || [];
+        const normT = s => s
+          .replace(/^[A-Za-z]+[）)]\s*/u, '')
+          .replace(/[（]/g, '(').replace(/[）]/g, ')')
+          .replace(/　/g, ' ').replace(/\s*[-－–—]\s*/g, '-')
+          .trim().toLowerCase();
+
+        const sorted = [...positionList].sort((a, b) => b.length - a.length);
+        const matched = sorted.find(p => {
+          if (!p) return false;
+          if (normT(tmplName) === normT(p)) return true;
+          const title = p.replace(/\s*[-–—]\s*[A-Z]{2,}[\s）)]*$/, '').trim();
+          return title.length >= 8 && normT(tmplName).includes(normT(title));
+        }) || '';
+
+        if (matched) {
+          pending.templateName = matched;
+          sessionStorage.setItem('pendingScout', JSON.stringify(pending));
+          console.log('[Snow-we] テンプレート名からポジション照合成功:', matched);
+        } else {
+          console.log('[Snow-we] テンプレート名照合失敗. tmplName=', tmplName);
+        }
+      } catch (err) {
+        console.log('[Snow-we] 確定ハンドラエラー:', err);
+      }
+    })();
+    return;
+  }
+
   // ── 確認ボタン：メール本文からポジションを照合 ──
   if (isConfirmBtn) {
     const raw = sessionStorage.getItem('pendingScout');
@@ -520,12 +615,15 @@ document.addEventListener('click', e => {
           console.log('[Snow-we] ポジション一覧件数:', positionList.length, '/ 先頭3件:', positionList.slice(0, 3));
           console.log('[Snow-we] メール本文先頭200字:', bodyText.substring(0, 200));
           const sorted = [...positionList].sort((a, b) => b.length - a.length);
-          // 完全一致 → カッコ/ハイフン前のコア部分で照合
+          // 1. 完全一致 → 2. 部署コード除いたタイトル部分で照合 → 3. コア部分（最終手段）
           matched = sorted.find(p => {
             if (!p) return false;
+            // 完全一致
             if (bodyText.includes(p)) return true;
-            const core = p.split(/[（(【]/)[0].split(/\s[-–—]\s|\s[-–—]$/)[0].trim();
-            return core.length >= 6 && bodyText.includes(core);
+            // 「- BUS」「- TEC」等の部署コードを除いたタイトル部分で照合
+            const title = p.replace(/\s*[-–—]\s*[A-Z]{2,}[\s）)]*$/, '').trim();
+            if (title && title.length >= 8 && bodyText.includes(title)) return true;
+            return false;
           }) || '';
         } catch (_) {}
 
@@ -579,6 +677,10 @@ document.addEventListener('click', e => {
 // -------------------------------------------------------
 async function loadAllCandidatesIntoDOM() {
   const platform = getPlatform();
+  // BizreachはCDK仮想スクロールのため window.scrollTo では新カードをロードできない
+  // 仮想スクロールの制御はtriggerAutoAdd内の再帰スクロールループで行う
+  if (platform === 'bizreach') return;
+
   const LOAD_MORE_TEXTS = ['さらに読み込む', 'もっと見る', 'Load more', '次の候補者'];
   const MAX_LOADS = 40;
   const TARGET_COUNT = 700; // 600人目標 + バッファ
@@ -669,16 +771,10 @@ async function autoScreenCandidates() {
       const el = cards[i].el;
       el.querySelectorAll('.snow-we-badge').forEach(b => b.remove());
 
-      const map = {
-        'OK':   ['ok',   '✅ スカウト候補'],
-        'NG':   ['ng',   '❌ 見送り'],
-        '要確認': ['warn', '⚠️ 要確認'],
-      };
-      const [cls, text] = map[r.overall] || ['warn', '⚠️ 要確認'];
-      const badge = document.createElement('div');
-      badge.className = `snow-we-badge batch ${cls}`; // batch クラスでクリック時消去を防ぐ
-      badge.textContent = text;
-      el.appendChild(badge);
+      const [cls, text] = r.overall === 'OK' ? ['ok', '✅ スカウト候補']
+                        : r.overall === 'NG' ? ['ng', '❌ 見送り']
+                        : ['warn', '⚠️ 要確認'];
+      setBatchBadge(el, cls, text, '', cards[i].summary?.substring(0, 200) || '', r.overall);
 
       // OK候補者の追加ボタンを光らせる
       if (r.overall === 'OK') {
@@ -835,7 +931,22 @@ async function triggerAutoAdd() {
   injectStyles();
 
   showAutoStatus('📥 読み込み中...');
-  document.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
+
+  // ページをまたいで処理するため、進捗をストレージで管理（バッジ消去前に確認）
+  const progress = await loadAutoAddProgress();
+  const isFreshStart = !progress.running; // running=true なら再帰呼び出し
+
+  // Bizreach再帰呼び出し時はバッジを消去しない（仮想スクロールで再表示されたカードのバッジが消えるため）
+  if (getPlatform() !== 'bizreach' || isFreshStart) {
+    document.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
+    if (getPlatform() === 'bizreach') {
+      _bizreachBadgeRegistry.clear();
+      if (_bizreachObserver) { _bizreachObserver.disconnect(); _bizreachObserver = null; }
+    }
+  }
+
+  // Bizreachは仮想スクロール監視を開始
+  if (getPlatform() === 'bizreach') startBizreachBadgeObserver();
 
   await loadAllCandidatesIntoDOM();
 
@@ -847,8 +958,6 @@ async function triggerAutoAdd() {
     return;
   }
 
-  // ページをまたいで処理するため、進捗をストレージで管理
-  const progress = await loadAutoAddProgress();
   let addedCount = progress.added || 0;
   let totalProcessed = progress.processed || 0;
 
@@ -859,7 +968,6 @@ async function triggerAutoAdd() {
   // ─── 仮想スクロール用：セッション内の処理済みIDセット ───
   // 再帰呼び出し時に前バッチの候補者を再処理しないための dedup
   const BATCH_SESSION_KEY = 'snowWeBatchProcessed';
-  const isFreshStart = !progress.running; // running=true なら再帰呼び出し
   if (isFreshStart) {
     sessionStorage.removeItem(BATCH_SESSION_KEY);
     sessionStorage.removeItem('snowWeBizreachStarred');
@@ -931,7 +1039,7 @@ async function triggerAutoAdd() {
 
     // 年収チェック：IT閾値を下回る場合は即NG確定
     if (checkIncomeNG(profileText)) {
-      setBatchBadge(el, 'ng', '❌ 見送り');
+      setBatchBadge(el, 'ng', '❌ 見送り', '年収基準未満', profileText.substring(0, 200), 'NG');
       totalProcessed++;
       await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
       continue;
@@ -939,7 +1047,7 @@ async function triggerAutoAdd() {
 
     // 短期在籍チェック：過去職歴に2年未満の在籍がある場合は即NG確定
     if (checkShortTenureNG(profileText)) {
-      setBatchBadge(el, 'ng', '❌ 見送り(短期在籍)');
+      setBatchBadge(el, 'ng', '❌ 見送り(短期在籍)', '短期在籍あり', profileText.substring(0, 200), 'NG');
       totalProcessed++;
       await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
       continue;
@@ -947,12 +1055,13 @@ async function triggerAutoAdd() {
 
     // ─── AI判定（1人ずつ）───
     setBatchBadge(el, 'checking', '🤖 判定中...');
-    showAutoStatus(`🤖 ${pending.length + 1}人目 AI判定中... ✅${addedCount}人追加`);
-    let overall, judgeReason;
+    showAutoStatus(`🤖 判定中 (${totalProcessed + 1}人目)... ✅${addedCount}人追加`);
+    let overall, judgeReason, judgeConfidence;
     try {
       const result = await judgeSingleCandidate(apiKey, profileText, criteria);
-      overall = result.verdict;
-      judgeReason = result.reason || '';
+      overall         = result.verdict;
+      judgeReason     = result.reason     || '';
+      judgeConfidence = result.confidence ?? null;
     } catch (err) {
       console.error('[Snow-we] judgeSingleCandidate error:', err);
       setBatchBadge(el, 'warn', `⚠️ 判定失敗: ${(err.message || '').slice(0, 30)}`);
@@ -962,10 +1071,19 @@ async function triggerAutoAdd() {
       continue;
     }
 
-    setBatchBadge(el,
-      overall === 'OK' ? 'ok' : overall === 'NG' ? 'ng' : 'warn',
-      overall === 'OK' ? '✅ スカウト候補' : overall === 'NG' ? '❌ 見送り' : '⚠️ 要確認',
-      judgeReason);
+    const isLowConfidence = judgeConfidence != null && judgeConfidence < 60;
+    const badgeCls = isLowConfidence ? 'warn'
+                   : overall === 'OK' ? 'ok'
+                   : overall === 'NG' ? 'ng'
+                   : 'warn';
+    const confLabel = judgeConfidence != null ? ` ${judgeConfidence}%` : '';
+    const badgeText = overall === 'OK' ? `✅ スカウト候補${confLabel}`
+                    : overall === 'NG' ? `❌ 見送り${confLabel}`
+                    : `⚠️ 要確認${confLabel}`;
+    const tooltipText = isLowConfidence
+      ? `[低確信度] ${judgeReason}`
+      : judgeReason;
+    setBatchBadge(el, badgeCls, badgeText, tooltipText, profileText.substring(0, 200), overall);
 
     const shouldAdd = getPlatform() === 'bizreach' ? overall === 'OK' : (overall === 'OK' || overall === '要確認');
     if (shouldAdd) {
@@ -991,24 +1109,73 @@ async function triggerAutoAdd() {
 
   // ビズリーチ：仮想スクロールで次バッチへ
   if (getPlatform() === 'bizreach') {
-    // candidate-list-item-content を含む cdk-virtual-scroll-viewport を特定
-    const viewport = document.querySelector('.candidate-list-item-content')
-      ?.closest('cdk-virtual-scroll-viewport')
-      || document.querySelector('cdk-virtual-scroll-viewport');
-    if (viewport) {
-      const prevTop = viewport.scrollTop;
-      // 90%分スクロール（カードクリックなし→スクロール位置が安定するため重複を減らせる）
-      const scrollBy = Math.floor((viewport.clientHeight || 800) * 0.9);
-      viewport.scrollTop += scrollBy;
-      await sleep(800); // Angular CDK のレンダリング待機
-      if (viewport.scrollTop > prevTop + 50) {
-        // まだスクロールできる = 未処理の候補者が残っている
-        showAutoStatus(`🤖 次の候補者を処理中... (累計✅${addedCount}人追加)`);
-        await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
-        await triggerAutoAdd();
-        return;
+    // CDK仮想スクロール：viewport要素またはwindowスクロールの両方に対応
+    let viewport = document.querySelector('cdk-virtual-scroll-viewport');
+    // フォールバック：viewport未検出時はカードリストの親スクロール要素を探す
+    if (!viewport) {
+      const firstCard = document.querySelector('ess-resume-list-item');
+      if (firstCard) {
+        let el = firstCard.parentElement;
+        for (let i = 0; i < 8 && el; i++, el = el.parentElement) {
+          const s = window.getComputedStyle(el);
+          if ((s.overflowY === 'scroll' || s.overflowY === 'auto') && el.scrollHeight > el.clientHeight + 50) {
+            viewport = el;
+            break;
+          }
+        }
       }
     }
+
+    // 現在DOMに存在するカードのIDテキスト指紋（新カード出現を検出するため）
+    const getCardFingerprint = () => {
+      const items = document.querySelectorAll('ess-resume-list-item');
+      if (!items.length) return '';
+      const texts = Array.from(items).map(it => (it.innerText || '').substring(0, 20));
+      return texts.join('|');
+    };
+
+    const prevFingerprint = getCardFingerprint();
+    const prevViewportTop = viewport ? viewport.scrollTop : window.scrollY;
+    const scrollAmt = (viewport && viewport.clientHeight > 50) ? viewport.clientHeight * 0.8 : (window.innerHeight || 800);
+
+    // scrollBy() を優先（ネイティブscrollイベントを発火→AngularCDKがDOMを再レンダリング）
+    if (viewport) {
+      if (typeof viewport.scrollBy === 'function') {
+        viewport.scrollBy({ top: scrollAmt, behavior: 'smooth' });
+      } else {
+        viewport.scrollTop += scrollAmt;
+        viewport.dispatchEvent(new Event('scroll', { bubbles: true }));
+      }
+    } else {
+      window.scrollBy({ top: scrollAmt, behavior: 'smooth' });
+    }
+
+    // Angular CDKがDOMを更新するまで最大10秒待機（指紋変化 or scrollTop変化を検出）
+    let scrolled = false;
+    for (let w = 0; w < 40; w++) {
+      await sleep(250);
+      const newFp = getCardFingerprint();
+      const newViewportTop = viewport ? viewport.scrollTop : window.scrollY;
+      if (newFp !== prevFingerprint || newViewportTop > prevViewportTop + 50) {
+        scrolled = true;
+        break;
+      }
+    }
+
+    // スクロール後にレジストリのバッジを再適用（仮想スクロールで消えたバッジを復元）
+    reapplyBizreachBadges();
+
+    console.log(`[Snow-we] Bizreach scroll: prevTop=${prevViewportTop} newTop=${viewport?.scrollTop ?? window.scrollY} scrolled=${scrolled} fp_changed=${getCardFingerprint() !== prevFingerprint}`);
+
+    if (scrolled) {
+      await sleep(800); // Angular CDKのレンダリング完了を待つ
+      showAutoStatus(`🤖 次の候補者を処理中... (累計✅${addedCount}人追加)`);
+      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+      await triggerAutoAdd();
+      return;
+    }
+
+    // スクロールしても変化なし＝全候補者処理完了
     sessionStorage.removeItem(BATCH_SESSION_KEY);
     showAutoStatus(`🤖 完了！ ✅${addedCount}人を検討リストに追加 (全${totalProcessed}人中)`, 8000);
     await saveAutoAddProgress({ running: false });
@@ -1126,6 +1293,40 @@ async function tryClickRDSResumeTab() {
 }
 
 
+// Bizreach APIレスポンスJSONからプロフィールテキストを抽出する
+function extractBizreachProfileText(data) {
+  if (!data || typeof data !== 'object') return '';
+  const lines = [];
+
+  // 再帰的に文字列値を収集（ラベルフィールドを特定して整形）
+  const labelKeys = /name|title|company|school|university|education|career|skill|summary|description|reason|position|department|industry|role|job|work|experience|history|business|project|achievement|pr|appeal|content|detail|年収|会社|学歴|職歴|スキル|経験|業務|担当|在籍|退職|勤務|期間|役職|従業員|年齢|出身|卒業|大学|高校/i;
+  const skipKeys = /id$|Id$|flag|flg|bool|count|num|code|status|type|sort|order|page|limit|offset|created|updated|deleted|token|hash|url|path|icon|image|avatar|photo|thumb|color|style|class|version|timestamp/i;
+
+  function collect(obj, depth) {
+    if (depth > 8) return;
+    if (Array.isArray(obj)) {
+      obj.forEach(item => collect(item, depth + 1));
+      return;
+    }
+    if (typeof obj === 'object' && obj !== null) {
+      for (const [k, v] of Object.entries(obj)) {
+        if (skipKeys.test(k)) continue;
+        if (typeof v === 'string' && v.trim().length > 1) {
+          if (labelKeys.test(k) || v.length > 10) lines.push(v.trim());
+        } else if (typeof v === 'number' && labelKeys.test(k)) {
+          lines.push(`${k}: ${v}`);
+        } else {
+          collect(v, depth + 1);
+        }
+      }
+    }
+  }
+
+  collect(data, 0);
+  const result = [...new Set(lines)].join('\n');
+  return result.substring(0, 5000);
+}
+
 async function getFullProfile(cardEl, fallbackText) {
   const platform = getPlatform();
 
@@ -1149,11 +1350,57 @@ async function getFullProfile(cardEl, fallbackText) {
     return fallbackText.substring(0, 900);
   }
 
-  // Bizreach: カードクリックはAngularルーティングでCDK仮想スクロールを破壊するため
-  // パネルを開かずカードテキストのみ使用する（年収・会社名・年齢は既に含まれている）
+  // Bizreach: APIでフルプロフィール取得（カードクリックはCDK仮想スクロールを破壊するため使用不可）
   if (platform === 'bizreach') {
+    const resumeId = getBizreachResumeNumericId(cardEl);
+    if (resumeId) {
+      let xsrfToken = '';
+      for (const part of document.cookie.split(';')) {
+        const [k, ...vParts] = part.trim().split('=');
+        if (k === 'XSRF-TOKEN') { xsrfToken = decodeURIComponent(vParts.join('=')); break; }
+      }
+      const headers = { 'Accept': 'application/json' };
+      if (xsrfToken) headers['X-XSRF-TOKEN'] = xsrfToken;
+      const endpoints = [
+        `${location.origin}/v1/api/resume/${resumeId}`,
+        `${location.origin}/v1/api/resumes/${resumeId}`,
+        `${location.origin}/v1/api/scout/resume/${resumeId}`,
+      ];
+      for (const endpoint of endpoints) {
+        try {
+          const res = await fetch(endpoint, { credentials: 'include', headers });
+          if (res.ok) {
+            const contentType = res.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+              const data = await res.json();
+              const profileText = extractBizreachProfileText(data);
+              if (profileText && profileText.length > 300) {
+                console.log(`[Snow-we] Bizreachプロフィール取得成功 (${endpoint}):`, profileText.length, '文字');
+                return profileText;
+              }
+            } else if (contentType.includes('text/html')) {
+              const html = await res.text();
+              const doc = new DOMParser().parseFromString(html, 'text/html');
+              doc.querySelectorAll('script,style,noscript,nav,header,footer').forEach(e => e.remove());
+              const text = (doc.body?.innerText || doc.body?.textContent || '').replace(/\s+/g, ' ').trim();
+              if (text.length > 300) {
+                console.log(`[Snow-we] BizreachプロフィールHTML取得成功 (${endpoint}):`, text.length, '文字');
+                return text.substring(0, 5000);
+              }
+            }
+            console.log(`[Snow-we] Bizreachプロフィール取得: テキスト不足 (${endpoint}) status=${res.status}`);
+            break;
+          } else {
+            console.log(`[Snow-we] Bizreachプロフィール取得: status=${res.status} (${endpoint})`);
+          }
+        } catch (e) {
+          console.warn(`[Snow-we] Bizreachプロフィール取得失敗 (${endpoint}):`, e.message);
+        }
+      }
+    }
+    // フォールバック：カードテキスト
     const text = fallbackText.substring(0, 900);
-    console.log('[Snow-we] Bizreachカードテキスト取得:', text.length, '文字');
+    console.log('[Snow-we] Bizreachカードテキスト取得(fallback):', text.length, '文字');
     return text;
   }
 
@@ -1803,19 +2050,51 @@ function checkShortTenureNG(profileText) {
   return null;
 }
 
+// ポジション要件をGASから取得（キャッシュ付き）
+async function fetchPositionRequirements(position) {
+  if (!position) return { requirements: '', companyCriteria: '' };
+  if (_posReqCache.has(position)) return _posReqCache.get(position);
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'getPositionRequirements', position });
+    const result = (res?.ok) ? res : { requirements: '', companyCriteria: '' };
+    _posReqCache.set(position, result);
+    return result;
+  } catch (_) {
+    return { requirements: '', companyCriteria: '' };
+  }
+}
+
 // 1候補者のAI判定
 async function judgeSingleCandidate(apiKey, profileText, criteria) {
   const criteriaLines = buildCriteriaText(criteria, getPlatform());
-  const prompt = `転職エージェントの一次選定アシスタントです。
 
+  // ポジション要件をGASから取得
+  const { currentPosition } = await chrome.storage.local.get(['currentPosition']);
+  const { requirements: posReq, companyCriteria } = await fetchPositionRequirements(currentPosition || '');
+  const posSection     = posReq        ? `\n【応募ポジションの職務内容】\n${posReq}\n`           : '';
+  const companySection = companyCriteria ? `\n【会社別採用基準（共通基準より優先）】\n${companyCriteria}\n` : '';
+
+  // 過去の訂正フィードバックをfew-shot examplesとして組み込む
+  const feedbacks = await loadRecentFeedbacks(10);
+  let fewShotSection = '';
+  if (feedbacks.length > 0) {
+    const examples = feedbacks
+      .map(f => `- 「${f.profileSummary.substring(0, 80)}…」 → 正解: ${f.correction}（AIの誤判定: ${f.aiVerdict}）`)
+      .join('\n');
+    fewShotSection = `\n【過去の訂正例（優先参照）】\n以下はAIが誤判定して人間が訂正した実例です。同様のケースは同じ判断をしてください。\n${examples}\n`;
+  }
+
+  const prompt = `転職エージェントの一次選定アシスタントです。
+${companySection}
 【選定基準】
-${criteriaLines}
+${criteriaLines}${posSection}${fewShotSection}
 
 【候補者情報】
 ${profileText}
 
-JSON1行のみで出力（rを先に書いてからoを確定すること。rは判定理由を50字以内で）:
-{"r":"理由","o":"OK"} または {"r":"理由","o":"NG"} または {"r":"理由","o":"要確認"}`;
+JSON1行のみで出力（rを先に書いてからoを確定し、最後にcで確信度0-100を付けること。rは判定理由を50字以内で）:
+{"r":"理由","o":"OK","c":90} または {"r":"理由","o":"NG","c":85} または {"r":"理由","o":"要確認","c":45}
+※cは判定の確信度（0〜100の整数）。基準に明確に合致/不合致なら80以上、判断が難しければ60未満。`;
 
   const data = await claudeFetch(apiKey, {
     model: 'claude-sonnet-4-6',
@@ -1823,23 +2102,161 @@ JSON1行のみで出力（rを先に書いてからoを確定すること。rは
     messages: [{ role: 'user', content: prompt }]
   });
   const text = (data.content?.[0]?.text || '').trim();
-  const verdictMatch = text.match(/"o"\s*:\s*"([^"]+)"/);
-  const reasonMatch  = text.match(/"r"\s*:\s*"([^"]+)"/);
-  const verdict = verdictMatch ? verdictMatch[1] : '要確認';
-  const reason  = reasonMatch  ? reasonMatch[1]  : '';
-  console.log(`[Snow-we] AI判定: ${verdict}${reason ? ` / ${reason}` : ''}`);
-  return { verdict, reason };
+  const verdictMatch    = text.match(/"o"\s*:\s*"([^"]+)"/);
+  const reasonMatch     = text.match(/"r"\s*:\s*"([^"]+)"/);
+  const confidenceMatch = text.match(/"c"\s*:\s*(\d+)/);
+  const verdict    = verdictMatch    ? verdictMatch[1]        : '要確認';
+  const reason     = reasonMatch     ? reasonMatch[1]         : '';
+  const confidence = confidenceMatch ? parseInt(confidenceMatch[1], 10) : null;
+  console.log(`[Snow-we] AI判定: ${verdict}${confidence != null ? ` (${confidence}%)` : ''}${reason ? ` / ${reason}` : ''}`);
+  return { verdict, reason, confidence };
+}
+
+// ── フィードバック保存・読み込み ──────────────────────────────────────
+async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
+  const ts = Date.now();
+
+  // ローカルに保存
+  const stored = await chrome.storage.local.get(['snowWeFeedbacks']);
+  const feedbacks = stored.snowWeFeedbacks || [];
+  feedbacks.unshift({ profileSummary, aiVerdict, correction, platform, ts });
+  if (feedbacks.length > 50) feedbacks.length = 50;
+  await chrome.storage.local.set({ snowWeFeedbacks: feedbacks });
+  console.log(`[Snow-we] フィードバック保存: AI=${aiVerdict} → 訂正=${correction} (累計${feedbacks.length}件)`);
+
+  // GASスプレッドシートにも送信（設定済みの場合）
+  const { gasSettings, screeningCriteria } = await chrome.storage.local.get(['gasSettings', 'screeningCriteria']);
+  const gasUrl = gasSettings?.dbUrl || gasSettings?.url;
+  const secret = gasSettings?.secret;
+  if (gasUrl && secret) {
+    chrome.runtime.sendMessage({
+      type: 'gasPost',
+      url: gasUrl,
+      payload: {
+        action: 'saveFeedback',
+        secret,
+        recruiter: screeningCriteria?.recruiterName || '',
+        platform,
+        aiVerdict,
+        correction,
+        profileSummary,
+        ts,
+      }
+    });
+  }
+}
+
+async function loadRecentFeedbacks(limit = 10) {
+  const stored = await chrome.storage.local.get(['snowWeFeedbacks']);
+  return (stored.snowWeFeedbacks || []).slice(0, limit);
+}
+
+// 訂正ポップアップを表示する
+function showFeedbackPopup(badgeEl) {
+  // 既存のポップアップを消す
+  document.querySelectorAll('.snow-we-fb-popup').forEach(p => p.remove());
+
+  const aiVerdict     = badgeEl.dataset.verdict  || '';
+  const profileSummary = badgeEl.dataset.profile || '';
+  const platform      = getPlatform();
+
+  const popup = document.createElement('div');
+  popup.className = 'snow-we-fb-popup';
+  popup.innerHTML = `<span>判定を訂正</span><div class="snow-we-fb-row"></div>`;
+  const row = popup.querySelector('.snow-we-fb-row');
+
+  const options = aiVerdict === 'OK'
+    ? [{ label: '❌ 実はNG', cls: 'ng', value: 'NG' }]
+    : aiVerdict === 'NG'
+    ? [{ label: '✅ 実はOK', cls: 'ok', value: 'OK' }]
+    : [{ label: '✅ OK', cls: 'ok', value: 'OK' }, { label: '❌ NG', cls: 'ng', value: 'NG' }];
+
+  options.forEach(({ label, cls, value }) => {
+    const btn = document.createElement('button');
+    btn.className = `snow-we-fb-btn ${cls}`;
+    btn.textContent = label;
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      popup.remove();
+      try {
+        await saveFeedback(profileSummary, aiVerdict, value, platform);
+      } catch (_) {}
+      // saveFeedbackが失敗してもバッジは必ず更新する
+      badgeEl.className = badgeEl.className.replace(/\b(ok|ng|warn)\b/, 'corrected');
+      badgeEl.textContent = value === 'OK' ? '↩ 訂正: OK' : '↩ 訂正: NG';
+      badgeEl.style.cursor = 'default';
+      badgeEl.removeEventListener('click', badgeEl._fbHandler);
+    });
+    row.appendChild(btn);
+  });
+
+  // ポップアップ外クリックで閉じる
+  setTimeout(() => {
+    document.addEventListener('click', function closePopup() {
+      popup.remove();
+      document.removeEventListener('click', closePopup);
+    });
+  }, 0);
+
+  badgeEl.parentElement.appendChild(popup);
 }
 
 // バッジをセット（バッチ用）
-function setBatchBadge(el, cls, text, tooltip) {
+function setBatchBadge(el, cls, text, tooltip, profileSummary, aiVerdict) {
   el.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
   if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
   const badge = document.createElement('div');
   badge.className = `snow-we-badge batch ${cls}`;
   badge.textContent = text;
-  if (tooltip) badge.title = tooltip; // ホバーで判定理由を表示
+  if (tooltip) badge.title = tooltip;
+  // ok/ng/warn 判定済みバッジにのみ訂正ハンドラを付与
+  if ((cls === 'ok' || cls === 'ng' || cls === 'warn') && profileSummary) {
+    badge.dataset.verdict = aiVerdict || cls.toUpperCase();
+    badge.dataset.profile = profileSummary;
+    badge._fbHandler = (e) => { e.stopPropagation(); showFeedbackPopup(badge); };
+    badge.addEventListener('click', badge._fbHandler);
+    badge.title = (tooltip ? tooltip + '\n' : '') + '（クリックで判定を訂正）';
+  }
   el.appendChild(badge);
+
+  // Bizreach仮想スクロール: checkingを除く確定判定をレジストリに保存（スクロール後の再表示に使用）
+  if (getPlatform() === 'bizreach' && cls !== 'checking') {
+    const resumeId = getBizreachResumeNumericId(el);
+    if (resumeId) {
+      _bizreachBadgeRegistry.set(resumeId, {
+        cls, text, tooltip: tooltip || '', profileSummary: profileSummary || '', aiVerdict: aiVerdict || ''
+      });
+    }
+  }
+}
+
+// Bizreach仮想スクロール: DOM上の全カードにレジストリのバッジを再適用（デバウンス付き）
+function reapplyBizreachBadges() {
+  if (_bizreachBadgeRegistry.size === 0) return;
+  clearTimeout(_reapplyBizreachTimer);
+  _reapplyBizreachTimer = setTimeout(() => {
+    document.querySelectorAll('ess-resume-list-item').forEach(el => {
+      if (el.querySelector('.snow-we-badge.batch')) return;
+      const resumeId = getBizreachResumeNumericId(el);
+      if (!resumeId) return;
+      const state = _bizreachBadgeRegistry.get(resumeId);
+      if (!state) return;
+      setBatchBadge(el, state.cls, state.text, state.tooltip, state.profileSummary, state.aiVerdict);
+    });
+  }, 300);
+}
+
+// Bizreach仮想スクロール監視を開始（初回のみ・viewport未検出時は監視しない）
+function startBizreachBadgeObserver() {
+  if (_bizreachObserver) return;
+  const target = document.querySelector('cdk-virtual-scroll-viewport');
+  if (!target) {
+    console.log('[Snow-we] cdk-virtual-scroll-viewport 未検出のため監視スキップ');
+    return;
+  }
+  _bizreachObserver = new MutationObserver(() => reapplyBizreachBadges());
+  _bizreachObserver.observe(target, { childList: true, subtree: true });
+  console.log('[Snow-we] Bizreachバッジ監視開始');
 }
 
 // 次ページボタンを探す
@@ -2110,67 +2527,89 @@ function buildCriteriaText(criteria, platform) {
   lines.push(`- 46歳以上で文系職（コンサル・営業・マーケ・経営企画・人事・金融営業・システム営業・IT営業等）かつ財務・経理・FP&A・CFO・財務戦略等の職歴が一切ない場合は即NG（年収が高くても）`);
   lines.push(`- ★重要★ 「財務・経理・FP&A職歴あり」の定義: 財務部・経理部・FP&A部門・Treasury・経営管理部（財務担当）等で実際に財務経理業務を担当した経験があること。以下はNG対象外外の例外にはならない：サステナビリティ/ESG担当として経理的な仕組みを設計した、非財務情報開示（SSBJ・TCFD等）を担当した、カーボン会計・GHG会計の仕組みを作った、経理部門と連携しただけ`);
   lines.push(`- 46歳以上でIT・理系・技術職（ソフトウェアエンジニア・インフラ・クラウド・SE・データサイエンティスト・データアナリスト・DXコンサル・PMO・研究職・建築設計・土木・機械設計・電気設計・製造技術・生産技術・品質管理等のIT以外の理工系技術職を含む）は即NG`);
-  lines.push(`- 医師・医者・歯科医・薬剤師等の医療資格職が主なキャリアの場合は即NG`);
+  lines.push(`- 医師・医者・歯科医・歯科医師・薬剤師等の医療資格職が主なキャリアの場合は即NG`);
   lines.push(`- 大学教授・准教授・講師・助教等のアカデミア（学術職）が主なキャリアの場合は即NG`);
   lines.push(`- 弁護士・法律事務所勤務が主なキャリアの場合は即NG`);
   lines.push(`- 記者・ジャーナリスト（新聞・テレビ・雑誌等のメディア記者）が主なキャリアの場合は即NG`);
+  lines.push(`- テレビ・映画・ラジオ・出版等のメディア制作職（プロデューサー・ディレクター・編集者・放送作家・カメラマン等）が主なキャリアの場合は即NG`);
   lines.push(`- 自衛官・自衛隊員が主なキャリアの場合は即NG`);
   lines.push(`- 司法書士・行政書士・社会保険労務士・土地家屋調査士等の士業（公認会計士・税理士・弁護士を除く）が主なキャリアの場合は即NG`);
   lines.push(`- フリーランス・個人事業主が主なキャリアで文系職の場合は即NG（ただし理系・IT・技術職のフリーランスはOK）`);
+  lines.push(`- 中小企業・無名企業・スタートアップの代表取締役・社長・経営者（自社設立・オーナー経営）が現在の主な活動の場合は即NG。大手・外資・有名上場企業に正社員として勤務中の人のみOK対象`);
   lines.push(`- パチンコ・消費者金融・サラ金・マルチ商法（MLM・ネットワークビジネス）・風俗・ギャンブル関連業界が主なキャリアの場合は即NG`);
   lines.push(`- 現在離職中（無職・求職中・退職済み）の場合は即NG。現在も正社員として在籍中の人のみOK対象`);
   lines.push(`- 現在の雇用形態が契約社員・派遣社員・業務委託・パート・アルバイト等の非正規雇用の場合は即NG。正社員のみOK対象`);
 
   if (isBizreach) {
-    lines.push(`\n【Bizreach専用：厳格基準（3つすべて満たす場合のみOK）】`);
-    lines.push(`- 社格：大手企業・外資系・有名上場企業のみOK。中小企業・無名企業はNG`);
-    lines.push(`- 学歴：早慶上智・MARCH・国立大学はOK。関関同立（関西大・関西学院大・同志社大・立命館大）は大手企業在籍の場合のみOK。それ以外はNG`);
-    lines.push(`- 年収：以下の基準を満たすこと（満たさない場合はNG）`);
-    lines.push(`- 判定方針：迷う場合・要確認はすべてNG。3条件すべて明確にOKの場合のみOK`);
+    lines.push(`\n【Bizreach専用基準】`);
+    lines.push(`※年収はBizreachサイト側のフィルターで1000万円以上に絞り込み済みのため、年収チェックは不要`);
+
+    lines.push(`\n▼経験社数（転職回数）`);
+    lines.push(`- 36歳以上：3社まで OK、4社以上 → NG`);
+    lines.push(`- 28〜35歳：2社まで OK、3社以上 → NG`);
+    lines.push(`- 27歳以下：1社のみ OK、2社以上 → NG`);
+    lines.push(`  ※同一グループ・親子会社間の異動・出向は1社としてカウントする`);
+    lines.push(`  ※経験社数が読み取れない場合は経験社数でNGにしない`);
+
+    lines.push(`\n▼職種の分類（最初にこれを確認する）`);
+    lines.push(`「ITエンジニア・デジタル系」に該当するのは以下のみ：`);
+    lines.push(`  ソフトウェアエンジニア・SE・Webエンジニア・インフラエンジニア・クラウドエンジニア・データエンジニア・データサイエンティスト・データアナリスト・DXコンサル・ITコンサル・ITプロジェクトマネージャー（IT系PM）`);
+    lines.push(`「それ以外の全職種」は学歴・社格の審査対象：`);
+    lines.push(`  営業・コンサル（IT以外）・マーケ・経営企画・財務・人事・金融・テレビ制作・出版・MR・医療営業・製造技術・生産技術・土木・機械設計・電気設計・臨床開発・研究職（製薬・化学・材料等）・品質管理・その他すべて`);
+
+    lines.push(`\n▼学歴・社格基準（「それ以外の全職種」に適用）`);
+    lines.push(`- 社格：大手企業・外資系・有名上場企業での勤務経験が必要。中小・無名企業のみはNG`);
+    lines.push(`- 学歴：以下のいずれかに該当すること（いずれにも該当しない場合はNG）`);
+    lines.push(`  ① 早慶上智（早稲田・慶應・上智）`);
+    lines.push(`  ② MARCH・東京理科大（明治・青山学院・立教・中央・法政・東京理科大）`);
+    lines.push(`  ③ 国立大学（旧帝大・東工大・一橋・筑波・横浜国立・小樽商科・北海道・東北・名古屋・大阪・九州・神戸・広島・岡山・千葉・埼玉・金沢・信州・静岡・熊本・長崎・鹿児島・琉球等、国が設置する全ての大学）`);
+    lines.push(`  ④ 関関同立（関西大・関西学院大・同志社大・立命館大）かつ大手企業・外資系・有名上場企業に現在在籍中`);
+    lines.push(`  ⑤ 海外大学卒（どの国・地域でも可）`);
+    lines.push(`  ※学歴が不明・記載なしの場合は学歴でNGにしない。社格・経験社数で判断すること`);
+
+    lines.push(`\n▼Bizreach判定方針（迷う場合は必ずNG）`);
+    lines.push(`以下の順番で判定すること：`);
+    lines.push(`1. 絶対NG条件に該当 → 即NG`);
+    lines.push(`2. 経験社数が年齢別上限を超える → NG`);
+    lines.push(`3. 「それ以外の全職種」で社格NG（中小・無名企業のみ）→ NG`);
+    lines.push(`4. 「それ以外の全職種」で学歴NG（①〜⑤のいずれにも非該当、かつ学歴が明記されている場合）→ NG`);
+    lines.push(`5. 上記1〜4のいずれにも該当しない → OK`);
+    lines.push(`※「要確認」は絶対に使用しないこと。必ずOKかNGを返すこと`);
+    lines.push(`※「ITエンジニア・デジタル系」のみステップ3・4をスキップ。それ以外の技術職（製造・土木・研究等）はスキップしない`);
+  } else {
+    lines.push(`\n【職種判定】候補者の「直近・現在の職種」で以下のどちらかに分類し、対応する基準を適用してください。過去の経歴や学歴は分類に影響しません。`);
+    lines.push(`- 「ITエンジニア系（IT・理系・技術職）」: 現在の職種がソフトウェアエンジニア・SE・インフラ・クラウド・データエンジニア・データサイエンティスト・データアナリスト・DXコンサル・ITコンサル・PMO・研究職（バイオ・化学・材料等）・建築設計・土木・機械設計・電気設計・製造技術・生産技術・品質管理等の技術職`);
+    lines.push(`- 「文系職」: 現在の職種がコンサル（IT以外）・営業・マーケ・経営企画・事業企画・財務・人事・金融・その他ビジネス職。理系出身・研究職経験があっても現職が経営企画等のビジネス職であれば文系職として分類する`);
+
+    lines.push(`\n【文系職の年収基準】`);
+    lines.push(`- 20代: 500万円未満 → NG`);
+    lines.push(`- 30〜35歳: 700万円未満 → NG`);
+    lines.push(`- 36〜39歳: 800万円未満 → NG`);
+    lines.push(`- 40〜42歳: 1000万円未満 → NG`);
+    lines.push(`- 43〜45歳: 1200万円未満 → NG`);
+    lines.push(`- 46歳以上: 1200万以上かつ財務・経理・FP&A職歴あり → 要確認、それ以外 → NG`);
+    lines.push(`※年収が明記されており基準を下回る場合は必ずNG。年収が不明・記載なしの場合は「要確認」`);
+
+    lines.push(`\n【ITエンジニア系の年収基準】`);
+    lines.push(`- 20代: 350万円未満 → NG`);
+    lines.push(`- 30〜35歳: 500万円未満 → NG`);
+    lines.push(`- 36〜40歳: 700万円未満 → NG`);
+    lines.push(`- 40〜45歳: 800万円未満 → NG`);
+    lines.push(`※年収が明記されており基準を下回る場合は必ずNG。年収が不明・記載なしの場合は「要確認」`);
+
+    lines.push(`\n【文系職の社格・学歴・転職回数】`);
+    lines.push(`- 社格: 職歴全体を通じて上場企業・大手グループ・外資系企業での勤務経験が1社以上あることが必要。中小企業・無名企業のみのキャリアで大手経験が一切ない場合は即NG（年収が高くても）`);
+    lines.push(`- 例外: 公認会計士・税理士（監査法人・会計事務所勤務）は業態上、上場企業勤務がないのが通常のため社格要件を問わない。ただし年収基準は適用する`);
+    lines.push(`- 学歴: 国立大学・早慶上智・MARCH・東京理科大はOK。それ以外は社格・年収でカバーされればOK`);
+    lines.push(`- 転職回数: 20代最大2社、30代最大3社（3社目は年収高ければOK）、40代最大4社`);
+
+    lines.push(`\n【ITエンジニア系の社格・学歴・転職回数】`);
+    lines.push(`- 社格: 問わない（大手でなくてもOK）`);
+    lines.push(`- 学歴: 問わない（高卒以上OK、スキル重視）`);
+    lines.push(`- 転職回数: 20代最大3社、30代最大4社、40代最大5社。1社の在籍が1年未満の場合は注意`);
   }
 
-  lines.push(`\n【職種判定】候補者の「直近・現在の職種」で以下のどちらかに分類し、対応する基準を適用してください。過去の経歴や学歴は分類に影響しません。`);
-  lines.push(`- 「ITエンジニア系（IT・理系・技術職）」: 現在の職種がソフトウェアエンジニア・SE・インフラ・クラウド・データエンジニア・データサイエンティスト・データアナリスト・DXコンサル・ITコンサル・PMO・研究職（バイオ・化学・材料等）・建築設計・土木・機械設計・電気設計・製造技術・生産技術・品質管理等の技術職`);
-  lines.push(`- 「文系職」: 現在の職種がコンサル（IT以外）・営業・マーケ・経営企画・事業企画・財務・人事・金融・その他ビジネス職。理系出身・研究職経験があっても現職が経営企画等のビジネス職であれば文系職として分類する`);
-
-  lines.push(`\n【文系職の年収基準】`);
-  lines.push(`- 20代: 500万円未満 → NG`);
-  lines.push(`- 30〜35歳: 700万円未満 → NG`);
-  lines.push(`- 36〜39歳: 800万円未満 → NG`);
-  lines.push(`- 40〜42歳: 1000万円未満 → NG`);
-  lines.push(`- 43〜45歳: 1200万円未満 → NG`);
-  lines.push(`- 46歳以上: 1200万以上かつ財務・経理・FP&A職歴あり → 要確認、それ以外 → NG`);
-  lines.push(`※年収が明記されており基準を下回る場合は必ずNG。年収が不明・記載なしの場合は「要確認」`);
-
-  lines.push(`\n【ITエンジニア系の年収基準】`);
-  lines.push(`- 20代: 350万円未満 → NG`);
-  lines.push(`- 30〜35歳: 500万円未満 → NG`);
-  lines.push(`- 36〜40歳: 700万円未満 → NG`);
-  lines.push(`- 40〜45歳: 800万円未満 → NG`);
-  lines.push(`※年収が明記されており基準を下回る場合は必ずNG。年収が不明・記載なしの場合は「要確認」`);
-
-  lines.push(`\n【文系職の社格・学歴・転職回数】`);
-  lines.push(`- 社格: 職歴全体を通じて上場企業・大手グループ・外資系企業での勤務経験が1社以上あることが必要。中小企業・無名企業のみのキャリアで大手経験が一切ない場合は即NG（年収が高くても）`);
-  lines.push(`- 例外: 公認会計士・税理士（監査法人・会計事務所勤務）は業態上、上場企業勤務がないのが通常のため社格要件を問わない。ただし年収基準は適用する`);
-  lines.push(`- 学歴: 国立大学・早慶上智・MARCHはOK。それ以外は社格・年収でカバーされればOK`);
-  lines.push(`- 転職回数: 20代最大2社、30代最大3社（3社目は年収高ければOK）、40代最大4社`);
-
-  lines.push(`\n【ITエンジニア系の社格・学歴・転職回数】`);
-  lines.push(`- 社格: 問わない（大手でなくてもOK）`);
-  lines.push(`- 学歴: 問わない（高卒以上OK、スキル重視）`);
-  lines.push(`- 転職回数: 20代最大3社、30代最大4社、40代最大5社。1社の在籍が1年未満の場合は注意`);
-
-  if (isBizreach) {
-    lines.push(`\n【Bizreach判定方針（厳格・上記Bizreach専用基準と合わせて適用）】`);
-    lines.push(`以下の順番で判定すること：`);
-    lines.push(`1. 絶対NG条件（アクセンチュア・ベイカレント・秘書・保守運用のみ・46歳以上IT理系技術職・46歳以上文系で財務経理歴なし・医師・教授・弁護士・記者・自衛官・士業・文系フリーランス・特定業界・離職中・非正規雇用）に該当する → 即NG`);
-    lines.push(`2. 社格・学歴・年収の3条件をそれぞれ確認する`);
-    lines.push(`3. いずれか1つでも明確にNG（中小企業・無名企業・基準学歴未満・年収基準未達）→ NG`);
-    lines.push(`4. 3条件すべてが明確にOK → OK`);
-    lines.push(`5. いずれかの条件が不明・読み取れない → NG（迷う場合は必ずNG）`);
-    lines.push(`※「要確認」は絶対に使用しないこと。必ずOKかNGのいずれかを返すこと`);
-    lines.push(`※学歴・社格が基準を満たさない場合は年収に関わらずNG`);
-  } else {
+  if (!isBizreach) {
     lines.push(`\n【判定方針】`);
     lines.push(`以下の順番で判定すること：`);
     lines.push(`1. 絶対NG条件（アクセンチュア・ベイカレント・秘書・保守運用のみ・46歳以上IT理系技術職・46歳以上文系で財務経理歴なし・医師・教授・弁護士・記者・自衛官・士業・文系フリーランス・特定業界・離職中・非正規雇用）に該当する → 即NG`);
@@ -2728,12 +3167,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (!cards[i]) return;
         const el = cards[i].el;
         el.querySelectorAll('.snow-we-badge').forEach(b => b.remove());
-        const map = { OK: ['ok', '✅ スカウト推奨'], NG: ['ng', '❌ 見送り'], '要確認': ['warn', '⚠️ 要確認'] };
-        const [cls, text] = map[r.overall] || ['warn', '⚠️ 要確認'];
-        const badge = document.createElement('div');
-        badge.className = `snow-we-badge batch ${cls}`;
-        badge.textContent = text;
-        el.appendChild(badge);
+        const [cls, text] = r.overall === 'OK' ? ['ok', '✅ スカウト推奨']
+                          : r.overall === 'NG' ? ['ng', '❌ 見送り']
+                          : ['warn', '⚠️ 要確認'];
+        setBatchBadge(el, cls, text, '', cards[i]?.summary?.substring(0, 200) || '', r.overall);
       });
       sendResponse({ success: true });
     } catch (e) {

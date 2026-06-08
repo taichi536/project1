@@ -79,6 +79,36 @@ const POSITION_LIST = [
   'インダストリーコンサルタント（消費財・サービス領域）-BUS',
 ];
 
+// ── 自動更新チェック ────────────────────────────────────────────────────
+const GITHUB_MANIFEST_URL =
+  'https://raw.githubusercontent.com/taichi536/project1/main/manifest.json';
+
+async function checkForUpdate() {
+  try {
+    const res = await fetch(GITHUB_MANIFEST_URL + '?_=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const remote = await res.json();
+    const current = chrome.runtime.getManifest().version;
+    if (remote.version && remote.version !== current) {
+      console.log(`[Snow-we] 新バージョン検出: ${current} → ${remote.version} 自動リロード中...`);
+      chrome.runtime.reload();
+    }
+  } catch (_) {
+    // ネットワーク不可時は無視
+  }
+}
+
+// アラームが未登録の時だけ作成（サービスワーカー再起動のたびにリセットされるのを防ぐ）
+// → ポップアップを開くたびに6秒後にreloadが走りポップアップが閉じるバグを修正
+chrome.alarms.get('snowWeUpdateCheck', (existing) => {
+  if (!existing) {
+    chrome.alarms.create('snowWeUpdateCheck', { delayInMinutes: 5, periodInMinutes: 5 });
+  }
+});
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'snowWeUpdateCheck') checkForUpdate();
+});
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // GASへのPOST中継
   if (msg.type === 'gasPost') {
@@ -87,6 +117,27 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     fetch(url, { method: 'POST', body: JSON.stringify(payload) })
       .then(() => sendResponse({ ok: true }))
       .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  // ポジション要件をGASから取得
+  if (msg.type === 'getPositionRequirements') {
+    const { position } = msg;
+    chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {
+      const url    = gasSettings?.dbUrl || gasSettings?.url;
+      const secret = gasSettings?.secret;
+      if (!url || !secret) {
+        sendResponse({ ok: false, requirements: '', companyCriteria: '' });
+        return;
+      }
+      fetch(url, {
+        method: 'POST',
+        body: JSON.stringify({ secret, action: 'getPositionRequirements', position }),
+      })
+        .then(r => r.json())
+        .then(data => sendResponse(data))
+        .catch(() => sendResponse({ ok: false, requirements: '', companyCriteria: '' }));
+    });
     return true;
   }
 
