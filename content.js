@@ -1,8 +1,12 @@
-// content.js v1.5.1
+// content.js v1.5.2
 // 各媒体のプロフィールページからテキストを抽出する
 
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
 const _posReqCache = new Map();
+
+// Bizreach仮想スクロール対応：バッジ状態レジストリ
+const _bizreachBadgeRegistry = new Map(); // resumeId → {cls, text, tooltip, profileSummary, aiVerdict}
+let _bizreachObserver = null;
 
 
 // -------------------------------------------------------
@@ -926,7 +930,22 @@ async function triggerAutoAdd() {
   injectStyles();
 
   showAutoStatus('📥 読み込み中...');
-  document.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
+
+  // ページをまたいで処理するため、進捗をストレージで管理（バッジ消去前に確認）
+  const progress = await loadAutoAddProgress();
+  const isFreshStart = !progress.running; // running=true なら再帰呼び出し
+
+  // Bizreach再帰呼び出し時はバッジを消去しない（仮想スクロールで再表示されたカードのバッジが消えるため）
+  if (getPlatform() !== 'bizreach' || isFreshStart) {
+    document.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
+    if (getPlatform() === 'bizreach') {
+      _bizreachBadgeRegistry.clear();
+      if (_bizreachObserver) { _bizreachObserver.disconnect(); _bizreachObserver = null; }
+    }
+  }
+
+  // Bizreachは仮想スクロール監視を開始
+  if (getPlatform() === 'bizreach') startBizreachBadgeObserver();
 
   await loadAllCandidatesIntoDOM();
 
@@ -938,8 +957,6 @@ async function triggerAutoAdd() {
     return;
   }
 
-  // ページをまたいで処理するため、進捗をストレージで管理
-  const progress = await loadAutoAddProgress();
   let addedCount = progress.added || 0;
   let totalProcessed = progress.processed || 0;
 
@@ -950,7 +967,6 @@ async function triggerAutoAdd() {
   // ─── 仮想スクロール用：セッション内の処理済みIDセット ───
   // 再帰呼び出し時に前バッチの候補者を再処理しないための dedup
   const BATCH_SESSION_KEY = 'snowWeBatchProcessed';
-  const isFreshStart = !progress.running; // running=true なら再帰呼び出し
   if (isFreshStart) {
     sessionStorage.removeItem(BATCH_SESSION_KEY);
     sessionStorage.removeItem('snowWeBizreachStarred');
@@ -1093,31 +1109,44 @@ async function triggerAutoAdd() {
   // ビズリーチ：仮想スクロールで次バッチへ
   if (getPlatform() === 'bizreach') {
     // CDK仮想スクロール：viewport要素またはwindowスクロールの両方に対応
-    const viewport = document.querySelector('cdk-virtual-scroll-viewport');
+    let viewport = document.querySelector('cdk-virtual-scroll-viewport');
+    // フォールバック：viewport未検出時はカードリストの親スクロール要素を探す
+    if (!viewport) {
+      const firstCard = document.querySelector('ess-resume-list-item');
+      if (firstCard) {
+        let el = firstCard.parentElement;
+        for (let i = 0; i < 8 && el; i++, el = el.parentElement) {
+          const s = window.getComputedStyle(el);
+          if ((s.overflowY === 'scroll' || s.overflowY === 'auto') && el.scrollHeight > el.clientHeight + 50) {
+            viewport = el;
+            break;
+          }
+        }
+      }
+    }
 
     // 現在DOMに存在するカードのIDテキスト指紋（新カード出現を検出するため）
     const getCardFingerprint = () => {
       const items = document.querySelectorAll('ess-resume-list-item');
       if (!items.length) return '';
-      // 最初と最後のカードのテキスト先頭30字を組み合わせる
-      const first = (items[0].innerText || '').substring(0, 30);
-      const last = (items[items.length - 1].innerText || '').substring(0, 30);
-      return `${items.length}|${first}|${last}`;
+      const texts = Array.from(items).map(it => (it.innerText || '').substring(0, 20));
+      return texts.join('|');
     };
 
     const prevFingerprint = getCardFingerprint();
-    const prevViewportTop = viewport ? viewport.scrollTop : -1;
-    const scrollAmt = (viewport && viewport.clientHeight > 50) ? viewport.clientHeight : (window.innerHeight || 800);
+    const prevViewportTop = viewport ? viewport.scrollTop : window.scrollY;
+    const scrollAmt = (viewport && viewport.clientHeight > 50) ? viewport.clientHeight * 0.8 : (window.innerHeight || 800);
 
     // scrollBy() を優先（ネイティブscrollイベントを発火→AngularCDKがDOMを再レンダリング）
-    // scrollTop += はscrollイベントを発火しない場合があるためフォールバックにとどめる
     if (viewport) {
       if (typeof viewport.scrollBy === 'function') {
-        viewport.scrollBy(0, scrollAmt);
+        viewport.scrollBy({ top: scrollAmt, behavior: 'smooth' });
       } else {
         viewport.scrollTop += scrollAmt;
         viewport.dispatchEvent(new Event('scroll', { bubbles: true }));
       }
+    } else {
+      window.scrollBy({ top: scrollAmt, behavior: 'smooth' });
     }
 
     // Angular CDKがDOMを更新するまで最大10秒待機（指紋変化 or scrollTop変化を検出）
@@ -1125,14 +1154,17 @@ async function triggerAutoAdd() {
     for (let w = 0; w < 40; w++) {
       await sleep(250);
       const newFp = getCardFingerprint();
-      const newViewportTop = viewport ? viewport.scrollTop : -1;
+      const newViewportTop = viewport ? viewport.scrollTop : window.scrollY;
       if (newFp !== prevFingerprint || newViewportTop > prevViewportTop + 50) {
         scrolled = true;
         break;
       }
     }
 
-    console.log(`[Snow-we] Bizreach scroll: prevTop=${prevViewportTop} newTop=${viewport?.scrollTop} scrolled=${scrolled} fp_changed=${getCardFingerprint() !== prevFingerprint}`);
+    // スクロール後にレジストリのバッジを再適用（仮想スクロールで消えたバッジを復元）
+    reapplyBizreachBadges();
+
+    console.log(`[Snow-we] Bizreach scroll: prevTop=${prevViewportTop} newTop=${viewport?.scrollTop ?? window.scrollY} scrolled=${scrolled} fp_changed=${getCardFingerprint() !== prevFingerprint}`);
 
     if (scrolled) {
       await sleep(800); // Angular CDKのレンダリング完了を待つ
@@ -2183,6 +2215,37 @@ function setBatchBadge(el, cls, text, tooltip, profileSummary, aiVerdict) {
     badge.title = (tooltip ? tooltip + '\n' : '') + '（クリックで判定を訂正）';
   }
   el.appendChild(badge);
+
+  // Bizreach仮想スクロール: checkingを除く確定判定をレジストリに保存（スクロール後の再表示に使用）
+  if (getPlatform() === 'bizreach' && cls !== 'checking') {
+    const resumeId = getBizreachResumeNumericId(el);
+    if (resumeId) {
+      _bizreachBadgeRegistry.set(resumeId, {
+        cls, text, tooltip: tooltip || '', profileSummary: profileSummary || '', aiVerdict: aiVerdict || ''
+      });
+    }
+  }
+}
+
+// Bizreach仮想スクロール: DOM上の全カードにレジストリのバッジを再適用
+function reapplyBizreachBadges() {
+  document.querySelectorAll('ess-resume-list-item').forEach(el => {
+    if (el.querySelector('.snow-we-badge.batch')) return;
+    const resumeId = getBizreachResumeNumericId(el);
+    if (!resumeId) return;
+    const state = _bizreachBadgeRegistry.get(resumeId);
+    if (!state) return;
+    setBatchBadge(el, state.cls, state.text, state.tooltip, state.profileSummary, state.aiVerdict);
+  });
+}
+
+// Bizreach仮想スクロール監視を開始（初回のみ）
+function startBizreachBadgeObserver() {
+  if (_bizreachObserver) return;
+  const target = document.querySelector('cdk-virtual-scroll-viewport') || document.body;
+  _bizreachObserver = new MutationObserver(() => reapplyBizreachBadges());
+  _bizreachObserver.observe(target, { childList: true, subtree: true });
+  console.log('[Snow-we] Bizreachバッジ監視開始');
 }
 
 // 次ページボタンを探す
