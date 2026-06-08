@@ -306,27 +306,36 @@ _UNIVERSE_CACHE_FILE = Path(__file__).parent.parent / ".jquants_universe.json"
 def _fetch_jquants_full_master() -> list[dict]:
     """J-Quantsから全銘柄マスターを取得（生データ）"""
     import time
+
+    # キャッシュが新鮮なら即返す
+    stale_cache = None
     if _UNIVERSE_CACHE_FILE.exists():
         try:
             cached = json.loads(_UNIVERSE_CACHE_FILE.read_text())
             if time.time() - cached.get("_fetched_at", 0) < 86400 * 7:
                 return cached.get("data", [])
+            stale_cache = cached.get("data", [])  # 期限切れキャッシュを退避
         except Exception:
             pass
+
     client = _get_jquants_client()
     if not client:
-        return []
+        print("  [J-Quants] 認証情報なし (JQUANTS_API_KEY / EMAIL+PASSWORDを.envに設定してください)")
+        return stale_cache or []
+
     try:
         resp = requests.get(f"{client.BASE_V2}/equities/master",
                             headers=client._headers(), timeout=30)
         if not resp.ok:
-            return []
+            print(f"  [J-Quants] APIエラー {resp.status_code}: {resp.text[:100]}")
+            return stale_cache or []
         data = resp.json().get("data", [])
         _UNIVERSE_CACHE_FILE.write_text(json.dumps(
             {"_fetched_at": time.time(), "data": data}, ensure_ascii=False))
         return data
-    except Exception:
-        return []
+    except Exception as e:
+        print(f"  [J-Quants] 取得失敗: {e}")
+        return stale_cache or []
 
 
 def fetch_jquants_universe(
