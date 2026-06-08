@@ -1,4 +1,4 @@
-// content.js v1.5.4
+// content.js v1.5.5
 // 各媒体のプロフィールページからテキストを抽出する
 
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
@@ -2056,10 +2056,18 @@ async function fetchPositionRequirements(position) {
   if (_posReqCache.has(position)) return _posReqCache.get(position);
   try {
     const res = await chrome.runtime.sendMessage({ type: 'getPositionRequirements', position });
-    const result = (res?.ok) ? res : { requirements: '', companyCriteria: '' };
-    _posReqCache.set(position, result);
-    return result;
-  } catch (_) {
+    if (res?.ok && res.requirements) {
+      console.log(`[Snow-we] GASデータ取得成功: "${position}" / 要件${res.requirements.length}文字${res.companyCriteria ? ` / 会社別基準${res.companyCriteria.length}文字` : ''}`);
+      _posReqCache.set(position, res);
+      return res;
+    } else {
+      console.warn(`[Snow-we] GASデータなし: "${position}" → 共通基準のみで判定します (ok=${res?.ok}, requirements="${res?.requirements}")`);
+      const result = { requirements: '', companyCriteria: '' };
+      _posReqCache.set(position, result);
+      return result;
+    }
+  } catch (e) {
+    console.error(`[Snow-we] GASデータ取得エラー: "${position}"`, e);
     return { requirements: '', companyCriteria: '' };
   }
 }
