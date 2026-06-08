@@ -440,14 +440,18 @@ def run_momentum_rebalance(dry_run: bool = False):
     if dry_run:
         print("[月次リバランス] ⚠️ DRY-RUNモード: 状態保存・通知は行いません")
 
-    TOP_N = 10           # 保有銘柄数
-    LOOKBACK_LONG = 252  # 12ヶ月（モメンタム計算の起点）
-    SKIP_RECENT = 21     # 直近1ヶ月を除外（平均回帰対策）
-    MA_PERIOD = 200      # 200日移動平均フィルター
-    MAX_PER_SECTOR = 3   # 同セクターから最大3銘柄
-    VOL_WINDOW = 60      # ボラティリティ計算期間（日）
-    MIN_WEIGHT = 0.05    # 最小配分5%
-    MAX_WEIGHT = 0.20    # 最大配分20%
+    TOP_N = 10              # 保有銘柄数
+    LOOKBACK_LONG = 252     # 12ヶ月（モメンタム計算の起点）
+    SKIP_RECENT = 21        # 直近1ヶ月を除外（平均回帰対策）
+    QUALITY_LOOKBACK = 63   # 3ヶ月モメンタム（品質フィルター用）
+    MA_PERIOD = 200         # 200日移動平均フィルター
+    MAX_PER_SECTOR = 3      # 同セクターから最大3銘柄
+    VOL_WINDOW = 60         # ボラティリティ計算期間（日）
+    MIN_WEIGHT = 0.05       # 最小配分5%
+    MAX_WEIGHT = 0.20       # 最大配分20%
+    CORR_THRESHOLD = 0.70   # 相関フィルター閾値
+    MIN_TURNOVER = 5e8      # 流動性フィルター: 5億円/日以上
+    REGIME_TICKER = "1306.T"  # TOPIXのプロキシETF
 
     # J-QuantsでTOPIX500を動的取得、失敗時は固定ユニバース
     from modules.universe import get_jquants_universe_with_sector
@@ -465,14 +469,46 @@ def run_momentum_rebalance(dry_run: bool = False):
 
     print(f"[月次リバランス] {universe_label} モメンタム計算中...")
 
+    # ── マーケット・レジームフィルター ──────────────────────────────
+    regime_bullish = True
+    try:
+        regime_df = fetch_ohlcv(REGIME_TICKER, period="16mo")
+        if regime_df is not None and len(regime_df) >= MA_PERIOD:
+            regime_cur = float(regime_df["Close"].iloc[-1])
+            regime_ma = float(regime_df["Close"].tail(MA_PERIOD).mean())
+            regime_bullish = regime_cur > regime_ma
+            status = "強気" if regime_bullish else "⚠️ 弱気"
+            print(f"  [レジーム] TOPIX ETF {regime_cur:,.0f} / MA200 {regime_ma:,.0f} → {status}")
+    except Exception:
+        print("  [レジーム] 取得失敗、強気と仮定して続行")
+
+    if not regime_bullish:
+        print("  [レジーム] ⚠️ 弱気相場: 全売り・現金保有を推奨")
+        prev_holdings = _load_momentum_holdings()
+        sell_all = prev_holdings[:]
+        if not dry_run and sell_all:
+            sell_labels = [f"{t.replace('.T', '')}" for t in sell_all]
+            _MOMENTUM_HOLDINGS_FILE.write_text(json.dumps([], ensure_ascii=False))
+            _MOMENTUM_ENTRY_FILE.write_text(json.dumps({}, ensure_ascii=False))
+            send_momentum_rebalance_alert(
+                buy=[], sell=sell_labels, hold=[],
+                rankings=[("⚠️ 弱気相場: 現金保有推奨", 0.0, 0.0, 0.0)])
+            print(f"  → 全売り通知送信")
+        elif dry_run:
+            print("  [DRY-RUN] 状態ファイルへの保存・Telegram通知をスキップしました")
+        return
+
+    # ── 株価・出来高データ取得 ──────────────────────────────────────
     prices = {}
+    volumes = {}
     latest_prices = {}
-    needed = LOOKBACK_LONG + SKIP_RECENT + 30  # 余裕を持ったデータ期間
+    needed = LOOKBACK_LONG + SKIP_RECENT + 30
     for t in tickers:
         try:
             df = fetch_ohlcv(t, period="16mo")
             if df is not None and not df.empty and len(df) > needed:
                 prices[t] = df["Close"].squeeze()
+                volumes[t] = df["Volume"].squeeze()
                 latest_prices[t] = float(df["Close"].iloc[-1])
         except Exception:
             pass  # データ不足（新規IPO等）はスキップ
@@ -484,22 +520,40 @@ def run_momentum_rebalance(dry_run: bool = False):
     price_df = pd.DataFrame(prices).ffill()
     n = len(price_df)
 
-    # モメンタム: 12ヶ月前〜1ヶ月前のリターン（直近1ヶ月除外）
+    # ── モメンタム計算 ──────────────────────────────────────────────
     idx_long = max(0, n - LOOKBACK_LONG - SKIP_RECENT)
     idx_recent = max(0, n - SKIP_RECENT)
+    idx_quality = max(0, n - QUALITY_LOOKBACK - SKIP_RECENT)
     past_long = price_df.iloc[idx_long]
     past_recent = price_df.iloc[idx_recent]
+    past_quality = price_df.iloc[idx_quality]
     momentum = ((past_recent / past_long) - 1) * 100
+    momentum_3m = ((past_recent / past_quality) - 1) * 100  # 品質フィルター用
 
-    # 200日移動平均フィルター（現在値が200日MAを上回る銘柄のみ）
+    # ── 200日MA + 品質 + 流動性フィルター ──────────────────────────
     cur = price_df.iloc[-1]
     ma200 = price_df.tail(MA_PERIOD).mean()
-    qualified = momentum[cur > ma200].dropna().sort_values(ascending=False)
 
-    CORR_THRESHOLD = 0.70  # これ以上の相関がある銘柄は除外
+    # 200日MAフィルター & 12ヶ月モメンタム正
+    base_filter = (cur > ma200) & (momentum > 0)
+    # 品質フィルター: 3ヶ月モメンタムも正
+    quality_filter = momentum_3m > 0
+    # 流動性フィルター: 平均出来高 × 株価 > MIN_TURNOVER
+    turnover = {}
+    for t in prices:
+        if t in volumes:
+            avg_vol = volumes[t].tail(20).mean()
+            avg_price = prices[t].tail(20).mean()
+            turnover[t] = avg_vol * avg_price
+    liquidity_filter = pd.Series({t: turnover.get(t, 0) >= MIN_TURNOVER for t in prices})
+
+    combined = base_filter & quality_filter & liquidity_filter
+    qualified = momentum[combined].dropna().sort_values(ascending=False)
+    print(f"  フィルター通過: {len(qualified)}銘柄 (MA200・品質・流動性)")
+
     returns_df = price_df.pct_change().dropna()
 
-    # セクター分散 + 相関フィルター
+    # ── セクター分散 + 相関フィルター ──────────────────────────────
     new_top = []
     sector_count: dict[str, int] = {}
     for t in qualified.index:
@@ -511,7 +565,7 @@ def run_momentum_rebalance(dry_run: bool = False):
         if sector_count.get(sector, 0) >= MAX_PER_SECTOR:
             continue
 
-        # 相関チェック（既選銘柄と相関が高すぎる場合は除外）
+        # 相関チェック
         too_correlated = False
         if new_top and t in returns_df.columns:
             ret_t = returns_df[t].tail(126)
