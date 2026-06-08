@@ -1,6 +1,9 @@
 // content.js v1.5.0
 // 各媒体のプロフィールページからテキストを抽出する
 
+// ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
+const _posReqCache = new Map();
+
 
 // -------------------------------------------------------
 // プラットフォーム判定
@@ -1946,9 +1949,29 @@ function checkShortTenureNG(profileText) {
   return null;
 }
 
+// ポジション要件をGASから取得（キャッシュ付き）
+async function fetchPositionRequirements(position) {
+  if (!position) return { requirements: '', companyCriteria: '' };
+  if (_posReqCache.has(position)) return _posReqCache.get(position);
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'getPositionRequirements', position });
+    const result = (res?.ok) ? res : { requirements: '', companyCriteria: '' };
+    _posReqCache.set(position, result);
+    return result;
+  } catch (_) {
+    return { requirements: '', companyCriteria: '' };
+  }
+}
+
 // 1候補者のAI判定
 async function judgeSingleCandidate(apiKey, profileText, criteria) {
   const criteriaLines = buildCriteriaText(criteria, getPlatform());
+
+  // ポジション要件をGASから取得
+  const { currentPosition } = await chrome.storage.local.get(['currentPosition']);
+  const { requirements: posReq, companyCriteria } = await fetchPositionRequirements(currentPosition || '');
+  const posSection     = posReq        ? `\n【応募ポジションの職務内容】\n${posReq}\n`           : '';
+  const companySection = companyCriteria ? `\n【会社別採用基準（共通基準より優先）】\n${companyCriteria}\n` : '';
 
   // 過去の訂正フィードバックをfew-shot examplesとして組み込む
   const feedbacks = await loadRecentFeedbacks(10);
@@ -1961,9 +1984,9 @@ async function judgeSingleCandidate(apiKey, profileText, criteria) {
   }
 
   const prompt = `転職エージェントの一次選定アシスタントです。
-
+${companySection}
 【選定基準】
-${criteriaLines}${fewShotSection}
+${criteriaLines}${posSection}${fewShotSection}
 
 【候補者情報】
 ${profileText}

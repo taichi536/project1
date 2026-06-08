@@ -115,6 +115,27 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
+  // ポジション要件をGASから取得
+  if (msg.type === 'getPositionRequirements') {
+    const { position } = msg;
+    chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {
+      const url    = gasSettings?.dbUrl || gasSettings?.url;
+      const secret = gasSettings?.secret;
+      if (!url || !secret) {
+        sendResponse({ ok: false, requirements: '', companyCriteria: '' });
+        return;
+      }
+      fetch(url, {
+        method: 'POST',
+        body: JSON.stringify({ secret, action: 'getPositionRequirements', position }),
+      })
+        .then(r => r.json())
+        .then(data => sendResponse(data))
+        .catch(() => sendResponse({ ok: false, requirements: '', companyCriteria: '' }));
+    });
+    return true;
+  }
+
   // ポジション一覧を返す（GASスプレッドシートから取得、失敗時はハードコードで代替）
   if (msg.type === 'getPositionList') {
     chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {

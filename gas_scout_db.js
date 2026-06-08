@@ -11,6 +11,8 @@ const GAS_SECRET        = 'snowwe2024';
 const SHEET_DB        = 'スカウト管理DB';
 const SHEET_DASHBOARD = '効果測定';
 const SHEET_FEEDBACK  = 'AI判定フィードバック';
+const SHEET_POSITIONS = 'ポジション';
+const SHEET_CONDITIONS = 'コンサル別条件';
 
 const STATUS_LIST = ['未返信', '返信あり', '面談設定', '書類選考', '一次面接', '最終面接', '内定', '辞退', '見送り'];
 
@@ -53,6 +55,38 @@ function doPost(e) {
       ]);
       return ContentService.createTextOutput(JSON.stringify({ ok: true }))
         .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ── ポジション要件取得 ──
+    if (data.action === 'getPositionRequirements') {
+      const posSheet  = ss.getSheetByName(SHEET_POSITIONS);
+      const condSheet = ss.getSheetByName(SHEET_CONDITIONS);
+      const posName   = data.position || '';
+
+      let requirements  = '';
+      let matchedSheetName = '';
+      if (posSheet) {
+        const rows = posSheet.getDataRange().getValues();
+        const normInput = normPos(posName);
+        for (let i = 1; i < rows.length; i++) {
+          if (!rows[i][0]) continue;
+          if (normPos(String(rows[i][0])) === normInput) {
+            requirements    = String(rows[i][1] || '').substring(0, 2000);
+            matchedSheetName = String(rows[i][0]);
+            break;
+          }
+        }
+      }
+
+      let companyCriteria = '';
+      if (condSheet && matchedSheetName) {
+        const company = detectCompany(matchedSheetName);
+        if (company) companyCriteria = getCompanyCriteria(condSheet, company);
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({
+        ok: true, requirements, companyCriteria
+      })).setMimeType(ContentService.MimeType.JSON);
     }
 
     // ── スカウト管理DB保存 ──
@@ -263,6 +297,41 @@ function postToSlack(text) {
     contentType: 'application/json',
     payload: JSON.stringify({ text, channel: SLACK_CHANNEL }),
   });
+}
+
+// ── ポジション名正規化 ────────────────────────────────────────
+function normPos(name) {
+  return name
+    .replace(/^[A-Za-z]+[）)]\s*/u, '')   // AC）BC）等のプレフィックス除去
+    .replace(/[（]/g, '(').replace(/[）]/g, ')')
+    .replace(/　/g, ' ').replace(/[\s]+/g, ' ')
+    .replace(/[-－ー]/g, '-')
+    .trim().toLowerCase();
+}
+
+// ── ポジション名から会社を判定 ───────────────────────────────
+function detectCompany(posName) {
+  if (/^AC[）)]/.test(posName)) return 'アクセンチュア';
+  if (/^BC/.test(posName))      return 'ベイカレント';
+  return null;
+}
+
+// ── 会社別条件をテキストで返す ───────────────────────────────
+function getCompanyCriteria(condSheet, companyName) {
+  const rows = condSheet.getDataRange().getValues();
+  const headerRow = rows[0];
+  let colIdx = -1;
+  for (let j = 0; j < headerRow.length; j++) {
+    if (headerRow[j] === companyName) { colIdx = j; break; }
+  }
+  if (colIdx === -1) return '';
+  const lines = [];
+  for (let i = 1; i < rows.length; i++) {
+    const label = rows[i][0];
+    const val   = rows[i][colIdx];
+    if (label && val) lines.push(`【${label}】\n${val}`);
+  }
+  return lines.join('\n\n').substring(0, 3000);
 }
 
 // ── setWeeklyTrigger: 週次トリガーを設定（一度だけ手動実行） ─
