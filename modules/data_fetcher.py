@@ -6,17 +6,13 @@ import os
 import time
 from pathlib import Path
 from datetime import datetime, timedelta
-try:
-    import streamlit as st
-    def _st_cache(ttl: int):
-        import sys
-        # streamlit run で起動している場合のみキャッシュ有効化（CLIでは無効）
-        if any(k.startswith("streamlit.web") for k in sys.modules):
-            return st.cache_data(ttl=ttl, show_spinner=False)
-        return lambda f: f
-except ImportError:
-    def _st_cache(ttl: int):  # type: ignore
-        return lambda f: f
+def _st_cache(ttl: int):
+    import sys
+    # streamlit run で起動している場合のみstreamlit本体をインポート＆キャッシュ有効化
+    if any(k.startswith("streamlit.web") for k in sys.modules):
+        import streamlit as st
+        return st.cache_data(ttl=ttl, show_spinner=False)
+    return lambda f: f
 
 
 # ── USD/JPY 為替レートキャッシュ ─────────────────────────────────────────────
