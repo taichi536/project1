@@ -746,9 +746,186 @@ def run_momentum_rebalance(dry_run: bool = False):
         print("  → 変更なし、通知スキップ")
 
 
+def run_pnl_check():
+    """保有ポジションの損益確認"""
+    from modules.data_fetcher import fetch_ohlcv
+    from modules.company_names import get_company_name
+    from modules.universe import get_jquants_universe_with_sector
+
+    holdings = _load_momentum_holdings()
+    entries = _load_momentum_entries()
+
+    if not holdings:
+        print("[損益確認] 保有銘柄なし")
+        return
+
+    print(f"[損益確認] {len(holdings)}銘柄の損益を確認中...")
+
+    jq_stocks = get_jquants_universe_with_sector("TOPIX500") or []
+    name_map = {s["code"]: s["name"] for s in jq_stocks}
+
+    def _label(t):
+        code = t.replace(".T", "")
+        name = name_map.get(code) or get_company_name(t, use_api=False)
+        return f"{code} {name}" if name and name not in (code, t) else code
+
+    results = []
+    for ticker in holdings:
+        entry_price = entries.get(ticker)
+        if not entry_price:
+            print(f"  {ticker}: 買値記録なし（手動で設定してください）")
+            continue
+        try:
+            df = fetch_ohlcv(ticker, period="5d")
+            if df is not None and not df.empty:
+                current = float(df["Close"].iloc[-1])
+                pnl_pct = (current / entry_price - 1) * 100
+                results.append({"ticker": ticker, "label": _label(ticker),
+                                 "entry": entry_price, "current": current, "pnl_pct": pnl_pct})
+        except Exception:
+            pass
+
+    if not results:
+        print("  現在価格の取得に失敗しました")
+        return
+
+    results.sort(key=lambda x: x["pnl_pct"], reverse=True)
+    avg_pnl = sum(r["pnl_pct"] for r in results) / len(results)
+
+    print(f"\n  {'銘柄':<22} {'買値':>10} {'現在値':>10} {'損益':>8}")
+    print(f"  {'─'*54}")
+    for r in results:
+        emoji = "🟢" if r["pnl_pct"] >= 0 else "🔴"
+        sign = "+" if r["pnl_pct"] >= 0 else ""
+        print(f"  {emoji} {r['label']:<22} {r['entry']:>10,.0f} {r['current']:>10,.0f} {sign}{r['pnl_pct']:>6.1f}%")
+    print(f"  {'─'*54}")
+    print(f"  平均損益: {'+' if avg_pnl >= 0 else ''}{avg_pnl:.1f}%  ({len(results)}銘柄)")
+    win = sum(1 for r in results if r["pnl_pct"] >= 0)
+    print(f"  勝率: {win}/{len(results)} ({win/len(results)*100:.0f}%)")
+
+
+_VALUE_CACHE_FILE = Path(__file__).parent / "data" / "value_cache.json"
+
+def run_value_screening(dry_run: bool = False):
+    """低PBR×高ROE バリュースクリーニング（月次推奨）"""
+    import yfinance as yf
+    import time
+    from modules.universe import get_jquants_universe_with_sector
+    from modules.data_fetcher import fetch_ohlcv, normalize_ticker
+    from modules.notifier import send_screening_alert
+
+    PBR_MAX = 1.5      # PBR上限（1.5倍以下）
+    ROE_MIN = 0.05     # ROE下限（5%以上）
+    MIN_TURNOVER = 5e8 # 流動性（日次5億円以上）
+    TOP_N = 20         # 表示銘柄数
+    CACHE_HOURS = 24   # ファンダメンタルキャッシュ有効期間
+
+    jq_stocks = get_jquants_universe_with_sector("TOPIX500")
+    if not jq_stocks:
+        print("[バリュースクリーニング] ユニバース取得失敗")
+        return
+
+    name_map = {s["code"]: s["name"] for s in jq_stocks}
+    sector_map = {s["code"]: s["sector"] for s in jq_stocks}
+    tickers = [normalize_ticker(s["code"]) for s in jq_stocks]
+
+    # キャッシュ読み込み
+    cache: dict = {}
+    _VALUE_CACHE_FILE.parent.mkdir(exist_ok=True)
+    if _VALUE_CACHE_FILE.exists():
+        try:
+            cached = json.loads(_VALUE_CACHE_FILE.read_text())
+            if time.time() - cached.get("_fetched_at", 0) < 3600 * CACHE_HOURS:
+                cache = cached.get("data", {})
+                print(f"[バリュースクリーニング] キャッシュ利用 ({len(cache)}銘柄)")
+        except Exception:
+            pass
+
+    # キャッシュにない銘柄のみ取得
+    missing = [t for t in tickers if t not in cache]
+    if missing:
+        print(f"[バリュースクリーニング] {len(missing)}銘柄のファンダメンタルを取得中...")
+        for i, ticker in enumerate(missing):
+            try:
+                info = yf.Ticker(ticker).info
+                pbr = info.get("priceToBook")
+                roe = info.get("returnOnEquity")
+                price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
+                avg_vol = info.get("averageVolume", 0)
+                cache[ticker] = {
+                    "pbr": pbr, "roe": roe, "price": price,
+                    "avg_vol": avg_vol,
+                    "div_yield": info.get("dividendYield"),
+                    "pe": info.get("trailingPE"),
+                }
+                if i % 50 == 49:
+                    print(f"  {i+1}/{len(missing)} 処理済み...")
+                    time.sleep(1)
+            except Exception:
+                cache[ticker] = {}
+        _VALUE_CACHE_FILE.write_text(json.dumps(
+            {"_fetched_at": time.time(), "data": cache}, ensure_ascii=False))
+
+    # スクリーニング
+    candidates = []
+    for ticker in tickers:
+        d = cache.get(ticker, {})
+        pbr = d.get("pbr")
+        roe = d.get("roe")
+        price = d.get("price") or 0
+        avg_vol = d.get("avg_vol") or 0
+        turnover = avg_vol * price
+
+        if not pbr or not roe or pbr <= 0 or roe <= 0:
+            continue
+        if pbr > PBR_MAX or roe < ROE_MIN or turnover < MIN_TURNOVER:
+            continue
+
+        code = ticker.replace(".T", "")
+        candidates.append({
+            "ticker": ticker,
+            "code": code,
+            "name": name_map.get(code, code),
+            "sector": sector_map.get(code, "不明"),
+            "pbr": pbr,
+            "roe": roe * 100,
+            "score": roe / pbr,  # ROE÷PBR＝割安×収益性の合成スコア
+            "price": price,
+            "div_yield": (d.get("div_yield") or 0) * 100,
+            "pe": d.get("pe"),
+        })
+
+    if not candidates:
+        print("  条件を満たす銘柄がありませんでした（PBR≤1.5 かつ ROE≥5%）")
+        return
+
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    top = candidates[:TOP_N]
+
+    print(f"\n  バリュー銘柄 TOP{TOP_N}（スコア = ROE ÷ PBR）")
+    print(f"  {'銘柄':<24} {'PBR':>5} {'ROE':>7} {'配当':>6} {'スコア':>7} セクター")
+    print(f"  {'─'*65}")
+    for c in top:
+        lbl = f"{c['code']} {c['name']}"[:24]
+        div = f"{c['div_yield']:.1f}%" if c["div_yield"] else "  -  "
+        print(f"  {lbl:<24} {c['pbr']:>5.2f} {c['roe']:>6.1f}% {div:>6} {c['score']:>7.3f}  {c['sector']}")
+
+    print(f"\n  合計 {len(candidates)}銘柄が条件通過（PBR≤{PBR_MAX} かつ ROE≥{ROE_MIN*100:.0f}%）")
+
+    if not dry_run:
+        passed = [
+            f"{c['code']} {c['name']}  PBR{c['pbr']:.2f}/ROE{c['roe']:.0f}%/配当{c['div_yield']:.1f}%"
+            for c in top[:10]
+        ]
+        result = send_screening_alert(passed_tickers=passed)
+        print(f"  → 通知送信: {result}")
+    else:
+        print("  [DRY-RUN] 通知スキップ")
+
+
 def main():
     parser = argparse.ArgumentParser(description="株式アラートランナー")
-    parser.add_argument("--mode", choices=["all", "signal", "stoploss", "screening", "watchlist", "momentum"],
+    parser.add_argument("--mode", choices=["all", "signal", "stoploss", "screening", "watchlist", "momentum", "pnl", "value"],
                         default="all")
     parser.add_argument("--loop", type=int, default=0,
                         help="繰り返し間隔（分）。省略か0で1回のみ実行")
@@ -830,6 +1007,14 @@ def main():
             now_dt = datetime.now()
             if args.mode == "momentum" or now_dt.day <= 3:
                 run_momentum_rebalance(dry_run=args.dry_run)
+
+        # 保有ポジション損益確認
+        if args.mode == "pnl":
+            run_pnl_check()
+
+        # バリュースクリーニング（低PBR×高ROE）
+        if args.mode == "value":
+            run_value_screening(dry_run=args.dry_run)
 
         print(f"\n次回チェック: {args.loop}分後" if args.loop > 0 else "\n完了")
 
