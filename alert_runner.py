@@ -21,10 +21,13 @@ import argparse
 import json
 import time
 import os
+import logging
 from pathlib import Path
 from datetime import datetime, date
 from dotenv import load_dotenv
 load_dotenv()
+
+logging.getLogger("streamlit").setLevel(logging.ERROR)
 from modules.data_fetcher import fetch_ohlcv, fetch_earnings_date
 from modules.technical import compute_all
 from modules.signals import evaluate_signals, overall_signal
