@@ -22,12 +22,16 @@ import json
 import time
 import os
 import logging
+
+# streamlitをCLIモードで使う際のWARNINGを抑制（インポート前に設定する必要あり）
+for _lg in ["streamlit", "streamlit.runtime", "streamlit.runtime.caching",
+            "streamlit.runtime.caching.cache_data_api"]:
+    logging.getLogger(_lg).setLevel(logging.ERROR)
+
 from pathlib import Path
 from datetime import datetime, date
 from dotenv import load_dotenv
 load_dotenv()
-
-logging.getLogger("streamlit").setLevel(logging.ERROR)
 from modules.data_fetcher import fetch_ohlcv, fetch_earnings_date
 from modules.technical import compute_all
 from modules.signals import evaluate_signals, overall_signal
