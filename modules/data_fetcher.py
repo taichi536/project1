@@ -8,8 +8,15 @@ from pathlib import Path
 from datetime import datetime, timedelta
 try:
     import streamlit as st
+    import streamlit.runtime.scriptrunner as _sr
     def _st_cache(ttl: int):
-        return st.cache_data(ttl=ttl, show_spinner=False)
+        # Streamlitランタイム外（CLI実行時）はキャッシュなし
+        try:
+            if _sr.get_script_run_ctx() is not None:
+                return st.cache_data(ttl=ttl, show_spinner=False)
+        except Exception:
+            pass
+        return lambda f: f
 except ImportError:
     def _st_cache(ttl: int):  # type: ignore
         return lambda f: f

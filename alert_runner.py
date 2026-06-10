@@ -23,7 +23,8 @@ import time
 import os
 import logging
 
-# streamlitをCLIモードで使う際のWARNINGを抑制（インポート前に設定する必要あり）
+# streamlit WARNINGをCLIモードで抑制（モジュールインポート前に環境変数を設定）
+os.environ.setdefault("STREAMLIT_LOGGER_LEVEL", "error")
 for _lg in ["streamlit", "streamlit.runtime", "streamlit.runtime.caching",
             "streamlit.runtime.caching.cache_data_api"]:
     logging.getLogger(_lg).setLevel(logging.ERROR)
