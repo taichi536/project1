@@ -449,7 +449,7 @@ def run_momentum_rebalance(dry_run: bool = False):
     VOL_WINDOW = 60         # ボラティリティ計算期間（日）
     MIN_WEIGHT = 0.05       # 最小配分5%
     MAX_WEIGHT = 0.20       # 最大配分20%
-    CORR_THRESHOLD = 0.55   # 相関フィルター閾値（テーマ相関も排除）
+    CORR_THRESHOLD = 0.70   # 相関フィルター閾値（バックテストで0.70が最適）
     MIN_TURNOVER = 5e8      # 流動性フィルター: 5億円/日以上
     REGIME_TICKER = "^N225"   # 日経225（yfinanceで安定して取得可能）
 
@@ -502,6 +502,85 @@ def run_momentum_rebalance(dry_run: bool = False):
         elif dry_run:
             print("  [DRY-RUN] 状態ファイルへの保存・Telegram通知をスキップしました")
         return
+
+    # ── デュアルモメンタム判定 ──────────────────────────────────────
+    # 日本 vs 米国を12ヶ月リターン（直近1ヶ月除外）で比較
+    # 米国優位 → 2558.T（S&P500円建てETF） / 両方負 → 現金
+    US_ETF = "2558.T"
+    DUAL_LOOKBACK = LOOKBACK_LONG
+    DUAL_SKIP = SKIP_RECENT
+    dual_japan_ret: float | None = None
+    dual_us_ret: float | None = None
+
+    try:
+        import yfinance as yf
+        # 日本: ^N225（既に regime_raw を取得済みなので再利用）
+        jp_raw = yf.download("^N225", period="16mo", interval="1d",
+                              auto_adjust=True, progress=False)
+        if not jp_raw.empty and len(jp_raw) >= DUAL_LOOKBACK + DUAL_SKIP:
+            jp_close = jp_raw["Close"].squeeze()
+            dual_japan_ret = (float(jp_close.iloc[-DUAL_SKIP])
+                              / float(jp_close.iloc[-(DUAL_LOOKBACK + DUAL_SKIP)]) - 1) * 100
+
+        # 米国: 2558.T（円建てS&P500 ETF）→ JPYベースで直接比較
+        us_raw = yf.download(US_ETF, period="16mo", interval="1d",
+                              auto_adjust=True, progress=False)
+        if not us_raw.empty and len(us_raw) >= DUAL_LOOKBACK + DUAL_SKIP:
+            us_close = us_raw["Close"].squeeze()
+            dual_us_ret = (float(us_close.iloc[-DUAL_SKIP])
+                           / float(us_close.iloc[-(DUAL_LOOKBACK + DUAL_SKIP)]) - 1) * 100
+
+        jp_str = f"{dual_japan_ret:+.1f}%" if dual_japan_ret is not None else "取得失敗"
+        us_str = f"{dual_us_ret:+.1f}%" if dual_us_ret is not None else "取得失敗"
+        print(f"  [デュアルモメンタム] 日本(N225): {jp_str}  米国(2558.T): {us_str}")
+    except Exception as e:
+        print(f"  [デュアルモメンタム] 取得失敗: {e}")
+
+    if dual_japan_ret is not None and dual_us_ret is not None:
+        if dual_japan_ret <= 0 and dual_us_ret <= 0:
+            # 両市場とも絶対モメンタムが負 → 現金保有
+            print("  [デュアルモメンタム] ⚠️ 両市場とも下落: 現金保有を推奨")
+            prev_holdings = _load_momentum_holdings()
+            sell_all = prev_holdings[:]
+            if not dry_run and sell_all:
+                sell_labels = [t.replace(".T", "") for t in sell_all]
+                _MOMENTUM_HOLDINGS_FILE.write_text(json.dumps([], ensure_ascii=False))
+                _MOMENTUM_ENTRY_FILE.write_text(json.dumps({}, ensure_ascii=False))
+                send_momentum_rebalance_alert(
+                    buy=[], sell=sell_labels, hold=[],
+                    rankings=[("⚠️ 両市場下落: 現金保有推奨", 0.0, 0.0, 0.0)])
+                print("  → 全売り通知送信")
+            elif dry_run:
+                print("  [DRY-RUN] 状態ファイルへの保存・Telegram通知をスキップしました")
+            return
+
+        elif dual_us_ret > dual_japan_ret:
+            # 米国が日本より強い → 2558.T に集中
+            print(f"  [デュアルモメンタム] 米国優位 ({dual_us_ret:+.1f}% > {dual_japan_ret:+.1f}%)"
+                  f" → {US_ETF}（S&P500円建て）を推奨")
+            prev_holdings = _load_momentum_holdings()
+            already_us = US_ETF in prev_holdings
+            sell_tickers = [t for t in prev_holdings if t != US_ETF]
+            sell_labels = [t.replace(".T", "") for t in sell_tickers]
+            if not dry_run:
+                _MOMENTUM_HOLDINGS_FILE.write_text(json.dumps([US_ETF], ensure_ascii=False))
+                entries = _load_momentum_entries()
+                for t in sell_tickers:
+                    entries.pop(t, None)
+                _MOMENTUM_ENTRY_FILE.write_text(json.dumps(entries, ensure_ascii=False))
+                us_label = f"2558 S&P500ETF(円建て)"
+                send_momentum_rebalance_alert(
+                    buy=[] if already_us else [us_label],
+                    sell=sell_labels,
+                    hold=[us_label] if already_us else [],
+                    rankings=[(us_label, dual_us_ret, 0.0, 1.0)])
+                print(f"  → {US_ETF} 切替通知送信")
+            else:
+                print(f"  [DRY-RUN] {US_ETF} 切替 (売り: {sell_labels})")
+            return
+        else:
+            print(f"  [デュアルモメンタム] 日本優位 ({dual_japan_ret:+.1f}% > {dual_us_ret:+.1f}%)"
+                  " → TOPIX500戦略を実行")
 
     # ── 株価・出来高データ取得 ──────────────────────────────────────
     prices = {}
