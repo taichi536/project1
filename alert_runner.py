@@ -1172,7 +1172,7 @@ def run_crypto_multi_rebalance(dry_run: bool = False):
 
 def main():
     parser = argparse.ArgumentParser(description="株式アラートランナー")
-    parser.add_argument("--mode", choices=["all", "signal", "stoploss", "screening", "watchlist", "momentum", "pnl", "value", "multi", "crypto_ma", "crypto_multi"],
+    parser.add_argument("--mode", choices=["all", "signal", "stoploss", "screening", "watchlist", "momentum", "pnl", "value", "multi", "crypto_ma", "crypto_multi", "paper", "paper_summary", "paper_reset"],
                         default="all")
     parser.add_argument("--loop", type=int, default=0,
                         help="繰り返し間隔（分）。省略か0で1回のみ実行")
@@ -1274,6 +1274,26 @@ def main():
         # 暗号資産 月次マルチアセットリバランス
         if args.mode == "crypto_multi":
             run_crypto_multi_rebalance(dry_run=args.dry_run)
+
+        # ペーパートレード
+        if args.mode == "paper":
+            from modules.paper_trader import run_paper_session
+            run_paper_session(dry_run=args.dry_run, verbose=True)
+
+        if args.mode == "paper_summary":
+            from modules.paper_trader import get_summary
+            summary = get_summary()
+            print("\n[ペーパートレード 損益サマリー]")
+            print(f"{'市場':<8} {'総資産':>12} {'損益%':>8} {'確定損益':>12} {'勝率':>8} {'取引数':>6}")
+            print("─" * 60)
+            for market, s in summary.items():
+                print(f"  {market:<6} {s['total']:>12,.0f}{s['unit']} {s['total_pnl_pct']:>+7.1f}%"
+                      f" {s['realized_pnl']:>+12,.0f} {s['win_rate']:>7.0f}% {s['trades']:>5}回")
+
+        if args.mode == "paper_reset":
+            from modules.paper_trader import reset_paper_trades
+            reset_paper_trades()
+            print("ペーパートレードをリセットしました")
 
         print(f"\n次回チェック: {args.loop}分後" if args.loop > 0 else "\n完了")
 
