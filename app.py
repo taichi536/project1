@@ -1782,7 +1782,7 @@ elif page == "🔬 バックテスト":
     st.title("🔬 バックテスト")
     st.markdown("過去データで売買戦略の有効性を検証します")
 
-    bt_tab_single, bt_tab_batch, bt_tab_momentum, bt_tab_multi = st.tabs(["📈 単一銘柄", "📊 一括バックテスト", "🚀 モメンタム戦略", "🌍 マルチアセット"])
+    bt_tab_single, bt_tab_batch, bt_tab_momentum, bt_tab_multi, bt_tab_crypto = st.tabs(["📈 単一銘柄", "📊 一括バックテスト", "🚀 モメンタム戦略", "🌍 マルチアセット", "🪙 暗号資産"])
 
     # ── 共通パラメータ（両タブで使う）──────────────────────────────────────
     with st.expander("⚙️ バックテスト設定（期間・戦略・資金）", expanded=False):
@@ -2264,6 +2264,59 @@ elif page == "🔬 バックテスト":
                 if not result["trades"].empty:
                     st.markdown("#### 📋 売買履歴（直近10件）")
                     st.dataframe(result["trades"].tail(10), hide_index=True, use_container_width=True)
+
+    with bt_tab_crypto:
+        st.markdown("### 🪙 暗号資産 戦略比較バックテスト")
+        st.caption("BTC買い持ち・200日MAフィルター・BTC/ETHローテーション・マルチアセットの4戦略を比較します。")
+
+        cr1, cr2 = st.columns(2)
+        cr_period = cr1.selectbox("バックテスト期間", ["3y", "5y", "10y", "カスタム"], index=1, key="cr_period")
+        cr_cash = cr2.number_input("初期資金（USD）", value=10_000, step=1_000, key="cr_cash")
+
+        cr_start = None
+        cr_end = None
+        if cr_period == "カスタム":
+            cc1, cc2 = st.columns(2)
+            cr_start = cc1.text_input("開始日", value="2019-01-01", key="cr_start")
+            cr_end = cc2.text_input("終了日", value="2024-12-31", key="cr_end")
+
+        if st.button("▶ バックテスト実行", key="run_crypto_bt"):
+            from modules.backtest import run_crypto_backtest
+            with st.spinner("バックテスト実行中..."):
+                result = run_crypto_backtest(
+                    initial_cash=cr_cash,
+                    period=cr_period if cr_period != "カスタム" else "10y",
+                    start_date=cr_start,
+                    end_date=cr_end,
+                )
+
+            if "error" in result:
+                st.error(result["error"])
+            else:
+                st.markdown("#### 📊 戦略比較")
+                m_df = result["metrics"].copy()
+                m_df["総リターン(%)"] = m_df["総リターン(%)"].apply(lambda x: f"{x:+.1f}%")
+                m_df["最大ドローダウン(%)"] = m_df["最大ドローダウン(%)"].apply(lambda x: f"{x:.1f}%")
+                m_df["シャープレシオ"] = m_df["シャープレシオ"].apply(lambda x: f"{x:.2f}")
+                st.dataframe(m_df, hide_index=True, use_container_width=True)
+
+                st.markdown("#### 📈 資産推移（USD）")
+                import plotly.graph_objects as go
+                pf = result["portfolio"].reset_index()
+                fig = go.Figure()
+                colors = ["#aaaaaa", "#00b4d8", "#f77f00", "#06d6a0"]
+                cols = [c for c in pf.columns if c not in ("index", "Date", "Datetime")]
+                for i, col in enumerate(cols):
+                    fig.add_trace(go.Scatter(
+                        x=pf.iloc[:, 0], y=pf[col],
+                        name=col,
+                        line=dict(color=colors[i % len(colors)], width=2)
+                    ))
+                fig.update_layout(height=400, margin=dict(l=0, r=0, t=20, b=0),
+                                  legend=dict(orientation="h", y=-0.2))
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.info("💡 税金（最大55%）を考慮すると、取引回数が少ない戦略ほど実質リターンが高くなります。")
 
 
 # ─── ポートフォリオ最適化 ─────────────────────────────────────────────────────
