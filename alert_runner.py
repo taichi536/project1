@@ -949,9 +949,21 @@ def run_multi_asset_rebalance(dry_run: bool = False):
     TOP_N = 1
     LOOKBACK = 252
     SKIP = 21
+    STOP_LOSS_PCT = 0.15
+
+    ENTRIES_FILE = os.path.join(os.path.dirname(__file__), ".multi_asset_entries.json")
 
     if dry_run:
         print("[マルチアセット] ⚠️ DRY-RUNモード")
+
+    # 入値ファイル読み込み
+    entries = {}
+    if os.path.exists(ENTRIES_FILE):
+        try:
+            with open(ENTRIES_FILE) as f:
+                entries = json.load(f)
+        except Exception:
+            entries = {}
 
     print(f"[マルチアセット] {len(ASSETS)}資産クラスのモメンタムを計算中...")
 
@@ -969,6 +981,23 @@ def run_multi_asset_rebalance(dry_run: bool = False):
         print("  データ取得失敗")
         return
 
+    # ── ストップロスチェック
+    sl_triggered = []
+    for ticker, entry_price in list(entries.items()):
+        if ticker not in prices:
+            continue
+        label, series = prices[ticker]
+        current = float(series.iloc[-1])
+        loss_pct = (current / entry_price - 1) * 100
+        if loss_pct <= -STOP_LOSS_PCT * 100:
+            sl_triggered.append((label, ticker, entry_price, current, loss_pct))
+
+    if sl_triggered:
+        print("\n  🚨 ストップロス発動！")
+        for label, ticker, entry, current, loss in sl_triggered:
+            print(f"  {label}({ticker}): 入値{entry:,.0f} → 現在{current:,.0f} ({loss:+.1f}%)")
+        print("  → 即座に売却し現金保有に切り替えてください")
+
     momentum = {}
     for ticker, (label, series) in prices.items():
         past = float(series.iloc[-(LOOKBACK + SKIP)])
@@ -984,10 +1013,18 @@ def run_multi_asset_rebalance(dry_run: bool = False):
 
     if not selected:
         print("  ⚠️ 全資産クラスのモメンタムが負 → 現金保有を推奨")
+        if not dry_run:
+            with open(ENTRIES_FILE, "w") as f:
+                json.dump({}, f)
     else:
         print(f"\n  ✅ 今月の推奨: {selected[0][1]['label']}（{selected[0][0]}）")
         print(f"     モメンタム: {selected[0][1]['mom']:+.1f}%  現在値: {selected[0][1]['price']:,.0f}円")
+        print(f"     ストップロス目安: {selected[0][1]['price'] * (1 - STOP_LOSS_PCT):,.0f}円（-{STOP_LOSS_PCT*100:.0f}%）")
         print(f"     → NISA成長投資枠で購入")
+        if not dry_run:
+            new_entries = {t: d["price"] for t, d in selected}
+            with open(ENTRIES_FILE, "w") as f:
+                json.dump(new_entries, f, ensure_ascii=False, indent=2)
 
     if dry_run:
         print("  [DRY-RUN] 通知スキップ")

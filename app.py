@@ -2202,10 +2202,11 @@ elif page == "🔬 バックテスト":
 | NEXT FUNDS 先進国債券 | 先進国債 | 2511.T |
 """)
 
-        mc1, mc2, mc3 = st.columns(3)
+        mc1, mc2, mc3, mc4 = st.columns(4)
         m_period = mc1.selectbox("バックテスト期間", ["3y", "5y", "10y", "カスタム"], index=1, key="m_period")
         m_top_n = mc2.selectbox("保有資産数", [1, 2], index=0, key="m_top_n")
         m_cash = mc3.number_input("初期資金（円）", value=1_000_000, step=100_000, key="m_cash")
+        m_sl = mc4.selectbox("ストップロス", ["なし", "-10%", "-15%", "-20%"], index=2, key="m_sl")
 
         m_start_date = None
         m_end_date = None
@@ -2213,6 +2214,8 @@ elif page == "🔬 バックテスト":
             cc1, cc2 = st.columns(2)
             m_start_date = cc1.text_input("開始日（例：2015-01-01）", value="2015-01-01", key="m_start")
             m_end_date = cc2.text_input("終了日（例：2020-12-31）", value="2020-12-31", key="m_end")
+
+        sl_map = {"なし": 0.0, "-10%": 0.10, "-15%": 0.15, "-20%": 0.20}
 
         if st.button("▶ バックテスト実行", key="run_multi_bt"):
             from modules.backtest import run_multi_asset_backtest
@@ -2223,6 +2226,7 @@ elif page == "🔬 バックテスト":
                     period=m_period if m_period != "カスタム" else "10y",
                     start_date=m_start_date,
                     end_date=m_end_date,
+                    stop_loss_pct=sl_map[m_sl],
                 )
 
             if "error" in result:

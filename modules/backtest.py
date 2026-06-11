@@ -598,6 +598,7 @@ def run_multi_asset_backtest(
     period: str = "5y",
     start_date: str = None,
     end_date: str = None,
+    stop_loss_pct: float = 0.0,
 ) -> dict:
     """マルチアセット・モメンタム バックテスト
     日本株・米国株・金・J-REIT・米国債のETFを毎月モメンタムでローテーション。
@@ -639,13 +640,37 @@ def run_multi_asset_backtest(
 
     cash = initial_cash
     holdings: dict[str, float] = {}
+    entry_prices: dict[str, float] = {}
     records = []
     trades_log = []
 
-    for rd in rebal_dates:
+    for i_rd, rd in enumerate(rebal_dates):
         idx = price_df.index.get_loc(rd)
         if idx < lookback_days + skip_recent_days:
             continue
+
+        # ── 日次ストップロスチェック（前回リバランス〜今回リバランスの間）
+        if stop_loss_pct > 0 and holdings and i_rd > 0:
+            prev_rd = rebal_dates[i_rd - 1]
+            prev_idx = price_df.index.get_loc(prev_rd)
+            for day_idx in range(prev_idx + 1, idx):
+                day_price = price_df.iloc[day_idx]
+                day_date = price_df.index[day_idx]
+                for t in list(holdings.keys()):
+                    if t not in day_price.index or t not in entry_prices:
+                        continue
+                    current_p = float(day_price[t])
+                    entry_p = entry_prices[t]
+                    if entry_p > 0 and (current_p / entry_p - 1) <= -stop_loss_pct:
+                        cash += holdings[t] * current_p * (1 - fee_rate)
+                        trades_log.append({
+                            "日付": day_date,
+                            "銘柄": labels.get(t, t),
+                            "売買": "売(SL)",
+                            "価格": current_p,
+                        })
+                        del holdings[t]
+                        del entry_prices[t]
 
         cur = price_df.iloc[idx]
         past = price_df.iloc[idx - lookback_days - skip_recent_days]
@@ -668,6 +693,7 @@ def run_multi_asset_backtest(
                     cash += holdings[t] * price * (1 - fee_rate)
                     trades_log.append({"日付": rd, "銘柄": labels.get(t, t), "売買": "売", "価格": price})
                 del holdings[t]
+                entry_prices.pop(t, None)
 
         if selected:
             per = pv / len(selected)
@@ -677,6 +703,7 @@ def run_multi_asset_backtest(
                     if price > 0:
                         buy_amt = min(per, cash)
                         holdings[t] = buy_amt * (1 - fee_rate) / price
+                        entry_prices[t] = price
                         cash -= buy_amt
                         trades_log.append({"日付": rd, "銘柄": labels.get(t, t), "売買": "買", "価格": price})
 
