@@ -762,3 +762,211 @@ def run_multi_asset_backtest(
             "総リバランス回数": len(records) - 1,
         },
     }
+
+
+def run_crypto_backtest(
+    initial_cash: float = 1_000_000,
+    period: str = "5y",
+    start_date: str = None,
+    end_date: str = None,
+) -> dict:
+    """暗号資産4戦略バックテスト比較
+    
+    戦略:
+    1. BTC買い持ち（ベンチマーク）
+    2. 200日移動平均フィルター
+    3. BTC/ETH モメンタムローテーション（月次）
+    4. マルチアセット（BTC+Gold+SP500、月次モメンタム）
+    """
+    import yfinance as yf
+
+    TICKERS = {
+        "BTC": "BTC-USD",
+        "ETH": "ETH-USD",
+        "Gold": "GLD",
+        "SP500": "SPY",
+    }
+
+    # データ取得
+    prices = {}
+    for label, ticker in TICKERS.items():
+        try:
+            if start_date and end_date:
+                df = yf.download(ticker, start=start_date, end=end_date,
+                                 interval="1d", auto_adjust=True, progress=False)
+            else:
+                df = yf.download(ticker, period=period, interval="1d",
+                                 auto_adjust=True, progress=False)
+            if df is not None and not df.empty:
+                prices[label] = df["Close"].squeeze()
+        except Exception:
+            pass
+
+    if "BTC" not in prices:
+        return {"error": "BTCデータ取得失敗"}
+
+    price_df = pd.DataFrame(prices).ffill().dropna(how="all")
+
+    results = {}
+
+    # ── 戦略1: BTC買い持ち
+    btc = price_df["BTC"].dropna()
+    bh_shares = initial_cash / float(btc.iloc[0])
+    bh_values = btc * bh_shares
+    results["BTC買い持ち"] = bh_values
+
+    # ── 戦略2: 200日移動平均フィルター
+    ma200 = btc.rolling(200).mean()
+    cash2 = initial_cash
+    shares2 = 0.0
+    vals2 = []
+    for i, (date, price) in enumerate(btc.items()):
+        ma = ma200.iloc[i] if i < len(ma200) else float("nan")
+        if pd.isna(ma):
+            vals2.append(cash2)
+            continue
+        if price > ma and shares2 == 0:
+            shares2 = cash2 / float(price) * 0.999
+            cash2 = 0.0
+        elif price <= ma and shares2 > 0:
+            cash2 = shares2 * float(price) * 0.999
+            shares2 = 0.0
+        vals2.append(cash2 + shares2 * float(price))
+    results["200日MAフィルター"] = pd.Series(vals2, index=btc.index)
+
+    # ── 戦略3: BTC/ETH モメンタムローテーション（月次）
+    if "ETH" in price_df.columns:
+        LOOKBACK = 252
+        SKIP = 21
+        cash3 = initial_cash
+        holding3 = None
+        shares3 = 0.0
+        vals3_dict = {}
+
+        rebal_dates = []
+        for d in price_df.resample("MS").first().index:
+            mask = price_df.index >= d
+            if mask.any():
+                rebal_dates.append(price_df.index[mask][0])
+
+        for rd in rebal_dates:
+            idx = price_df.index.get_loc(rd)
+            if idx < LOOKBACK + SKIP:
+                continue
+            cur = price_df.iloc[idx]
+            past = price_df.iloc[idx - LOOKBACK - SKIP]
+            recent = price_df.iloc[idx - SKIP]
+
+            mom = {}
+            for asset in ["BTC", "ETH"]:
+                if asset in price_df.columns and past[asset] > 0 and recent[asset] > 0:
+                    mom[asset] = (recent[asset] / past[asset] - 1)
+
+            if not mom:
+                continue
+            best = max(mom, key=mom.get)
+            best_mom = mom[best]
+            pv = cash3 + (shares3 * float(cur[holding3]) if holding3 and holding3 in cur.index else 0)
+
+            if best_mom > 0:
+                if holding3 != best:
+                    if holding3 and holding3 in cur.index:
+                        cash3 = shares3 * float(cur[holding3]) * 0.999
+                        shares3 = 0.0
+                    shares3 = pv * 0.999 / float(cur[best])
+                    cash3 = 0.0
+                    holding3 = best
+            else:
+                if holding3:
+                    cash3 = shares3 * float(cur[holding3]) * 0.999
+                    shares3 = 0.0
+                    holding3 = None
+            vals3_dict[rd] = pv
+
+        if vals3_dict:
+            s3 = pd.Series(vals3_dict)
+            s3 = s3.reindex(btc.index).ffill().bfill()
+            results["BTC/ETHローテーション"] = s3
+
+    # ── 戦略4: マルチアセット（BTC+Gold+SP500、月次モメンタム）
+    multi_assets = [k for k in ["BTC", "Gold", "SP500"] if k in price_df.columns]
+    if len(multi_assets) >= 2:
+        LOOKBACK = 252
+        SKIP = 21
+        cash4 = initial_cash
+        holdings4 = {}
+        entry4 = {}
+        vals4_dict = {}
+
+        rebal_dates4 = []
+        for d in price_df.resample("MS").first().index:
+            mask = price_df.index >= d
+            if mask.any():
+                rebal_dates4.append(price_df.index[mask][0])
+
+        for rd in rebal_dates4:
+            idx = price_df.index.get_loc(rd)
+            if idx < LOOKBACK + SKIP:
+                continue
+            cur = price_df.iloc[idx]
+            past = price_df.iloc[idx - LOOKBACK - SKIP]
+            recent = price_df.iloc[idx - SKIP]
+
+            mom = {}
+            for asset in multi_assets:
+                if past[asset] > 0 and recent[asset] > 0:
+                    mom[asset] = (recent[asset] / past[asset] - 1)
+
+            ranked = sorted(mom.items(), key=lambda x: x[1], reverse=True)
+            selected = [a for a, m in ranked[:1] if m > 0]
+
+            pv = cash4 + sum(holdings4.get(a, 0) * float(cur[a]) for a in holdings4 if a in cur.index)
+
+            for a in list(holdings4.keys()):
+                if a not in selected:
+                    cash4 += holdings4[a] * float(cur[a]) * 0.999
+                    del holdings4[a]
+
+            if selected:
+                a = selected[0]
+                if a not in holdings4:
+                    holdings4[a] = pv * 0.999 / float(cur[a])
+                    cash4 = 0.0
+
+            vals4_dict[rd] = pv
+
+        if vals4_dict:
+            s4 = pd.Series(vals4_dict)
+            s4 = s4.reindex(btc.index).ffill().bfill()
+            results["マルチアセット(BTC+金+株)"] = s4
+
+    if not results:
+        return {"error": "バックテスト計算失敗"}
+
+    # ── 指標計算
+    metrics = {}
+    for name, series in results.items():
+        series = series.dropna()
+        if len(series) < 2:
+            continue
+        total_ret = (series.iloc[-1] / series.iloc[0] - 1) * 100
+        daily_ret = series.pct_change().dropna()
+        sharpe = (daily_ret.mean() / daily_ret.std() * (252 ** 0.5)) if daily_ret.std() > 0 else 0
+        rolling_max = series.cummax()
+        max_dd = ((series - rolling_max) / rolling_max * 100).min()
+        metrics[name] = {
+            "総リターン(%)": round(total_ret, 1),
+            "最大ドローダウン(%)": round(max_dd, 1),
+            "シャープレシオ": round(sharpe, 2),
+        }
+
+    result_df = pd.DataFrame(metrics).T.reset_index().rename(columns={"index": "戦略"})
+
+    portfolio_df = pd.DataFrame(
+        {k: v / v.iloc[0] * initial_cash for k, v in results.items()}
+    )
+
+    return {
+        "portfolio": portfolio_df,
+        "metrics": result_df,
+    }
