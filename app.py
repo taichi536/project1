@@ -2194,9 +2194,12 @@ elif page == "🔬 バックテスト":
 |---|---|---|
 | TOPIX連動ETF | 日本株 | 1306.T |
 | MAXIS S&P500 | 米国株 | 2558.T |
+| iShares 先進国株式 | 先進国株（日米除く） | 1657.T |
+| iShares 新興国株式 | 新興国株 | 1658.T |
 | 純金上場信託 | 金 | 1540.T |
 | NEXT FUNDS J-REIT | 不動産 | 1343.T |
-| iShares 米国債7-10年 | 債券 | 1482.T |
+| iShares 米国債7-10年 | 米国債 | 1482.T |
+| NEXT FUNDS 先進国債券 | 先進国債 | 2511.T |
 """)
 
         mc1, mc2, mc3 = st.columns(3)
