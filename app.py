@@ -2269,7 +2269,7 @@ elif page == "🔬 バックテスト":
         st.markdown("### 🪙 暗号資産 戦略比較バックテスト")
         st.caption("BTC買い持ち・200日MAフィルター・BTC/ETHローテーション・マルチアセットの4戦略を比較します。")
 
-        cr1, cr2 = st.columns(2)
+        cr1, cr2, cr3 = st.columns(3)
         cr_period = cr1.selectbox("バックテスト期間", ["3y", "5y", "10y", "カスタム"], index=1, key="cr_period")
         cr_cash = cr2.number_input("初期資金（USD）", value=10_000, step=1_000, key="cr_cash")
 
