@@ -1037,9 +1037,142 @@ def run_multi_asset_rebalance(dry_run: bool = False):
         print("  → Telegram通知送信")
 
 
+def run_crypto_ma_check(dry_run: bool = False):
+    """暗号資産 週次MAチェック: BTCが200日MA以上か確認"""
+    import yfinance as yf
+
+    MA_PERIOD = 200
+    print("[暗号資産 MAチェック] BTC 200日移動平均を確認中...")
+
+    try:
+        df = yf.download("BTC-USD", period="300d", interval="1d",
+                         auto_adjust=True, progress=False)
+        if df is None or df.empty:
+            print("  データ取得失敗")
+            return
+        close = df["Close"].squeeze().dropna()
+    except Exception as e:
+        print(f"  データ取得エラー: {e}")
+        return
+
+    if len(close) < MA_PERIOD:
+        print(f"  データ不足（{len(close)}日）")
+        return
+
+    current = float(close.iloc[-1])
+    ma200 = float(close.rolling(MA_PERIOD).mean().iloc[-1])
+    pct = (current / ma200 - 1) * 100
+    sign = "+" if pct >= 0 else ""
+
+    print(f"  BTC現在値: ${current:,.0f}")
+    print(f"  200日MA:   ${ma200:,.0f}")
+    print(f"  乖離率:    {sign}{pct:.1f}%")
+
+    if current > ma200:
+        print(f"\n  ✅ MA上 → 保有継続（強気トレンド）")
+        signal = "hold"
+    else:
+        print(f"\n  🚨 MA下 → キャッシュへ逃げてください！（弱気トレンド）")
+        signal = "exit"
+
+    if not dry_run:
+        try:
+            from modules.notifier import _telegram, _slack
+            import os as _os
+            msg = (
+                f"【暗号資産 MAチェック】\n"
+                f"BTC: ${current:,.0f}\n"
+                f"200日MA: ${ma200:,.0f}\n"
+                f"乖離率: {sign}{pct:.1f}%\n"
+                f"{'✅ 保有継続' if signal == 'hold' else '🚨 キャッシュ退避'}"
+            )
+            token = _os.getenv("TELEGRAM_BOT_TOKEN", "")
+            chat_id = _os.getenv("TELEGRAM_CHAT_ID", "")
+            if token and chat_id:
+                _telegram(token, chat_id, msg)
+            webhook = _os.getenv("SLACK_WEBHOOK_URL", "")
+            if webhook:
+                _slack(webhook, msg)
+            print("  → 通知送信")
+        except Exception:
+            pass
+
+
+def run_crypto_multi_rebalance(dry_run: bool = False):
+    """暗号資産 月次マルチアセットリバランス（BTC+金+米国株）"""
+    import yfinance as yf
+
+    ASSETS = {
+        "BTC":  "BTC-USD",
+        "金":   "GLD",
+        "米国株": "SPY",
+    }
+    TOP_N = 1
+    LOOKBACK = 252
+    SKIP = 21
+    ENTRIES_FILE = os.path.join(os.path.dirname(__file__), ".crypto_entries.json")
+
+    if dry_run:
+        print("[暗号資産マルチ] ⚠️ DRY-RUNモード")
+
+    print(f"[暗号資産マルチ] {len(ASSETS)}資産のモメンタムを計算中...")
+
+    prices = {}
+    for label, ticker in ASSETS.items():
+        try:
+            df = yf.download(ticker, period="16mo", interval="1d",
+                             auto_adjust=True, progress=False)
+            if df is not None and not df.empty and len(df) >= LOOKBACK + SKIP:
+                prices[ticker] = (label, df["Close"].squeeze())
+        except Exception:
+            pass
+
+    if not prices:
+        print("  データ取得失敗")
+        return
+
+    momentum = {}
+    for ticker, (label, series) in prices.items():
+        past = float(series.iloc[-(LOOKBACK + SKIP)])
+        recent = float(series.iloc[-SKIP])
+        current = float(series.iloc[-1])
+        mom = (recent / past - 1) * 100
+        momentum[ticker] = {"label": label, "mom": mom, "price": current}
+        sign = "+" if mom >= 0 else ""
+        print(f"  {label}({ticker}): {sign}{mom:.1f}%  現在値: ${current:,.2f}")
+
+    ranked = sorted(momentum.items(), key=lambda x: x[1]["mom"], reverse=True)
+    selected = [(t, d) for t, d in ranked[:TOP_N] if d["mom"] > 0]
+
+    if not selected:
+        print("  ⚠️ 全資産のモメンタムが負 → 現金保有（ステーブルコイン）を推奨")
+        if not dry_run:
+            with open(ENTRIES_FILE, "w") as f:
+                json.dump({}, f)
+    else:
+        label = selected[0][1]["label"]
+        mom = selected[0][1]["mom"]
+        price = selected[0][1]["price"]
+        print(f"\n  ✅ 今月の推奨: {label}")
+        print(f"     モメンタム: {mom:+.1f}%  現在値: ${price:,.2f}")
+        if label == "BTC":
+            print(f"     → 取引所でBTCを購入")
+        elif label == "金":
+            print(f"     → GLD ETF または 金ETF（1540.T）を購入")
+        else:
+            print(f"     → 米国株ETF（2558.T等）を購入")
+        if not dry_run:
+            new_entries = {t: d["price"] for t, d in selected}
+            with open(ENTRIES_FILE, "w") as f:
+                json.dump(new_entries, f, ensure_ascii=False, indent=2)
+
+    if dry_run:
+        print("  [DRY-RUN] 通知スキップ")
+
+
 def main():
     parser = argparse.ArgumentParser(description="株式アラートランナー")
-    parser.add_argument("--mode", choices=["all", "signal", "stoploss", "screening", "watchlist", "momentum", "pnl", "value", "multi"],
+    parser.add_argument("--mode", choices=["all", "signal", "stoploss", "screening", "watchlist", "momentum", "pnl", "value", "multi", "crypto_ma", "crypto_multi"],
                         default="all")
     parser.add_argument("--loop", type=int, default=0,
                         help="繰り返し間隔（分）。省略か0で1回のみ実行")
@@ -1133,6 +1266,14 @@ def main():
         # マルチアセット・モメンタム（月次）
         if args.mode == "multi":
             run_multi_asset_rebalance(dry_run=args.dry_run)
+
+        # 暗号資産 週次MAチェック
+        if args.mode == "crypto_ma":
+            run_crypto_ma_check(dry_run=args.dry_run)
+
+        # 暗号資産 月次マルチアセットリバランス
+        if args.mode == "crypto_multi":
+            run_crypto_multi_rebalance(dry_run=args.dry_run)
 
         print(f"\n次回チェック: {args.loop}分後" if args.loop > 0 else "\n完了")
 
