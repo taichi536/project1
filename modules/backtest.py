@@ -593,6 +593,8 @@ def run_multi_asset_backtest(
     skip_recent_days: int = 21,
     fee_rate: float = 0.001,
     period: str = "5y",
+    start_date: str = None,
+    end_date: str = None,
 ) -> dict:
     """マルチアセット・モメンタム バックテスト
     日本株・米国株・金・J-REIT・米国債のETFを毎月モメンタムでローテーション。
@@ -607,8 +609,12 @@ def run_multi_asset_backtest(
     prices = {}
     for ticker in tickers:
         try:
-            df = yf.download(ticker, period=period, interval="1d",
-                             auto_adjust=True, progress=False)
+            if start_date and end_date:
+                df = yf.download(ticker, start=start_date, end=end_date,
+                                 interval="1d", auto_adjust=True, progress=False)
+            else:
+                df = yf.download(ticker, period=period, interval="1d",
+                                 auto_adjust=True, progress=False)
             if df is not None and not df.empty:
                 prices[ticker] = df["Close"].squeeze()
         except Exception:

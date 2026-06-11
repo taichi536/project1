@@ -2200,9 +2200,16 @@ elif page == "🔬 バックテスト":
 """)
 
         mc1, mc2, mc3 = st.columns(3)
-        m_period = mc1.selectbox("バックテスト期間", ["3y", "5y", "10y"], index=1, key="m_period")
+        m_period = mc1.selectbox("バックテスト期間", ["3y", "5y", "10y", "カスタム"], index=1, key="m_period")
         m_top_n = mc2.selectbox("保有資産数", [1, 2], index=0, key="m_top_n")
         m_cash = mc3.number_input("初期資金（円）", value=1_000_000, step=100_000, key="m_cash")
+
+        m_start_date = None
+        m_end_date = None
+        if m_period == "カスタム":
+            cc1, cc2 = st.columns(2)
+            m_start_date = cc1.text_input("開始日（例：2015-01-01）", value="2015-01-01", key="m_start")
+            m_end_date = cc2.text_input("終了日（例：2020-12-31）", value="2020-12-31", key="m_end")
 
         if st.button("▶ バックテスト実行", key="run_multi_bt"):
             from modules.backtest import run_multi_asset_backtest
@@ -2210,7 +2217,9 @@ elif page == "🔬 バックテスト":
                 result = run_multi_asset_backtest(
                     initial_cash=m_cash,
                     top_n=m_top_n,
-                    period=m_period,
+                    period=m_period if m_period != "カスタム" else "10y",
+                    start_date=m_start_date,
+                    end_date=m_end_date,
                 )
 
             if "error" in result:
