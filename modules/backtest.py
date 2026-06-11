@@ -575,3 +575,154 @@ def run_momentum_portfolio_backtest(
             "保有銘柄数": top_n,
         },
     }
+
+
+MULTI_ASSET_UNIVERSE = {
+    "日本株":  "1306.T",
+    "米国株":  "2558.T",
+    "金":      "1540.T",
+    "J-REIT":  "1343.T",
+    "米国債":  "1482.T",
+}
+
+
+def run_multi_asset_backtest(
+    initial_cash: float = 1_000_000,
+    top_n: int = 1,
+    lookback_months: int = 12,
+    skip_recent_days: int = 21,
+    fee_rate: float = 0.001,
+    period: str = "5y",
+) -> dict:
+    """マルチアセット・モメンタム バックテスト
+    日本株・米国株・金・J-REIT・米国債のETFを毎月モメンタムでローテーション。
+    全て東証上場・NISA成長投資枠対応。
+    """
+    import yfinance as yf
+
+    assets = MULTI_ASSET_UNIVERSE
+    tickers = list(assets.values())
+    labels = {v: k for k, v in assets.items()}
+
+    prices = {}
+    for ticker in tickers:
+        try:
+            df = yf.download(ticker, period=period, interval="1d",
+                             auto_adjust=True, progress=False)
+            if df is not None and not df.empty:
+                prices[ticker] = df["Close"].squeeze()
+        except Exception:
+            pass
+
+    if len(prices) < 2:
+        return {"error": "データ取得失敗（2銘柄未満）"}
+
+    price_df = pd.DataFrame(prices).ffill().dropna(how="all")
+    available = list(price_df.columns)
+
+    lookback_days = lookback_months * 21
+
+    rebal_dates = []
+    for d in price_df.resample("MS").first().index:
+        mask = price_df.index >= d
+        if mask.any():
+            rebal_dates.append(price_df.index[mask][0])
+
+    cash = initial_cash
+    holdings: dict[str, float] = {}
+    records = []
+    trades_log = []
+
+    for rd in rebal_dates:
+        idx = price_df.index.get_loc(rd)
+        if idx < lookback_days + skip_recent_days:
+            continue
+
+        cur = price_df.iloc[idx]
+        past = price_df.iloc[idx - lookback_days - skip_recent_days]
+        recent = price_df.iloc[idx - skip_recent_days]
+
+        momentum = {}
+        for t in available:
+            if past[t] > 0 and recent[t] > 0:
+                momentum[t] = (recent[t] / past[t] - 1) * 100
+
+        ranked = sorted(momentum.items(), key=lambda x: x[1], reverse=True)
+        selected = [t for t, m in ranked[:top_n] if m > 0]
+
+        pv = cash + sum(holdings.get(t, 0) * float(cur[t]) for t in holdings if t in cur.index)
+
+        for t in list(holdings.keys()):
+            if t not in selected:
+                price = float(cur[t]) if t in cur.index else 0
+                if price > 0:
+                    cash += holdings[t] * price * (1 - fee_rate)
+                    trades_log.append({"日付": rd, "銘柄": labels.get(t, t), "売買": "売", "価格": price})
+                del holdings[t]
+
+        if selected:
+            per = pv / len(selected)
+            for t in selected:
+                if t not in holdings and t in cur.index:
+                    price = float(cur[t])
+                    if price > 0:
+                        buy_amt = min(per, cash)
+                        holdings[t] = buy_amt * (1 - fee_rate) / price
+                        cash -= buy_amt
+                        trades_log.append({"日付": rd, "銘柄": labels.get(t, t), "売買": "買", "価格": price})
+
+        records.append({
+            "日付": rd,
+            "総資産": pv,
+            "保有": "/".join(labels.get(t, t) for t in selected) if selected else "現金",
+        })
+
+    final_price = price_df.iloc[-1]
+    final_value = cash + sum(
+        holdings.get(t, 0) * float(final_price[t])
+        for t in holdings if t in final_price.index
+    )
+    records.append({"日付": price_df.index[-1], "総資産": final_value, "保有": ""})
+
+    pv_df = pd.DataFrame(records).set_index("日付")
+
+    first_valid = price_df.dropna().iloc[0]
+    bh_shares = {t: (initial_cash / len(available)) / float(first_valid[t])
+                 for t in available if float(first_valid[t]) > 0}
+    bh_final = sum(bh_shares[t] * float(final_price[t])
+                   for t in bh_shares if t in final_price.index)
+    bh_return = (bh_final / initial_cash - 1) * 100
+    total_return = (final_value / initial_cash - 1) * 100
+
+    rolling_max = pv_df["総資産"].cummax()
+    max_dd = ((pv_df["総資産"] - rolling_max) / rolling_max * 100).min()
+    monthly_ret = pv_df["総資産"].pct_change().dropna()
+    sharpe = (monthly_ret.mean() / monthly_ret.std() * (12 ** 0.5)) if monthly_ret.std() > 0 else 0
+
+    n = len(price_df)
+    cur_mom = {}
+    for t in available:
+        p = price_df.iloc[max(0, n - lookback_days - skip_recent_days)]
+        r = price_df.iloc[max(0, n - skip_recent_days)]
+        if p[t] > 0 and r[t] > 0:
+            cur_mom[t] = (r[t] / p[t] - 1) * 100
+
+    ranking = pd.DataFrame([
+        {"資産": labels.get(t, t), "モメンタム(%)": round(m, 1),
+         "推奨": "✅ 買い" if i < top_n and m > 0 else ("⚠️ 絶対モメンタム負" if m <= 0 else "")}
+        for i, (t, m) in enumerate(sorted(cur_mom.items(), key=lambda x: x[1], reverse=True))
+    ])
+
+    return {
+        "portfolio": pv_df,
+        "trades": pd.DataFrame(trades_log) if trades_log else pd.DataFrame(),
+        "ranking": ranking,
+        "metrics": {
+            "最終資産": round(final_value, 0),
+            "総リターン(%)": round(total_return, 2),
+            "B&Hリターン(%)": round(bh_return, 2),
+            "最大ドローダウン(%)": round(max_dd, 2),
+            "シャープレシオ": round(sharpe, 2),
+            "総リバランス回数": len(records) - 1,
+        },
+    }

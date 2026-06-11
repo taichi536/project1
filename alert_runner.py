@@ -931,9 +931,75 @@ def run_value_screening(dry_run: bool = False):
         print("  [DRY-RUN] 通知スキップ")
 
 
+def run_multi_asset_rebalance(dry_run: bool = False):
+    """マルチアセット・モメンタム月次リバランス（NISA成長投資枠対応ETF）"""
+    import yfinance as yf
+    import numpy as np
+
+    ASSETS = {
+        "日本株":  "1306.T",
+        "米国株":  "2558.T",
+        "金":      "1540.T",
+        "J-REIT":  "1343.T",
+        "米国債":  "1482.T",
+    }
+    TOP_N = 1
+    LOOKBACK = 252
+    SKIP = 21
+
+    if dry_run:
+        print("[マルチアセット] ⚠️ DRY-RUNモード")
+
+    print(f"[マルチアセット] {len(ASSETS)}資産クラスのモメンタムを計算中...")
+
+    prices = {}
+    for label, ticker in ASSETS.items():
+        try:
+            df = yf.download(ticker, period="16mo", interval="1d",
+                             auto_adjust=True, progress=False)
+            if df is not None and not df.empty and len(df) >= LOOKBACK + SKIP:
+                prices[ticker] = (label, df["Close"].squeeze())
+        except Exception:
+            pass
+
+    if not prices:
+        print("  データ取得失敗")
+        return
+
+    momentum = {}
+    for ticker, (label, series) in prices.items():
+        past = float(series.iloc[-(LOOKBACK + SKIP)])
+        recent = float(series.iloc[-SKIP])
+        current = float(series.iloc[-1])
+        mom = (recent / past - 1) * 100
+        momentum[ticker] = {"label": label, "mom": mom, "price": current}
+        sign = "+" if mom >= 0 else ""
+        print(f"  {label}({ticker}): {sign}{mom:.1f}%  現在値: {current:,.0f}")
+
+    ranked = sorted(momentum.items(), key=lambda x: x[1]["mom"], reverse=True)
+    selected = [(t, d) for t, d in ranked[:TOP_N] if d["mom"] > 0]
+
+    if not selected:
+        print("  ⚠️ 全資産クラスのモメンタムが負 → 現金保有を推奨")
+    else:
+        print(f"\n  ✅ 今月の推奨: {selected[0][1]['label']}（{selected[0][0]}）")
+        print(f"     モメンタム: {selected[0][1]['mom']:+.1f}%  現在値: {selected[0][1]['price']:,.0f}円")
+        print(f"     → NISA成長投資枠で購入")
+
+    if dry_run:
+        print("  [DRY-RUN] 通知スキップ")
+    else:
+        from modules.notifier import send_momentum_rebalance_alert
+        rankings = [(d["label"], d["mom"], d["price"], 1.0 if i == 0 else 0.0)
+                    for i, (t, d) in enumerate(ranked)]
+        buy_labels = [d["label"] for t, d in selected]
+        send_momentum_rebalance_alert(buy=buy_labels, sell=[], hold=[], rankings=rankings)
+        print("  → Telegram通知送信")
+
+
 def main():
     parser = argparse.ArgumentParser(description="株式アラートランナー")
-    parser.add_argument("--mode", choices=["all", "signal", "stoploss", "screening", "watchlist", "momentum", "pnl", "value"],
+    parser.add_argument("--mode", choices=["all", "signal", "stoploss", "screening", "watchlist", "momentum", "pnl", "value", "multi"],
                         default="all")
     parser.add_argument("--loop", type=int, default=0,
                         help="繰り返し間隔（分）。省略か0で1回のみ実行")
@@ -1023,6 +1089,10 @@ def main():
         # バリュースクリーニング（低PBR×高ROE）
         if args.mode == "value":
             run_value_screening(dry_run=args.dry_run)
+
+        # マルチアセット・モメンタム（月次）
+        if args.mode == "multi":
+            run_multi_asset_rebalance(dry_run=args.dry_run)
 
         print(f"\n次回チェック: {args.loop}分後" if args.loop > 0 else "\n完了")
 

@@ -1782,7 +1782,7 @@ elif page == "🔬 バックテスト":
     st.title("🔬 バックテスト")
     st.markdown("過去データで売買戦略の有効性を検証します")
 
-    bt_tab_single, bt_tab_batch, bt_tab_momentum = st.tabs(["📈 単一銘柄", "📊 一括バックテスト", "🚀 モメンタム戦略"])
+    bt_tab_single, bt_tab_batch, bt_tab_momentum, bt_tab_multi = st.tabs(["📈 単一銘柄", "📊 一括バックテスト", "🚀 モメンタム戦略", "🌍 マルチアセット"])
 
     # ── 共通パラメータ（両タブで使う）──────────────────────────────────────
     with st.expander("⚙️ バックテスト設定（期間・戦略・資金）", expanded=False):
@@ -2286,6 +2286,72 @@ elif page == "📐 ポートフォリオ":
                             st.caption("※ ハーフケリー（推奨比率の半分）が実用的とされています")
                         else:
                             st.info("📝 投資日記に取引履歴を記録するとケリー基準が自動計算されます")
+
+    with bt_tab_multi:
+        st.markdown("### 🌍 マルチアセット・モメンタム バックテスト")
+        st.caption("日本株・米国株・金・J-REIT・米国債のETFを毎月モメンタムでローテーション。全てNISA成長投資枠対応。")
+
+        with st.expander("対象ETF", expanded=False):
+            st.markdown("""
+| ETF | 資産クラス | コード |
+|---|---|---|
+| TOPIX連動ETF | 日本株 | 1306.T |
+| MAXIS S&P500 | 米国株 | 2558.T |
+| 純金上場信託 | 金 | 1540.T |
+| NEXT FUNDS J-REIT | 不動産 | 1343.T |
+| iShares 米国債7-10年 | 債券 | 1482.T |
+""")
+
+        mc1, mc2, mc3 = st.columns(3)
+        m_period = mc1.selectbox("バックテスト期間", ["3y", "5y", "10y"], index=1, key="m_period")
+        m_top_n = mc2.selectbox("保有資産数", [1, 2], index=0, key="m_top_n")
+        m_cash = mc3.number_input("初期資金（円）", value=1_000_000, step=100_000, key="m_cash")
+
+        if st.button("▶ バックテスト実行", key="run_multi_bt"):
+            from modules.backtest import run_multi_asset_backtest
+            with st.spinner("バックテスト実行中..."):
+                result = run_multi_asset_backtest(
+                    initial_cash=m_cash,
+                    top_n=m_top_n,
+                    period=m_period,
+                )
+
+            if "error" in result:
+                st.error(result["error"])
+            else:
+                m = result["metrics"]
+                beat = m["総リターン(%)"] > m["B&Hリターン(%)"]
+
+                st.markdown("#### 📊 結果")
+                r1, r2, r3, r4 = st.columns(4)
+                r1.metric("総リターン", f"{m['総リターン(%)']:+.1f}%",
+                          delta=f"B&H比 {m['総リターン(%)'] - m['B&Hリターン(%)']:+.1f}%")
+                r2.metric("B&H（等分保有）", f"{m['B&Hリターン(%)']:+.1f}%")
+                r3.metric("最大ドローダウン", f"{m['最大ドローダウン(%)']:.1f}%")
+                r4.metric("シャープレシオ", f"{m['シャープレシオ']:.2f}")
+
+                if beat:
+                    st.success(f"✅ B&Hを {m['総リターン(%)'] - m['B&Hリターン(%)']:+.1f}% 上回りました")
+                else:
+                    st.warning(f"⚠️ B&Hに {m['総リターン(%)'] - m['B&Hリターン(%)']:+.1f}% 負けました")
+
+                st.markdown("#### 📈 資産推移")
+                pf = result["portfolio"].reset_index()
+                pf.columns = ["日付", "総資産", "保有"]
+                import plotly.graph_objects as go
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=pf["日付"], y=pf["総資産"],
+                                         name="マルチアセット戦略", line=dict(color="#00b4d8", width=2)))
+                bh_val = m_cash * (1 + m["B&Hリターン(%)"] / 100)
+                fig.update_layout(height=350, margin=dict(l=0, r=0, t=20, b=0))
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.markdown("#### 🏆 現在のモメンタムランキング")
+                st.dataframe(result["ranking"], hide_index=True, use_container_width=True)
+
+                if not result["trades"].empty:
+                    st.markdown("#### 📋 売買履歴（直近10件）")
+                    st.dataframe(result["trades"].tail(10), hide_index=True, use_container_width=True)
 
 
 # ─── 投資日記 ─────────────────────────────────────────────────────────────────
