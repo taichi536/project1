@@ -121,18 +121,19 @@ function doPost(e) {
       .build();
     statusCell.setDataValidation(statusRule);
 
-    // ポジション名列（F列）にドロップダウンを設定
+    // ポジション名列（F列・P列・Z列・AJ列）にドロップダウンを設定
     const posSheet2 = ss.getSheetByName(SHEET_POSITIONS);
     if (posSheet2) {
       const posNames = posSheet2.getDataRange().getValues()
         .slice(1).map(r => String(r[0] || '')).filter(Boolean);
       if (posNames.length > 0) {
-        const posCell = dbSheet.getRange(lastRow, 6);
         const posRule = SpreadsheetApp.newDataValidation()
           .requireValueInList(posNames, true)
-          .setAllowInvalid(true) // 一覧外の値も許可（手動入力対応）
+          .setAllowInvalid(true)
           .build();
-        posCell.setDataValidation(posRule);
+        [6, 16, 26, 36].forEach(col => {
+          dbSheet.getRange(lastRow, col).setDataValidation(posRule);
+        });
       }
     }
 
