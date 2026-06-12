@@ -10,6 +10,9 @@ const GAS_SECRET        = 'snowwe2024';
 
 const SHEET_DB        = 'スカウト管理DB';
 const SHEET_DASHBOARD = '効果測定';
+const SHEET_FEEDBACK  = 'AI判定フィードバック';
+const SHEET_POSITIONS = 'ポジション';
+const SHEET_CONDITIONS = 'コンサル別条件';
 
 const STATUS_LIST = ['未返信', '返信あり', '面談設定', '書類選考', '一次面接', '最終面接', '内定', '辞退', '見送り'];
 
@@ -27,7 +30,66 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
-    const ss    = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // ── フィードバック保存 ──
+    if (data.action === 'saveFeedback') {
+      let fbSheet = ss.getSheetByName(SHEET_FEEDBACK);
+      if (!fbSheet) {
+        fbSheet = ss.insertSheet(SHEET_FEEDBACK);
+        const headers = ['日時', '担当者', '媒体', 'AI判定', '訂正後', '候補者概要'];
+        fbSheet.getRange(1, 1, 1, headers.length).setValues([headers])
+          .setBackground('#4338CA').setFontColor('#ffffff').setFontWeight('bold');
+        fbSheet.setFrozenRows(1);
+        fbSheet.setColumnWidth(1, 150);
+        fbSheet.setColumnWidth(6, 400);
+      }
+      const ts = data.ts ? new Date(data.ts) : new Date();
+      fbSheet.appendRow([
+        ts,
+        data.recruiter     || '',
+        MEDIA_LABEL[data.platform] || data.platform || '',
+        data.aiVerdict     || '',
+        data.correction    || '',
+        data.profileSummary || '',
+      ]);
+      return ContentService.createTextOutput(JSON.stringify({ ok: true }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ── ポジション要件取得 ──
+    if (data.action === 'getPositionRequirements') {
+      const posSheet  = ss.getSheetByName(SHEET_POSITIONS);
+      const condSheet = ss.getSheetByName(SHEET_CONDITIONS);
+      const posName   = data.position || '';
+
+      let requirements  = '';
+      let matchedSheetName = '';
+      if (posSheet) {
+        const rows = posSheet.getDataRange().getValues();
+        const normInput = normPos(posName);
+        for (let i = 1; i < rows.length; i++) {
+          if (!rows[i][0]) continue;
+          if (normPos(String(rows[i][0])) === normInput) {
+            requirements    = String(rows[i][1] || '').substring(0, 2000);
+            matchedSheetName = String(rows[i][0]);
+            break;
+          }
+        }
+      }
+
+      let companyCriteria = '';
+      if (condSheet && matchedSheetName) {
+        const company = detectCompany(matchedSheetName);
+        if (company) companyCriteria = getCompanyCriteria(condSheet, company);
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({
+        ok: true, requirements, companyCriteria
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ── スカウト管理DB保存 ──
     const sheet = ss.getSheetByName(SHEET_DB);
     if (!sheet) setupSheets();
 
@@ -49,14 +111,30 @@ function doPost(e) {
       '',                    // K: メモ
     ]);
 
-    // ステータス列にドロップダウンを設定
     const lastRow = dbSheet.getLastRow();
-    const statusCell = dbSheet.getRange(lastRow, 8); // H列
-    const rule = SpreadsheetApp.newDataValidation()
+
+    // ステータス列（H列）にドロップダウンを設定
+    const statusCell = dbSheet.getRange(lastRow, 8);
+    const statusRule = SpreadsheetApp.newDataValidation()
       .requireValueInList(STATUS_LIST, true)
       .setAllowInvalid(false)
       .build();
-    statusCell.setDataValidation(rule);
+    statusCell.setDataValidation(statusRule);
+
+    // ポジション名列（F列）にドロップダウンを設定
+    const posSheet2 = ss.getSheetByName(SHEET_POSITIONS);
+    if (posSheet2) {
+      const posNames = posSheet2.getDataRange().getValues()
+        .slice(1).map(r => String(r[0] || '')).filter(Boolean);
+      if (posNames.length > 0) {
+        const posCell = dbSheet.getRange(lastRow, 6);
+        const posRule = SpreadsheetApp.newDataValidation()
+          .requireValueInList(posNames, true)
+          .setAllowInvalid(true) // 一覧外の値も許可（手動入力対応）
+          .build();
+        posCell.setDataValidation(posRule);
+      }
+    }
 
     return ContentService.createTextOutput(JSON.stringify({ ok: true }))
       .setMimeType(ContentService.MimeType.JSON);
@@ -235,6 +313,41 @@ function postToSlack(text) {
     contentType: 'application/json',
     payload: JSON.stringify({ text, channel: SLACK_CHANNEL }),
   });
+}
+
+// ── ポジション名正規化 ────────────────────────────────────────
+function normPos(name) {
+  return name
+    .replace(/^[A-Za-z]+[）)]\s*/u, '')   // AC）BC）等のプレフィックス除去
+    .replace(/[（]/g, '(').replace(/[）]/g, ')')
+    .replace(/　/g, ' ').replace(/\s+/g, ' ')
+    .replace(/\s*[-－–—]\s*/g, '-')        // 前後スペース込みで各種ハイフン・ダッシュを統一（ーは除外）
+    .trim().toLowerCase();
+}
+
+// ── ポジション名から会社を判定 ───────────────────────────────
+function detectCompany(posName) {
+  if (/^AC[）)]/.test(posName)) return 'アクセンチュア';
+  if (/^BC/.test(posName))      return 'ベイカレント';
+  return null;
+}
+
+// ── 会社別条件をテキストで返す ───────────────────────────────
+function getCompanyCriteria(condSheet, companyName) {
+  const rows = condSheet.getDataRange().getValues();
+  const headerRow = rows[0];
+  let colIdx = -1;
+  for (let j = 0; j < headerRow.length; j++) {
+    if (headerRow[j] === companyName) { colIdx = j; break; }
+  }
+  if (colIdx === -1) return '';
+  const lines = [];
+  for (let i = 1; i < rows.length; i++) {
+    const label = rows[i][0];
+    const val   = rows[i][colIdx];
+    if (label && val) lines.push(`【${label}】\n${val}`);
+  }
+  return lines.join('\n\n').substring(0, 3000);
 }
 
 // ── setWeeklyTrigger: 週次トリガーを設定（一度だけ手動実行） ─
