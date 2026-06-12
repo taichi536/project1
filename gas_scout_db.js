@@ -143,8 +143,8 @@ function writeToDailySheet(ss, data, ts, media, ageVal, industry) {
     return;
   }
 
-  // 今日の日付シートを取得（なければ原本からコピー）
-  const sheetName = getTodaySheetName();
+  // 送信時刻に対応する日付シートを取得（なければ原本からコピー）
+  const sheetName = getSheetNameForTs(data.ts);
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
     const template = ss.getSheetByName(SHEET_TEMPLATE);
@@ -210,16 +210,17 @@ function findNextRow(sheet, startCol) {
   return lastRow + 1;
 }
 
-// ── 今日の日付シート名（日本時間） ───────────────────────────
-function getTodaySheetName() {
-  const now      = new Date();
-  // GASのタイムゾーン設定に依存するため、スクリプトのタイムゾーンをJSTに設定すること
-  const year     = now.getFullYear();
-  const month    = now.getMonth() + 1;
-  const day      = now.getDate();
+// ── 日付シート名を取得（送信時刻をJSTに変換して決定） ────────
+// data.ts（Unixミリ秒）を使うのでGASのタイムゾーン設定に依存しない
+function getSheetNameForTs(tsMs) {
+  const date     = new Date(tsMs || Date.now());
   const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
-  const weekday  = weekdays[now.getDay()];
-  return year + '年' + month + '月' + day + '日(' + weekday + ')';
+  // Utilities.formatDate で明示的にAsia/Tokyoを指定
+  const year   = parseInt(Utilities.formatDate(date, 'Asia/Tokyo', 'yyyy'));
+  const month  = parseInt(Utilities.formatDate(date, 'Asia/Tokyo', 'M'));
+  const day    = parseInt(Utilities.formatDate(date, 'Asia/Tokyo', 'd'));
+  const isoDay = parseInt(Utilities.formatDate(date, 'Asia/Tokyo', 'u')); // 1=月〜7=日
+  return year + '年' + month + '月' + day + '日(' + weekdays[isoDay % 7] + ')';
 }
 
 // ── 業界マスタから業界を取得 ─────────────────────────────────
