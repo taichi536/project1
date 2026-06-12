@@ -7,19 +7,23 @@ const SLACK_WEBHOOK_URL = 'YOUR_SLACK_WEBHOOK_URL'; // ← Slack Incoming Webhoo
 const SLACK_CHANNEL     = '#scout-report';
 const GAS_SECRET        = 'snowwe2024';
 
+const SHEET_DB         = 'スカウト管理DB';
+const SHEET_DASHBOARD  = '効果測定';
 const SHEET_FEEDBACK   = 'AI判定フィードバック';
 const SHEET_POSITIONS  = 'ポジション';
 const SHEET_CONDITIONS = 'コンサル別条件';
 const SHEET_TEMPLATE   = '原本';
 const SHEET_INDUSTRY   = '🏭 業界マスタ';
 
+const STATUS_LIST = ['未返信', '返信あり', '面談設定', '書類選考', '一次面接', '最終面接', '内定', '辞退', '見送り'];
+
 const MEDIA_LABEL = {
   rds: 'RDS', bizreach: 'ビズリーチ', dodax: 'doda X',
   ambi: 'AMBI', green: 'Green', mynavi: 'マイナビ'
 };
 
-// メンバーと年齢列（C=3, M=13, W=23, AG=33）の対応
-// 各セクション: 年齢・会社名・大学・ポジション名・媒体・業界・送信日時（7列）
+// メンバーと年齢列の対応（各セクション7列: 年齢・会社名・大学・ポジション名・媒体・業界・送信日時）
+// ★ メンバーが増えた場合はここに追加する
 const MEMBER_MAP = {
   'たけと':      3,   // C=年齢, D=会社名, E=大学, F=ポジション名, G=媒体, H=業界, I=送信日時
   'ゆうき':     13,   // M=年齢, N=会社名, O=大学, P=ポジション名, Q=媒体, R=業界, S=送信日時
@@ -32,8 +36,7 @@ function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
     if (data.secret !== GAS_SECRET) {
-      return ContentService.createTextOutput(JSON.stringify({ ok: false, error: 'unauthorized' }))
-        .setMimeType(ContentService.MimeType.JSON);
+      return json({ ok: false, error: 'unauthorized' });
     }
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -43,16 +46,15 @@ function doPost(e) {
       let fbSheet = ss.getSheetByName(SHEET_FEEDBACK);
       if (!fbSheet) {
         fbSheet = ss.insertSheet(SHEET_FEEDBACK);
-        const headers = ['日時', '担当者', '媒体', 'AI判定', '訂正後', '候補者概要'];
-        fbSheet.getRange(1, 1, 1, headers.length).setValues([headers])
+        fbSheet.getRange(1, 1, 1, 6).setValues([['日時', '担当者', '媒体', 'AI判定', '訂正後', '候補者概要']])
           .setBackground('#4338CA').setFontColor('#ffffff').setFontWeight('bold');
         fbSheet.setFrozenRows(1);
       }
       const ts = data.ts ? new Date(data.ts) : new Date();
-      fbSheet.appendRow([ts, data.recruiter || '', MEDIA_LABEL[data.platform] || data.platform || '',
+      fbSheet.appendRow([ts, data.recruiter || '',
+        MEDIA_LABEL[data.platform] || data.platform || '',
         data.aiVerdict || '', data.correction || '', data.profileSummary || '']);
-      return ContentService.createTextOutput(JSON.stringify({ ok: true }))
-        .setMimeType(ContentService.MimeType.JSON);
+      return json({ ok: true });
     }
 
     // ── ポジション要件取得 ──
@@ -60,61 +62,84 @@ function doPost(e) {
       const posSheet  = ss.getSheetByName(SHEET_POSITIONS);
       const condSheet = ss.getSheetByName(SHEET_CONDITIONS);
       const posName   = data.position || '';
-      let requirements = '';
-      let matchedSheetName = '';
+      let requirements = '', matchedName = '';
       if (posSheet) {
         const rows = posSheet.getDataRange().getValues();
         const normInput = normPos(posName);
         for (let i = 1; i < rows.length; i++) {
           if (!rows[i][0]) continue;
           if (normPos(String(rows[i][0])) === normInput) {
-            requirements     = String(rows[i][1] || '').substring(0, 2000);
-            matchedSheetName = String(rows[i][0]);
+            requirements = String(rows[i][1] || '').substring(0, 2000);
+            matchedName  = String(rows[i][0]);
             break;
           }
         }
       }
       let companyCriteria = '';
-      if (condSheet && matchedSheetName) {
-        const company = detectCompany(matchedSheetName);
+      if (condSheet && matchedName) {
+        const company = detectCompany(matchedName);
         if (company) companyCriteria = getCompanyCriteria(condSheet, company);
       }
-      return ContentService.createTextOutput(JSON.stringify({ ok: true, requirements, companyCriteria }))
-        .setMimeType(ContentService.MimeType.JSON);
+      return json({ ok: true, requirements, companyCriteria });
     }
 
     // ── ポジション一覧取得 ──
     if (data.action === 'getPositions') {
       const posSheet = ss.getSheetByName(SHEET_POSITIONS);
-      if (!posSheet) return ContentService.createTextOutput(JSON.stringify({ ok: false }))
-        .setMimeType(ContentService.MimeType.JSON);
-      const rows = posSheet.getDataRange().getValues().slice(1);
-      const positions = rows.filter(r => r[0]).map(r => ({
-        name: String(r[0]),
-        description: String(r[1] || '').substring(0, 500)
-      }));
-      return ContentService.createTextOutput(JSON.stringify({ ok: true, positions }))
-        .setMimeType(ContentService.MimeType.JSON);
+      if (!posSheet) return json({ ok: false });
+      const positions = posSheet.getDataRange().getValues().slice(1)
+        .filter(r => r[0])
+        .map(r => ({ name: String(r[0]), description: String(r[1] || '').substring(0, 500) }));
+      return json({ ok: true, positions });
     }
 
-    // ── スカウト記録（日付別シートに書き込み） ──
-    writeToDailySheet(ss, data);
-
-    return ContentService.createTextOutput(JSON.stringify({ ok: true }))
-      .setMimeType(ContentService.MimeType.JSON);
+    // ── スカウト記録 ──
+    recordScout(ss, data);
+    return json({ ok: true });
 
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.message }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return json({ ok: false, error: err.message });
   }
 }
 
-// ── 日付別シートに書き込み ───────────────────────────────────
-function writeToDailySheet(ss, data) {
+// ── スカウト記録：日付別シート ＋ スカウト管理DB の両方に書く ──
+function recordScout(ss, data) {
+  const ts      = data.ts ? new Date(data.ts) : new Date();
+  const media   = MEDIA_LABEL[data.media] || data.media || '';
+  const ageVal  = parseInt(data.age) || '';
+  const industry = lookupIndustry(ss, data.company || '');
+
+  // ── 1. 日付別シートに書く ──
+  writeToDailySheet(ss, data, ts, media, ageVal, industry);
+
+  // ── 2. スカウト管理DBにも書く（集計・Slackレポート用） ──
+  let dbSheet = ss.getSheetByName(SHEET_DB);
+  if (!dbSheet) {
+    dbSheet = ss.insertSheet(SHEET_DB);
+    const headers = ['送信日時', '担当者', '年齢', '会社名', '大学', 'ポジション名', '媒体', 'ステータス', '返信日', '面談日', 'メモ'];
+    dbSheet.getRange(1, 1, 1, headers.length).setValues([headers])
+      .setBackground('#4338CA').setFontColor('#ffffff').setFontWeight('bold');
+    dbSheet.setFrozenRows(1);
+  }
+  dbSheet.appendRow([ts, data.recruiter || '', ageVal, data.company || '',
+    data.univ || '', data.position || '', media, '未返信', '', '', '']);
+  const lastRow = dbSheet.getLastRow();
+
+  // ステータス列にドロップダウン設定
+  const statusRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(STATUS_LIST, true).setAllowInvalid(false).build();
+  dbSheet.getRange(lastRow, 8).setDataValidation(statusRule);
+
+  // ポジション名列にドロップダウン設定
+  applyPositionDropdown(ss, dbSheet, lastRow, 6);
+}
+
+// ── 日付別シートへの書き込み ─────────────────────────────────
+function writeToDailySheet(ss, data, ts, media, ageVal, industry) {
   const recruiter = (data.recruiter || '').trim();
   const startCol  = findMemberCol(recruiter);
   if (!startCol) {
-    Logger.log('メンバーが見つかりません: ' + recruiter + ' / 登録済み: ' + Object.keys(MEMBER_MAP).join(', '));
+    Logger.log('メンバー未登録: "' + recruiter + '" / 登録済み: ' + Object.keys(MEMBER_MAP).join(', '));
     return;
   }
 
@@ -123,69 +148,59 @@ function writeToDailySheet(ss, data) {
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
     const template = ss.getSheetByName(SHEET_TEMPLATE);
-    if (template) {
-      sheet = template.copyTo(ss);
-      sheet.setName(sheetName);
-      // 先頭に移動
-      ss.setActiveSheet(sheet);
-      ss.moveActiveSheet(1);
-    } else {
+    if (!template) {
       Logger.log('原本シートが見つかりません');
       return;
     }
+    sheet = template.copyTo(ss);
+    sheet.setName(sheetName);
+    ss.moveActiveSheet(1);
   }
 
   // 次の空行を探す（3行目から）
   const nextRow = findNextRow(sheet, startCol);
 
-  // 業界を業界マスタから取得
-  const industry = lookupIndustry(ss, data.company || '');
-
-  // データを書き込む
-  const ts     = data.ts ? new Date(data.ts) : new Date();
-  const media  = MEDIA_LABEL[data.media] || data.media || '';
-  const ageVal = parseInt(data.age) || '';
-
+  // データを書き込む（年齢・会社名・大学・ポジション名・媒体・業界・送信日時）
   sheet.getRange(nextRow, startCol, 1, 7).setValues([[
-    ageVal,              // 年齢
-    data.company  || '', // 会社名
-    data.univ     || '', // 大学
-    data.position || '', // ポジション名
-    media,               // 媒体
-    industry,            // 業界
-    ts,                  // 送信日時
+    ageVal, data.company || '', data.univ || '',
+    data.position || '', media, industry, ts,
   ]]);
 
-  // ポジション名列にドロップダウンを設定
-  const posSheet = ss.getSheetByName(SHEET_POSITIONS);
-  if (posSheet) {
+  // ポジション名列（startCol+3）にドロップダウン設定
+  applyPositionDropdown(ss, sheet, nextRow, startCol + 3);
+
+  Logger.log('日付シート記録: ' + sheetName + ' / ' + recruiter + ' / 行' + nextRow + ' / ' + (data.position || ''));
+}
+
+// ── ポジション名ドロップダウンを設定 ─────────────────────────
+function applyPositionDropdown(ss, sheet, row, col) {
+  try {
+    const posSheet = ss.getSheetByName(SHEET_POSITIONS);
+    if (!posSheet) return;
     const posNames = posSheet.getDataRange().getValues()
       .slice(1).map(r => String(r[0] || '')).filter(Boolean);
-    if (posNames.length > 0) {
-      const posRule = SpreadsheetApp.newDataValidation()
-        .requireValueInList(posNames, true)
-        .setAllowInvalid(true)
-        .build();
-      sheet.getRange(nextRow, startCol + 3).setDataValidation(posRule);
-    }
+    if (posNames.length === 0) return;
+    const rule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(posNames, true)
+      .setAllowInvalid(true)
+      .build();
+    sheet.getRange(row, col).setDataValidation(rule);
+  } catch (err) {
+    Logger.log('ドロップダウン設定エラー: ' + err.message);
   }
-
-  Logger.log('記録完了: ' + sheetName + ' / ' + recruiter + ' / 行' + nextRow + ' / ' + (data.position || ''));
 }
 
 // ── メンバー名から年齢列を取得（部分一致対応） ───────────────
 function findMemberCol(recruiter) {
   if (!recruiter) return null;
-  // 完全一致
-  if (MEMBER_MAP[recruiter]) return MEMBER_MAP[recruiter];
-  // 部分一致（登録名に入力名が含まれるか、または逆）
+  if (MEMBER_MAP[recruiter] !== undefined) return MEMBER_MAP[recruiter];
   for (const [name, col] of Object.entries(MEMBER_MAP)) {
     if (name.includes(recruiter) || recruiter.includes(name)) return col;
   }
   return null;
 }
 
-// ── 次の空行を取得（3行目から下方向へ） ────────────────────
+// ── 次の空行を取得（3行目から） ──────────────────────────────
 function findNextRow(sheet, startCol) {
   const lastRow = Math.max(sheet.getLastRow(), 2);
   for (let r = 3; r <= lastRow + 1; r++) {
@@ -195,9 +210,10 @@ function findNextRow(sheet, startCol) {
   return lastRow + 1;
 }
 
-// ── 今日の日付シート名を生成 ─────────────────────────────────
+// ── 今日の日付シート名（日本時間） ───────────────────────────
 function getTodaySheetName() {
   const now      = new Date();
+  // GASのタイムゾーン設定に依存するため、スクリプトのタイムゾーンをJSTに設定すること
   const year     = now.getFullYear();
   const month    = now.getMonth() + 1;
   const day      = now.getDate();
@@ -209,75 +225,148 @@ function getTodaySheetName() {
 // ── 業界マスタから業界を取得 ─────────────────────────────────
 function lookupIndustry(ss, companyName) {
   if (!companyName) return '';
-  const indSheet = ss.getSheetByName(SHEET_INDUSTRY);
-  if (!indSheet) return '';
-  const rows = indSheet.getDataRange().getValues().slice(1);
-  const norm = s => s.replace(/[　\s]/g, '').toLowerCase();
-  const normCompany = norm(companyName);
-  for (const row of rows) {
-    const name = String(row[0] || '');
-    if (!name) continue;
-    if (norm(name) === normCompany || normCompany.includes(norm(name)) || norm(name).includes(normCompany)) {
-      return String(row[1] || '');
+  try {
+    const indSheet = ss.getSheetByName(SHEET_INDUSTRY);
+    if (!indSheet) return '';
+    const norm = s => s.replace(/[　\s]/g, '').toLowerCase();
+    const normCompany = norm(companyName);
+    const rows = indSheet.getDataRange().getValues().slice(1);
+    for (const row of rows) {
+      const name = norm(String(row[0] || ''));
+      if (!name) continue;
+      if (name === normCompany || normCompany.includes(name) || name.includes(normCompany)) {
+        return String(row[1] || '');
+      }
     }
-  }
+  } catch (_) {}
   return '';
 }
 
 // ── ポジション名正規化 ────────────────────────────────────────
 function normPos(name) {
-  return name
-    .replace(/^[A-Za-z]+[）)]\s*/u, '')
+  return name.replace(/^[A-Za-z]+[）)]\s*/u, '')
     .replace(/[（]/g, '(').replace(/[）]/g, ')')
     .replace(/　/g, ' ').replace(/\s+/g, ' ')
-    .replace(/\s*[-－–—]\s*/g, '-')
-    .trim().toLowerCase();
+    .replace(/\s*[-－–—]\s*/g, '-').trim().toLowerCase();
 }
 
-// ── ポジション名から会社を判定 ───────────────────────────────
 function detectCompany(posName) {
   if (/^AC[）)]/.test(posName)) return 'アクセンチュア';
   if (/^BC/.test(posName))      return 'ベイカレント';
   return null;
 }
 
-// ── 会社別条件をテキストで返す ───────────────────────────────
 function getCompanyCriteria(condSheet, companyName) {
   const rows = condSheet.getDataRange().getValues();
-  const headerRow = rows[0];
   let colIdx = -1;
-  for (let j = 0; j < headerRow.length; j++) {
-    if (headerRow[j] === companyName) { colIdx = j; break; }
+  for (let j = 0; j < rows[0].length; j++) {
+    if (rows[0][j] === companyName) { colIdx = j; break; }
   }
   if (colIdx === -1) return '';
-  const lines = [];
-  for (let i = 1; i < rows.length; i++) {
-    const label = rows[i][0];
-    const val   = rows[i][colIdx];
-    if (label && val) lines.push('【' + label + '】\n' + val);
-  }
-  return lines.join('\n\n').substring(0, 3000);
+  return rows.slice(1).filter(r => r[0] && r[colIdx])
+    .map(r => '【' + r[0] + '】\n' + r[colIdx]).join('\n\n').substring(0, 3000);
 }
 
-// ── Slackへ送信 ──────────────────────────────────────────────
-function postToSlack(text) {
-  if (!SLACK_WEBHOOK_URL || SLACK_WEBHOOK_URL === 'YOUR_SLACK_WEBHOOK_URL') {
-    Logger.log('Slack Webhook URLが未設定: ' + text);
-    return;
+function json(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ── 効果測定ダッシュボード更新 ───────────────────────────────
+function updateDashboard() {
+  const ss   = SpreadsheetApp.getActiveSpreadsheet();
+  const db   = ss.getSheetByName(SHEET_DB);
+  const dash = ss.getSheetByName(SHEET_DASHBOARD) || ss.insertSheet(SHEET_DASHBOARD);
+  if (!db) return;
+
+  const rows = db.getDataRange().getValues();
+  if (rows.length <= 1) return;
+  const data = rows.slice(1).filter(r => r[0]);
+
+  function aggregate(keyIdx) {
+    const map = {};
+    data.forEach(r => {
+      const key = r[keyIdx] || '不明';
+      const st  = r[7] || '未返信';
+      if (!map[key]) map[key] = { total: 0, replied: 0 };
+      map[key].total++;
+      if (['返信あり','面談設定','書類選考','一次面接','最終面接','内定'].includes(st)) map[key].replied++;
+    });
+    return Object.entries(map).sort((a, b) => b[1].total - a[1].total);
   }
+
+  dash.clearContents();
+  let row = 1;
+  function writeSection(title, headers, entries) {
+    dash.getRange(row, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground('#E0E7FF');
+    row++;
+    entries.forEach(([key, v]) => {
+      const rate = v.total > 0 ? Math.round(v.replied / v.total * 100) + '%' : '-';
+      dash.getRange(row, 1, 1, 4).setValues([[key, v.total, v.replied, rate]]);
+      row++;
+    });
+    row++;
+  }
+  writeSection('📊 ポジション別', ['ポジション名','送信数','返信数','返信率'], aggregate(5));
+  writeSection('👤 担当者別',     ['担当者',       '送信数','返信数','返信率'], aggregate(1));
+  writeSection('📱 媒体別',       ['媒体',         '送信数','返信数','返信率'], aggregate(6));
+  dash.getRange(row, 1).setValue('最終更新: ' + new Date().toLocaleString('ja-JP')).setFontColor('#888');
+}
+
+// ── 週次Slackレポート ────────────────────────────────────────
+function sendWeeklyReport() {
+  const ss  = SpreadsheetApp.getActiveSpreadsheet();
+  const db  = ss.getSheetByName(SHEET_DB);
+  if (!db) return;
+
+  const rows    = db.getDataRange().getValues().slice(1).filter(r => r[0]);
+  const now     = new Date();
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const week    = rows.filter(r => new Date(r[0]) >= weekAgo);
+  if (week.length === 0) { postToSlack('今週のスカウト送信はありませんでした。'); return; }
+
+  const byRec = {};
+  week.forEach(r => {
+    const n = r[1] || '不明';
+    if (!byRec[n]) byRec[n] = { total: 0, replied: 0 };
+    byRec[n].total++;
+    if (['返信あり','面談設定','書類選考','一次面接','最終面接','内定'].includes(r[7])) byRec[n].replied++;
+  });
+  const byPos = {};
+  week.forEach(r => { const p = r[5] || '不明'; byPos[p] = (byPos[p] || 0) + 1; });
+  const topPos = Object.entries(byPos).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const totalReplied = rows.filter(r => ['返信あり','面談設定','書類選考','一次面接','最終面接','内定'].includes(r[7])).length;
+
+  const msg = [
+    '📊 *週次スカウトレポート* (' + weekAgo.toLocaleDateString('ja-JP') + ' 〜 ' + now.toLocaleDateString('ja-JP') + ')',
+    '', '*今週の送信数：' + week.length + '件*', '',
+    '*担当者別*',
+    Object.entries(byRec).sort((a,b)=>b[1].total-a[1].total).map(([n,v])=>'　• '+n+'：'+v.total+'件'+(v.replied>0?'（返信'+v.replied+'件）':'')).join('\n'),
+    '', '*送信ポジション TOP5*',
+    topPos.map(([p,c])=>'　• '+p+'：'+c+'件').join('\n'),
+    '', '*累計*',
+    '　• 累計送信：'+rows.length+'件',
+    '　• 返信率：'+（rows.length>0?Math.round(totalReplied/rows.length*100):0)+'%（'+totalReplied+'件）',
+  ].join('\n');
+
+  postToSlack(msg);
+  updateDashboard();
+}
+
+function postToSlack(text) {
+  if (!SLACK_WEBHOOK_URL || SLACK_WEBHOOK_URL === 'YOUR_SLACK_WEBHOOK_URL') return;
   UrlFetchApp.fetch(SLACK_WEBHOOK_URL, {
-    method: 'post',
-    contentType: 'application/json',
+    method: 'post', contentType: 'application/json',
     payload: JSON.stringify({ text, channel: SLACK_CHANNEL }),
   });
 }
 
-// ── setWeeklyTrigger: 週次トリガー設定（一度だけ手動実行） ───
+// ── 週次トリガー設定（一度だけ手動実行） ────────────────────
 function setWeeklyTrigger() {
   ScriptApp.getProjectTriggers().forEach(t => {
     if (t.getHandlerFunction() === 'sendWeeklyReport') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('sendWeeklyReport')
     .timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(9).create();
-  Logger.log('週次トリガーを設定しました（毎週月曜9時）');
+  Logger.log('週次トリガー設定完了（毎週月曜9時）');
 }
