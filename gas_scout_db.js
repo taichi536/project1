@@ -111,14 +111,30 @@ function doPost(e) {
       '',                    // K: メモ
     ]);
 
-    // ステータス列にドロップダウンを設定
     const lastRow = dbSheet.getLastRow();
-    const statusCell = dbSheet.getRange(lastRow, 8); // H列
-    const rule = SpreadsheetApp.newDataValidation()
+
+    // ステータス列（H列）にドロップダウンを設定
+    const statusCell = dbSheet.getRange(lastRow, 8);
+    const statusRule = SpreadsheetApp.newDataValidation()
       .requireValueInList(STATUS_LIST, true)
       .setAllowInvalid(false)
       .build();
-    statusCell.setDataValidation(rule);
+    statusCell.setDataValidation(statusRule);
+
+    // ポジション名列（F列）にドロップダウンを設定
+    const posSheet2 = ss.getSheetByName(SHEET_POSITIONS);
+    if (posSheet2) {
+      const posNames = posSheet2.getDataRange().getValues()
+        .slice(1).map(r => String(r[0] || '')).filter(Boolean);
+      if (posNames.length > 0) {
+        const posCell = dbSheet.getRange(lastRow, 6);
+        const posRule = SpreadsheetApp.newDataValidation()
+          .requireValueInList(posNames, true)
+          .setAllowInvalid(true) // 一覧外の値も許可（手動入力対応）
+          .build();
+        posCell.setDataValidation(posRule);
+      }
+    }
 
     return ContentService.createTextOutput(JSON.stringify({ ok: true }))
       .setMimeType(ContentService.MimeType.JSON);
