@@ -1,4 +1,4 @@
-// content.js v1.5.6
+// content.js v1.5.7
 // 各媒体のプロフィールページからテキストを抽出する
 
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
@@ -537,35 +537,34 @@ document.addEventListener('click', e => {
   if (isTemplateConfirmBtn) {
     const raw = sessionStorage.getItem('pendingScout');
     if (!raw) return;
+
+    // ★ モーダルが閉じる前に同期的にテンプレート名を取得する（非同期にすると消える）
+    const checkedRadio = document.querySelector('input[type="radio"]:checked');
+    let tmplName = '';
+    if (checkedRadio) {
+      const row = checkedRadio.closest('tr, [role="row"]') || checkedRadio.closest('li, [class*="row"], [class*="item"]');
+      if (row) {
+        for (const cell of row.querySelectorAll('td, [role="cell"]')) {
+          if (cell.querySelector('input')) continue;
+          const t = cell.textContent?.trim() || '';
+          if (t.length > 3) { tmplName = t; break; }
+        }
+        if (!tmplName) {
+          for (const el of row.querySelectorAll('div, span, p')) {
+            if (el.querySelector('input, button')) continue;
+            const t = el.textContent?.trim() || '';
+            if (t.length > 3 && t.length < 80) { tmplName = t; break; }
+          }
+        }
+      }
+    }
+    if (!tmplName) return;
+    console.log('[Snow-we] テンプレート名検出 (同期取得):', tmplName);
+
     (async () => {
       try {
         const pending = JSON.parse(raw);
         if (pending.templateName) return;
-
-        // 選択中のラジオボタンの行からテンプレート名を取得
-        const checkedRadio = document.querySelector('input[type="radio"]:checked');
-        if (!checkedRadio) return;
-
-        const row = checkedRadio.closest('tr, [role="row"]') || checkedRadio.closest('li, [class*="row"], [class*="item"]');
-        let tmplName = '';
-        if (row) {
-          // tdセルからテンプレート名を取得（ラジオボタンのセルは除外）
-          for (const cell of row.querySelectorAll('td, [role="cell"]')) {
-            if (cell.querySelector('input')) continue;
-            const t = cell.textContent?.trim() || '';
-            if (t.length > 3) { tmplName = t; break; }
-          }
-          // tdが見つからない場合はdivベースで試みる
-          if (!tmplName) {
-            for (const el of row.querySelectorAll('div, span, p')) {
-              if (el.querySelector('input, button')) continue;
-              const t = el.textContent?.trim() || '';
-              if (t.length > 3 && t.length < 80) { tmplName = t; break; }
-            }
-          }
-        }
-        if (!tmplName) return;
-        console.log('[Snow-we] テンプレート名検出:', tmplName);
 
         const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
         const positionList = res?.positions || [];
@@ -2768,7 +2767,9 @@ function removeNonProfileSections(text) {
     'スカウト履歴', 'メモ・備考', '候補者評価', 'スカウト送信履歴',
     'スカウトメール', '送信したメール', 'スカウト文面', 'スカウト送信文',
     'エージェントからのメッセージ', 'この度はご連絡', '貴方様のご経歴を拝見',
-    'ご経歴を拝見し', '採用担当者からのメッセージ', 'メッセージ履歴'
+    'ご経歴を拝見し', '採用担当者からのメッセージ', 'メッセージ履歴',
+    '送信済みテンプレート', '前回スカウト', 'スカウト送信日', '送信日時',
+    'スカウト済み', '選考ステータス', 'エージェントメモ', '社内メモ',
   ];
   // マーカーが先頭200文字以内に現れる場合の判断：
   //   テキスト全体にプロフィールキーワード(≥2個)あり → タブラベル（スキップ）
