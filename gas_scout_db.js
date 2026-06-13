@@ -17,6 +17,24 @@ const SHEET_INDUSTRY   = '🏭 業界マスタ';
 
 const STATUS_LIST = ['未返信', '返信あり', '面談設定', '書類選考', '一次面接', '最終面接', '内定', '辞退', '見送り'];
 
+// GICS産業分類（F列・全65種）
+const GICS_INDUSTRIES = [
+  'エネルギー設備・サービス','石油・ガス・消耗燃料','化学','建設資材','容器・包装',
+  '金属・鉱業','紙製品・林産品','航空宇宙・防衛','建設関連製品','建設・土木',
+  '電気設備','コングロマリット','機械','商社・流通業','商業サービス・用品',
+  '航空貨物・物流サービス','旅客航空輸送業','海運業','陸運・鉄道','運送インフラ',
+  '自動車部品','自動車','家庭用耐久財','レジャー用品','繊維・アパレル・贅沢品',
+  'ホテル・レストラン・レジャー','各種消費者サービス','メディア','販売',
+  'インターネット販売・カタログ販売','複合小売り','専門小売り','食品・生活必需品小売り',
+  '飲料','食品','タバコ','家庭用品','パーソナル用品','ヘルスケア機器・用品',
+  'ヘルスケア・プロバイダー/ヘルスケア・サービス','バイオテクノロジー','医薬品',
+  '商業銀行','貯蓄・抵当・不動産金融','各種金融サービス','消費者金融','資本市場',
+  '保険','不動産','インターネットソフトウェア・サービス','情報技術サービス',
+  'ソフトウェア','通信機器','コンピュータ・周辺機器','電子装置・機器','事務用電子機器',
+  '半導体・半導体製造装置','各種電気通信サービス','無線通信サービス',
+  '電力','ガス','総合公益事業','水道','独立系発電事業者・エネルギー販売業者',
+];
+
 const MEDIA_LABEL = {
   rds: 'RDS', bizreach: 'ビズリーチ', dodax: 'doda X',
   ambi: 'AMBI', green: 'Green', mynavi: 'マイナビ'
@@ -55,6 +73,28 @@ function doPost(e) {
         MEDIA_LABEL[data.platform] || data.platform || '',
         data.aiVerdict || '', data.correction || '', data.profileSummary || '']);
       return json({ ok: true });
+    }
+
+    // ── フィードバック一覧取得（チーム共有用） ──
+    if (data.action === 'getFeedbacks') {
+      const fbSheet = ss.getSheetByName(SHEET_FEEDBACK);
+      if (!fbSheet) return json({ ok: true, feedbacks: [] });
+      const rows = fbSheet.getDataRange().getValues();
+      if (rows.length <= 1) return json({ ok: true, feedbacks: [] });
+      const limit = Math.min(data.limit || 30, 100);
+      const feedbacks = rows.slice(1)
+        .reverse()
+        .slice(0, limit)
+        .map(r => ({
+          ts:             r[0] ? new Date(r[0]).getTime() : 0,
+          recruiter:      String(r[1] || ''),
+          platform:       String(r[2] || ''),
+          aiVerdict:      String(r[3] || ''),
+          correction:     String(r[4] || ''),
+          profileSummary: String(r[5] || ''),
+        }))
+        .filter(f => f.aiVerdict && f.correction && f.profileSummary);
+      return json({ ok: true, feedbacks });
     }
 
     // ── ポジション要件取得 ──
@@ -143,8 +183,8 @@ function writeToDailySheet(ss, data, ts, media, ageVal, industry) {
     return;
   }
 
-  // 今日の日付シートを取得（なければ原本からコピー）
-  const sheetName = getTodaySheetName();
+  // 送信時刻に対応する日付シートを取得（なければ原本からコピー）
+  const sheetName = getSheetNameForTs(data.ts);
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
     const template = ss.getSheetByName(SHEET_TEMPLATE);
@@ -166,10 +206,60 @@ function writeToDailySheet(ss, data, ts, media, ageVal, industry) {
     data.position || '', media, industry, ts,
   ]]);
 
-  // ポジション名列（startCol+3）にドロップダウン設定
+  // ポジション名・業界列にドロップダウン設定
   applyPositionDropdown(ss, sheet, nextRow, startCol + 3);
+  applyIndustryDropdown(sheet, nextRow, startCol + 5);
 
   Logger.log('日付シート記録: ' + sheetName + ' / ' + recruiter + ' / 行' + nextRow + ' / ' + (data.position || ''));
+}
+
+// ── 業界ドロップダウンを設定（GICS産業リスト・1セル用）──────
+function applyIndustryDropdown(sheet, row, col) {
+  try {
+    const rule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(GICS_INDUSTRIES, true)
+      .setAllowInvalid(true).build();
+    sheet.getRange(row, col).setDataValidation(rule);
+  } catch (err) {
+    Logger.log('業界ドロップダウン設定エラー: ' + err.message);
+  }
+}
+
+// 全日付シートの業界列ドロップダウンをGICSに一括更新
+// GASエディタから手動で1回実行してください
+function updateAllIndustryDropdowns() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(GICS_INDUSTRIES, true)
+    .setAllowInvalid(true).build();
+  let sheetCount = 0;
+
+  ss.getSheets().forEach(sheet => {
+    if (!datePattern.test(sheet.getName())) return;
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 3) return;
+
+    // 列ごとに範囲でまとめて設定（セル個別でなく範囲指定→高速）
+    Object.values(MEMBER_MAP).forEach(startCol => {
+      const industryCol = startCol + 5;
+      const numRows = lastRow - 2; // 3行目〜lastRow
+      sheet.getRange(3, industryCol, numRows, 1).setDataValidation(rule);
+    });
+    sheetCount++;
+  });
+
+  // 原本シートにも適用（今後コピーされるシートに引き継がれる）
+  const template = ss.getSheetByName(SHEET_TEMPLATE);
+  if (template) {
+    Object.values(MEMBER_MAP).forEach(startCol => {
+      template.getRange(3, startCol + 5, 500, 1).setDataValidation(rule);
+    });
+  }
+
+  const msg = sheetCount + '枚の日付シートにGICSドロップダウンを設定しました（原本シートも更新済み）';
+  Logger.log(msg);
+  SpreadsheetApp.getUi().alert(msg);
 }
 
 // ── ポジション名ドロップダウンを設定 ─────────────────────────
@@ -210,35 +300,359 @@ function findNextRow(sheet, startCol) {
   return lastRow + 1;
 }
 
-// ── 今日の日付シート名（日本時間） ───────────────────────────
-function getTodaySheetName() {
-  const now      = new Date();
-  // GASのタイムゾーン設定に依存するため、スクリプトのタイムゾーンをJSTに設定すること
-  const year     = now.getFullYear();
-  const month    = now.getMonth() + 1;
-  const day      = now.getDate();
-  const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
-  const weekday  = weekdays[now.getDay()];
-  return year + '年' + month + '月' + day + '日(' + weekday + ')';
+// ── 過去データの業界を一括GICS再分類 ────────────────────────────
+// GASエディタから手動で実行してください（メニュー → 関数を選択 → reclassifyAllIndustries）
+function reclassifyAllIndustries() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+  let updated = 0, skipped = 0;
+
+  ss.getSheets().forEach(sheet => {
+    if (!datePattern.test(sheet.getName())) return;
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 3) return;
+
+    Object.entries(MEMBER_MAP).forEach(([, startCol]) => {
+      const companyCol  = startCol + 1;
+      const industryCol = startCol + 5;
+      const numRows = lastRow - 2;
+
+      // 書き込み前に業界列のバリデーションをGICS+allowInvalid(true)に統一
+      const gicsRule = SpreadsheetApp.newDataValidation()
+        .requireValueInList(GICS_INDUSTRIES, true)
+        .setAllowInvalid(true).build();
+      sheet.getRange(3, industryCol, numRows, 1).setDataValidation(gicsRule);
+
+      const companyVals  = sheet.getRange(3, companyCol,  numRows, 1).getValues();
+      const industryVals = sheet.getRange(3, industryCol, numRows, 1).getValues();
+
+      companyVals.forEach((r, i) => {
+        const company = String(r[0] || '').trim();
+        if (!company) return;
+
+        const newIndustry = lookupIndustry(ss, company);
+        if (!newIndustry) { skipped++; return; }
+
+        const current = String(industryVals[i][0] || '').trim();
+        if (current === newIndustry) { skipped++; return; }
+
+        sheet.getRange(3 + i, industryCol).setValue(newIndustry);
+        updated++;
+        Logger.log(sheet.getName() + ' 行' + (3 + i) + ': ' + company + ' → ' + newIndustry);
+      });
+    });
+  });
+
+  const msg = '完了: ' + updated + '件を更新、' + skipped + '件はスキップ（分類不明 or 変更なし）';
+  Logger.log(msg);
+  SpreadsheetApp.getUi().alert(msg);
 }
 
-// ── 業界マスタから業界を取得 ─────────────────────────────────
+// ── 日付シート名を取得（送信時刻をJSTに変換して決定） ────────
+// data.ts（Unixミリ秒）を使うのでGASのタイムゾーン設定に依存しない
+function getSheetNameForTs(tsMs) {
+  const date     = new Date(tsMs || Date.now());
+  const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+  // Utilities.formatDate で明示的にAsia/Tokyoを指定
+  const year   = parseInt(Utilities.formatDate(date, 'Asia/Tokyo', 'yyyy'));
+  const month  = parseInt(Utilities.formatDate(date, 'Asia/Tokyo', 'M'));
+  const day    = parseInt(Utilities.formatDate(date, 'Asia/Tokyo', 'd'));
+  const isoDay = parseInt(Utilities.formatDate(date, 'Asia/Tokyo', 'u')); // 1=月〜7=日
+  return year + '年' + month + '月' + day + '日(' + weekdays[isoDay % 7] + ')';
+}
+
+// ── 業界マスタから業界を取得 ───────────────────────────────────
+// 優先順位: ①マスターシート手動登録 → ②キーワード自動分類 → ③Claude API分類
 function lookupIndustry(ss, companyName) {
   if (!companyName) return '';
-  try {
-    const indSheet = ss.getSheetByName(SHEET_INDUSTRY);
-    if (!indSheet) return '';
-    const norm = s => s.replace(/[　\s]/g, '').toLowerCase();
-    const normCompany = norm(companyName);
-    const rows = indSheet.getDataRange().getValues().slice(1);
-    for (const row of rows) {
-      const name = norm(String(row[0] || ''));
-      if (!name) continue;
-      if (name === normCompany || normCompany.includes(name) || name.includes(normCompany)) {
-        return String(row[1] || '');
+
+  let indSheet = null;
+  try { indSheet = ss.getSheetByName(SHEET_INDUSTRY); } catch (_) {}
+
+  // ① マスターシートを検索
+  if (indSheet) {
+    try {
+      const norm = s => s.replace(/[　\s]/g, '').toLowerCase();
+      const normCompany = norm(companyName);
+      const rows = indSheet.getDataRange().getValues().slice(1);
+      for (const row of rows) {
+        const name = norm(String(row[0] || ''));
+        if (!name) continue;
+        if (name === normCompany || normCompany.includes(name) || name.includes(normCompany)) {
+          const industry = String(row[1] || '');
+          // GICSリストにある値のみ返す（古い42分類は無視してキーワード/APIで再分類）
+          if (GICS_INDUSTRIES.includes(industry)) return industry;
+          break;
+        }
       }
+    } catch (_) {}
+  }
+
+  // ② キーワード自動分類
+  const kwResult = gicsAutoClassify(companyName);
+  if (kwResult) {
+    cacheIndustryToSheet(ss, indSheet, companyName, kwResult);
+    return kwResult;
+  }
+
+  // ③ Claude API で分類（APIキーが設定されている場合のみ）
+  const aiResult = classifyIndustryWithClaude(companyName);
+  if (aiResult) {
+    cacheIndustryToSheet(ss, indSheet, companyName, aiResult);
+    return aiResult;
+  }
+
+  return '';
+}
+
+// 分類結果をマスターシートにキャッシュ（次回以降は即返却）
+// 既存シートの列構造（会社名・業界・登録方法・登録日）に合わせて追記
+function cacheIndustryToSheet(ss, indSheet, companyName, industry) {
+  try {
+    if (!indSheet) {
+      indSheet = ss.insertSheet(SHEET_INDUSTRY);
+      indSheet.appendRow(['会社名', '業界', '登録方法', '登録日']);
     }
+    const now = new Date();
+    indSheet.appendRow([companyName, industry, '自動', now]);
   } catch (_) {}
+}
+
+// ── Claude API で GICS産業を自動分類（1社） ──────────────────────
+function classifyIndustryWithClaude(companyName) {
+  try {
+    const apiKey = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+    if (!apiKey) return '';
+
+    const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      payload: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 30,
+        messages: [{
+          role: 'user',
+          content: `会社名「${companyName}」をGICS産業分類で分類してください。\n以下のリストから最も適切な産業名を1つだけ返してください（産業名のみ、説明不要）：\n${GICS_INDUSTRIES.join('\n')}`,
+        }],
+      }),
+      muteHttpExceptions: true,
+    });
+
+    if (res.getResponseCode() !== 200) return '';
+    const text = (JSON.parse(res.getContentText()).content?.[0]?.text || '').trim();
+    return GICS_INDUSTRIES.find(i => text.includes(i)) || '';
+  } catch (_) {
+    return '';
+  }
+}
+
+// ── 未分類の会社をClaude APIで一括分類（20社ずつバッチ処理） ──────
+// 全シートで業界が空または旧分類の会社を収集してClaudeで一括分類し
+// マスターシートに保存する。完了後に reclassifyAllIndustries を実行すること。
+function claudeBatchClassify() {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+  if (!apiKey) {
+    SpreadsheetApp.getUi().alert('ANTHROPIC_API_KEY が設定されていません。\nプロジェクトの設定 → スクリプトプロパティ に追加してください。');
+    return;
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+
+  // 未分類の会社名を収集（重複排除）
+  const unclassified = new Set();
+  ss.getSheets().forEach(sheet => {
+    if (!datePattern.test(sheet.getName())) return;
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 3) return;
+
+    Object.entries(MEMBER_MAP).forEach(([, startCol]) => {
+      const companyCol  = startCol + 1;
+      const industryCol = startCol + 5;
+      const numRows = lastRow - 2;
+      const companyVals  = sheet.getRange(3, companyCol,  numRows, 1).getValues();
+      const industryVals = sheet.getRange(3, industryCol, numRows, 1).getValues();
+      companyVals.forEach((r, i) => {
+        const company  = String(r[0] || '').trim();
+        const industry = String(industryVals[i][0] || '').trim();
+        if (!company) return;
+        if (GICS_INDUSTRIES.includes(industry)) return; // 既に正しく分類済み
+        if (gicsAutoClassify(company)) return;          // キーワードで分類可能
+        unclassified.add(company);
+      });
+    });
+  });
+
+  if (unclassified.size === 0) {
+    SpreadsheetApp.getUi().alert('未分類の会社はありません。');
+    return;
+  }
+
+  const companies = Array.from(unclassified);
+  Logger.log('未分類会社数: ' + companies.length);
+
+  // マスターシートを取得または作成
+  let indSheet = ss.getSheetByName(SHEET_INDUSTRY);
+  if (!indSheet) {
+    indSheet = ss.insertSheet(SHEET_INDUSTRY);
+    indSheet.appendRow(['会社名', '業界', '登録方法', '登録日']);
+  }
+
+  // 20社ずつバッチでClaude APIに送る
+  const BATCH_SIZE = 20;
+  let classified = 0;
+
+  for (let i = 0; i < companies.length; i += BATCH_SIZE) {
+    const batch = companies.slice(i, i + BATCH_SIZE);
+
+    try {
+      const prompt = '以下の会社名をそれぞれGICS産業分類で分類してください。\n' +
+        '各会社について、下記リストから最も適切な産業名を1つ選んでください。\n\n' +
+        '【産業リスト】\n' + GICS_INDUSTRIES.join('\n') + '\n\n' +
+        '【会社リスト】\n' + batch.map((c, j) => (j+1) + '. ' + c).join('\n') + '\n\n' +
+        '【回答形式】番号と産業名のみ、各行に1件：\n1. 産業名\n2. 産業名\n...';
+
+      const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        payload: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 600,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+        muteHttpExceptions: true,
+      });
+
+      if (res.getResponseCode() === 200) {
+        const text = (JSON.parse(res.getContentText()).content?.[0]?.text || '');
+        const lines = text.trim().split('\n');
+        batch.forEach((company, j) => {
+          const line = lines[j] || '';
+          const industry = GICS_INDUSTRIES.find(ind => line.includes(ind)) || '';
+          if (industry) {
+            indSheet.appendRow([company, industry, 'Claude一括', new Date()]);
+            classified++;
+            Logger.log(company + ' → ' + industry);
+          }
+        });
+      }
+    } catch (_) {}
+
+    if (i + BATCH_SIZE < companies.length) Utilities.sleep(500);
+  }
+
+  const msg = companies.length + '社中 ' + classified + '社を分類しマスターに保存しました。\n次に reclassifyAllIndustries を実行してください。';
+  Logger.log(msg);
+  SpreadsheetApp.getUi().alert(msg);
+}
+
+// ── GICS F列（産業）キーワード自動分類 ───────────────────────────
+function gicsAutoClassify(companyName) {
+  if (!companyName) return '';
+  const n = companyName.replace(/[株式会社　\s]/g, '').toLowerCase();
+
+  // 情報技術・コンサルティング
+  if (/accenture|アクセンチュア/.test(n))                    return 'ソフトウェア';
+  if (/ベイカレント|baycurrent/.test(n))                      return '情報技術サービス';
+  if (/ibm|日本ibm/.test(n))                                  return '情報技術サービス';
+  if (/microsoft|マイクロソフト/.test(n))                     return 'ソフトウェア';
+  if (/oracle|オラクル/.test(n))                              return 'ソフトウェア';
+  if (/sap/.test(n))                                          return 'ソフトウェア';
+  if (/salesforce|セールスフォース/.test(n))                  return 'ソフトウェア';
+  if (/google|グーグル|alphabet/.test(n))                     return 'インターネットソフトウェア・サービス';
+  if (/amazon|アマゾン|aws/.test(n))                          return 'インターネット販売・カタログ販売';
+  if (/ntt(データ|data|コミュニケーションズ|communications)/.test(n)) return '情報技術サービス';
+  if (/ntt(東日本|西日本|docomo|ドコモ|^$)/.test(n) || n === 'ntt') return '各種電気通信サービス';
+  if (/富士通|fujitsu/.test(n))                               return '情報技術サービス';
+  if (/日立|hitachi/.test(n))                                 return '情報技術サービス';
+  if (/nec|日本電気/.test(n))                                 return '情報技術サービス';
+  if (/野村総研|nri/.test(n))                                 return '情報技術サービス';
+  if (/伊藤忠テクノ|ctc/.test(n))                             return '情報技術サービス';
+  if (/インフォシス|infosys|tcs|wipro/.test(n))               return '情報技術サービス';
+  if (/デロイト|deloitte|pwc|kpmg|ey |アーンスト/.test(n))    return '商業サービス・用品';
+  if (/マッキンゼー|mckinsey|ボストンコンサル|bcg|roland berger|ローランドベルガー|bain|ベイン/.test(n)) return '商業サービス・用品';
+
+  // 通信
+  if (/softbank|ソフトバンク/.test(n))                        return '無線通信サービス';
+  if (/kddi|au/.test(n))                                      return '無線通信サービス';
+  if (/docomo|ドコモ/.test(n))                                return '無線通信サービス';
+  if (/楽天モバイル|rakutenmobile/.test(n))                   return '無線通信サービス';
+
+  // 金融・銀行
+  if (/三菱uf|mufg|三菱東京/.test(n))                        return '商業銀行';
+  if (/みずほ|mizuho/.test(n))                                return '商業銀行';
+  if (/三井住友|smbc/.test(n))                                return '商業銀行';
+  if (/りそな|resona/.test(n))                                return '商業銀行';
+  if (/(銀行|bank)/.test(n))                                  return '商業銀行';
+  if (/野村証券|大和証券|みずほ証券|三菱uf.+証券|smbc日興|証券/.test(n)) return '資本市場';
+  if (/日本生命|第一生命|住友生命|明治安田|生命保険/.test(n)) return '保険';
+  if (/東京海上|損保ジャパン|三井住友海上|あいおい|損保|火災/.test(n)) return '保険';
+  if (/三井不動産|三菱地所|住友不動産|野村不動産|不動産/.test(n)) return '不動産';
+  if (/オリックス|orix/.test(n))                              return '各種金融サービス';
+
+  // 製造・自動車
+  if (/toyota|トヨタ/.test(n))                               return '自動車';
+  if (/honda|ホンダ|本田技/.test(n))                         return '自動車';
+  if (/nissan|日産/.test(n))                                  return '自動車';
+  if (/mazda|マツダ/.test(n))                                 return '自動車';
+  if (/subaru|スバル/.test(n))                                return '自動車';
+  if (/suzuki|スズキ/.test(n))                                return '自動車';
+  if (/mitsubishi motors|三菱自動車/.test(n))                 return '自動車';
+  if (/デンソー|denso|アイシン|aisin|豊田自動/.test(n))       return '自動車部品';
+  if (/ブリヂストン|bridgestone|住友ゴム/.test(n))            return '自動車部品';
+
+  // 半導体・電子
+  if (/キーエンス|keyence/.test(n))                           return '電子装置・機器';
+  if (/ソニー|sony/.test(n))                                  return '電子装置・機器';
+  if (/パナソニック|panasonic/.test(n))                       return '電子装置・機器';
+  if (/東京エレク|tel|applied materials|レーザーテック/.test(n)) return '半導体・半導体製造装置';
+  if (/ルネサス|renesas|ローム|rohm|東芝デバイス/.test(n))    return '半導体・半導体製造装置';
+  if (/(半導体|semiconductor)/.test(n))                        return '半導体・半導体製造装置';
+
+  // 医薬品・ヘルスケア
+  if (/武田薬品|takeda|アステラス|astellas|第一三共|大塚製薬|中外製薬|エーザイ|eisai/.test(n)) return '医薬品';
+  if (/医薬品|製薬|pharma/.test(n))                           return '医薬品';
+  if (/オリンパス|olympus|テルモ|terumo|シスメックス/.test(n)) return 'ヘルスケア機器・用品';
+  if (/病院|クリニック|メディカル|medical|healthcare/.test(n)) return 'ヘルスケア・プロバイダー/ヘルスケア・サービス';
+
+  // 小売・消費財
+  if (/セブン.?イレブン|ローソン|ファミリーマート|コンビニ/.test(n)) return '食品・生活必需品小売り';
+  if (/イオン|ウォルマート|walmart|ドンキ|ユニー/.test(n))     return '複合小売り';
+  if (/ユニクロ|uniqlo|ファーストリテ|zara|h&m/.test(n))      return '専門小売り';
+  if (/amazon|楽天|rakuten|メルカリ|mercari|yahoo.+ショッピング/.test(n) && !/銀行|モバイル/.test(n)) return 'インターネット販売・カタログ販売';
+
+  // 食品・飲料
+  if (/味の素|ajinomoto|キリン|kirin|アサヒ|asahi|サントリー|suntory|サッポロ/.test(n)) return '飲料';
+  if (/日清食品|明治|森永|カルビー|味の素|ネスレ|nestle/.test(n)) return '食品';
+
+  // メディア・広告
+  if (/電通|dentsu|博報堂|hakuhodo|サイバーエージェント|cyberagent/.test(n)) return 'メディア';
+  if (/(テレビ|tv|放送|フジ|ntv|tbs|abc)/.test(n))             return 'メディア';
+
+  // 商社
+  if (/三菱商事|三井物産|住友商事|伊藤忠|丸紅|双日|豊田通商|商事|物産/.test(n)) return '商社・流通業';
+
+  // 建設・不動産
+  if (/鹿島|清水建設|大成建設|竹中工務|大林組|建設/.test(n))  return '建設・土木';
+
+  // 物流・運輸
+  if (/ヤマト|yamato|佐川|sagawa|日本郵便|jppost/.test(n))    return '航空貨物・物流サービス';
+  if (/jal|ana|日本航空|全日空|航空/.test(n))                  return '旅客航空輸送業';
+  if (/jr|東海道新幹線|鉄道|railway/.test(n))                  return '陸運・鉄道';
+
+  // エネルギー・化学
+  if (/jxtg|eneos|出光|idemitsu|コスモ石油/.test(n))          return '石油・ガス・消耗燃料';
+  if (/東電|東京電力|関西電力|中部電力|九州電力|電力/.test(n)) return '電力';
+  if (/旭化成|住友化学|三菱化学|東レ|toray|化学/.test(n))      return '化学';
+
   return '';
 }
 
