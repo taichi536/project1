@@ -227,6 +227,45 @@
     /* 設定タブ */
     .setting-group { margin-bottom: 14px; }
     .setting-group .label { margin-bottom: 6px; }
+
+    /* GAS設定UI */
+    .gas-section {
+      border: 1px solid #AFA9EC; border-radius: 10px;
+      padding: 12px; margin-bottom: 14px; background: #FAFAFF;
+    }
+    .gas-section-title {
+      font-size: 12px; font-weight: 700; color: #3C3489; margin-bottom: 10px;
+      display: flex; align-items: center; gap: 5px;
+    }
+    .gas-field { margin-bottom: 8px; }
+    .gas-field-label {
+      font-size: 10px; font-weight: 600; color: #5F5E5A;
+      margin-bottom: 3px; display: flex; align-items: center; gap: 5px;
+    }
+    .gas-badge {
+      font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 8px;
+      background: #EEEDFE; color: #534AB7;
+    }
+    .gas-badge.required { background: #FEE2E2; color: #991B1B; }
+    .gas-badge.optional { background: #F0FDF4; color: #065F46; }
+    .gas-features {
+      background: #fff; border: 1px solid #AFA9EC;
+      border-radius: 7px; padding: 8px 10px; margin-top: 6px;
+    }
+    .gas-features-title {
+      font-size: 10px; font-weight: 600; color: #534AB7; margin-bottom: 5px;
+    }
+    .gas-feature-item {
+      font-size: 10px; color: #3C3489; line-height: 1.8;
+    }
+    .gas-advanced summary {
+      font-size: 10px; color: #888780; cursor: pointer; margin-top: 8px;
+      padding: 4px 0; user-select: none;
+    }
+    .gas-advanced summary:hover { color: #534AB7; }
+    .gas-advanced-content { margin-top: 8px; }
+    .gas-advanced-field { margin-bottom: 7px; }
+    .gas-advanced-field .gas-field-label { color: #888780; }
     .range-row { display: flex; align-items: center; gap: 6px; }
     .range-row input[type="number"] { flex: 1; }
     .range-sep { color: #888780; font-size: 12px; flex-shrink: 0; }
@@ -547,29 +586,71 @@
     <div style="font-size:10px; color:#888; margin-top:3px;">doda-Xで自動リスト追加時にこのタグを付与します</div>
   </div>
 
-  <div class="setting-group">
-    <div class="label">Googleスプレッドシート自動記録</div>
-    <div style="margin-bottom:5px;">
-      <select id="gas-recruiter" style="width:100%; margin-bottom:5px;">
-        <option value="">-- 担当者を選択 --</option>
+  <!-- GAS設定 -->
+  <div class="gas-section">
+    <div class="gas-section-title">📊 Googleスプレッドシート連携</div>
+
+    <div class="gas-field">
+      <div class="gas-field-label">
+        担当者名
+        <span class="gas-badge">スプレッドシートの記録欄を決定</span>
+      </div>
+      <select id="gas-recruiter" style="width:100%;">
+        <option value="">-- 自分の名前を選択 --</option>
         <option value="たけと">たけと</option>
         <option value="ゆうき">ゆうき</option>
         <option value="たいち">たいち</option>
         <option value="れいしろう">れいしろう</option>
       </select>
-      <input type="text" id="gas-url" placeholder="既存GAS URL（日付別シート用）" style="width:100%; margin-bottom:5px;">
-      <input type="text" id="gas-db-url" placeholder="新GAS URL（スカウト管理DB用）" style="width:100%; margin-bottom:5px;">
-      <input type="text" id="gas-secret" placeholder="シークレットキー（デフォルト: snowwe2024）" style="width:100%;">
     </div>
-    <div style="font-size:10px; color:#888; line-height:1.6;">スカウト送信時に両方のスプレッドシートへ自動記録します</div>
-  </div>
 
-  <div class="setting-group">
-    <div class="label">ポジション管理GAS URL（ポジション提案の精度向上）</div>
-    <input type="text" id="position-gas-url" placeholder="ポジション管理GAS URL" style="width:100%; margin-bottom:5px;">
-    <div style="font-size:10px; color:#888; line-height:1.6;">既存スカウト管理スプレッドシートに「ポジション」シートを追加し、GASに追記したWebアプリのURLを入力してください。未入力の場合はデフォルト一覧を使用します。</div>
-    <button class="save-btn" id="gas-test-btn" style="margin-top:6px; width:100%; font-size:11px;">🔗 スプレッドシート接続テスト</button>
+    <div class="gas-field">
+      <div class="gas-field-label">
+        GASウェブアプリURL
+        <span class="gas-badge required">必須</span>
+      </div>
+      <input type="text" id="gas-url" placeholder="https://script.google.com/macros/s/..." style="width:100%;">
+      <div class="gas-features">
+        <div class="gas-features-title">このURLを設定すると有効になる機能：</div>
+        <div class="gas-feature-item">✅ スカウト送信 → 日付別シートに自動記録</div>
+        <div class="gas-feature-item">✅ スカウト送信 → スカウト管理DBにも記録</div>
+        <div class="gas-feature-item">✅ AI訂正ボタン → フィードバックシートに保存</div>
+        <div class="gas-feature-item">✅ ポジション要件をAI判定プロンプトに反映</div>
+      </div>
+    </div>
+
+    <div class="gas-field">
+      <div class="gas-field-label">
+        シークレットキー
+        <span class="gas-badge">GASと合わせる（デフォルト: snowwe2024）</span>
+      </div>
+      <input type="text" id="gas-secret" placeholder="snowwe2024" style="width:100%;">
+    </div>
+
+    <button class="save-btn" id="gas-test-btn" style="margin-top:4px; width:100%; font-size:11px;">🔗 接続テスト</button>
     <div id="gas-test-result" style="font-size:11px; margin-top:5px; padding:6px; background:#f5f4f0; border-radius:6px; display:none; word-break:break-all;"></div>
+
+    <details class="gas-advanced">
+      <summary>▸ 詳細設定（URLを複数使う場合のみ）</summary>
+      <div class="gas-advanced-content">
+        <div class="gas-advanced-field">
+          <div class="gas-field-label">
+            スカウト管理DB専用URL
+            <span class="gas-badge optional">省略可</span>
+          </div>
+          <div style="font-size:10px; color:#888; margin-bottom:3px;">上記URLと別のGASを使う場合のみ入力。通常は空欄でOK。</div>
+          <input type="text" id="gas-db-url" placeholder="（空欄 = 上のURLと同じ）" style="width:100%;">
+        </div>
+        <div class="gas-advanced-field">
+          <div class="gas-field-label">
+            ポジション管理専用URL
+            <span class="gas-badge optional">省略可</span>
+          </div>
+          <div style="font-size:10px; color:#888; margin-bottom:3px;">上記URLと別のGASを使う場合のみ入力。通常は空欄でOK。</div>
+          <input type="text" id="position-gas-url" placeholder="（空欄 = 上のURLと同じ）" style="width:100%;">
+        </div>
+      </div>
+    </details>
   </div>
 
   <button class="settings-save-btn" id="settings-save-btn">設定を保存</button>

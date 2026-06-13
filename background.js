@@ -144,9 +144,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // ポジション一覧を返す（GASスプレッドシートから取得、失敗時はハードコードで代替）
   if (msg.type === 'getPositionList') {
     chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {
-      const positionUrl = gasSettings?.positionUrl;
+      const positionUrl = gasSettings?.positionUrl || gasSettings?.dbUrl || gasSettings?.url;
       const secret = gasSettings?.secret;
-      if (!positionUrl) {
+      if (!positionUrl || !secret) {
         sendResponse({ positions: POSITION_LIST });
         return;
       }
