@@ -1,4 +1,4 @@
-// content.js v1.5.7
+// content.js v1.5.8
 // 各媒体のプロフィールページからテキストを抽出する
 
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
@@ -351,9 +351,11 @@ async function recordScoutSent(candidateId, info, templateName) {
     };
 
     // バックグラウンド経由でGASへ送信（content.jsから直接fetchするとCORS/401になるため）
-    chrome.runtime.sendMessage({ type: 'gasPost', url: gas.url, payload });
+    chrome.runtime.sendMessage({ type: 'gasPost', url: gas.url, payload })
+      .catch(err => console.error('[Snow-we] GAS送信エラー (daily):', err));
     if (gas.dbUrl) {
-      chrome.runtime.sendMessage({ type: 'gasPost', url: gas.dbUrl, payload });
+      chrome.runtime.sendMessage({ type: 'gasPost', url: gas.dbUrl, payload })
+        .catch(err => console.error('[Snow-we] GAS送信エラー (db):', err));
     }
   }
 }
@@ -2245,11 +2247,10 @@ function setBatchBadge(el, cls, text, tooltip, profileSummary, aiVerdict) {
   // Bizreach仮想スクロール: checkingを除く確定判定をレジストリに保存（スクロール後の再表示に使用）
   if (getPlatform() === 'bizreach' && cls !== 'checking') {
     const resumeId = getBizreachResumeNumericId(el);
-    if (resumeId) {
-      _bizreachBadgeRegistry.set(resumeId, {
-        cls, text, tooltip: tooltip || '', profileSummary: profileSummary || '', aiVerdict: aiVerdict || ''
-      });
-    }
+    const key = resumeId || ('fp:' + el.textContent.trim().substring(0, 60));
+    _bizreachBadgeRegistry.set(key, {
+      cls, text, tooltip: tooltip || '', profileSummary: profileSummary || '', aiVerdict: aiVerdict || ''
+    });
   }
 }
 
@@ -2261,8 +2262,8 @@ function reapplyBizreachBadges() {
     document.querySelectorAll('ess-resume-list-item').forEach(el => {
       if (el.querySelector('.snow-we-badge.batch')) return;
       const resumeId = getBizreachResumeNumericId(el);
-      if (!resumeId) return;
-      const state = _bizreachBadgeRegistry.get(resumeId);
+      const key = resumeId || ('fp:' + el.textContent.trim().substring(0, 60));
+      const state = _bizreachBadgeRegistry.get(key);
       if (!state) return;
       setBatchBadge(el, state.cls, state.text, state.tooltip, state.profileSummary, state.aiVerdict);
     });
