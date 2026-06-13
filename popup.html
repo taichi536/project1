@@ -266,6 +266,50 @@
     .gas-advanced-content { margin-top: 8px; }
     .gas-advanced-field { margin-bottom: 7px; }
     .gas-advanced-field .gas-field-label { color: #888780; }
+
+    /* トグルスイッチ */
+    .toggle-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 0; border-bottom: 0.5px solid #DDD9F5;
+    }
+    .toggle-row:last-child { border-bottom: none; }
+    .toggle-text .toggle-label { font-size: 12px; color: #2c2c2a; font-weight: 500; }
+    .toggle-text .toggle-desc { font-size: 10px; color: #888780; margin-top: 1px; }
+    .toggle-switch {
+      position: relative; width: 38px; height: 21px; flex-shrink: 0;
+    }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .toggle-slider {
+      position: absolute; inset: 0; cursor: pointer;
+      background: #d3d1c7; border-radius: 21px; transition: .2s;
+    }
+    .toggle-slider::before {
+      content: ''; position: absolute;
+      width: 15px; height: 15px; left: 3px; bottom: 3px;
+      background: #fff; border-radius: 50%; transition: .2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,.2);
+    }
+    .toggle-switch input:checked + .toggle-slider { background: #534AB7; }
+    .toggle-switch input:checked + .toggle-slider::before { transform: translateX(17px); }
+
+    /* チーム設定コード */
+    .setup-code-section {
+      border: 1px dashed #AFA9EC; border-radius: 10px;
+      padding: 11px; margin-bottom: 14px; background: #FAFAFF;
+    }
+    .setup-code-title {
+      font-size: 12px; font-weight: 700; color: #3C3489; margin-bottom: 4px;
+    }
+    .setup-code-desc { font-size: 10px; color: #888780; margin-bottom: 8px; line-height: 1.6; }
+    .setup-code-box {
+      width: 100%; min-height: 44px; padding: 7px 9px;
+      border: 0.5px solid #d3d1c7; border-radius: 6px;
+      font-size: 10px; font-family: monospace; color: #2c2c2a;
+      background: #fff; resize: none; outline: none; word-break: break-all;
+    }
+    .setup-code-box:focus { border-color: #7F77DD; }
+    .setup-code-btn-row { display: flex; gap: 6px; margin-top: 6px; }
+    .setup-code-msg { font-size: 11px; margin-top: 5px; display: none; }
     .range-row { display: flex; align-items: center; gap: 6px; }
     .range-row input[type="number"] { flex: 1; }
     .range-sep { color: #888780; font-size: 12px; flex-shrink: 0; }
@@ -627,7 +671,32 @@
       <input type="text" id="gas-secret" placeholder="snowwe2024" style="width:100%;">
     </div>
 
-    <button class="save-btn" id="gas-test-btn" style="margin-top:4px; width:100%; font-size:11px;">🔗 接続テスト</button>
+    <!-- 機能ON/OFFトグル -->
+    <div style="margin-top:10px; margin-bottom:4px;">
+      <div class="gas-field-label" style="margin-bottom:6px;">機能のON/OFF</div>
+      <div class="toggle-row">
+        <div class="toggle-text">
+          <div class="toggle-label">スカウト自動記録</div>
+          <div class="toggle-desc">スカウト送信時にスプレッドシートへ記録</div>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="toggle-scout-record" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <div class="toggle-text">
+          <div class="toggle-label">AI訂正フィードバック保存</div>
+          <div class="toggle-desc">訂正ボタン押下時にシートへ保存・次回AI判定に反映</div>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="toggle-feedback" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <button class="save-btn" id="gas-test-btn" style="margin-top:8px; width:100%; font-size:11px;">🔗 接続テスト</button>
     <div id="gas-test-result" style="font-size:11px; margin-top:5px; padding:6px; background:#f5f4f0; border-radius:6px; display:none; word-break:break-all;"></div>
 
     <details class="gas-advanced">
@@ -651,6 +720,22 @@
         </div>
       </div>
     </details>
+  </div>
+
+  <!-- チーム設定コード -->
+  <div class="setup-code-section">
+    <div class="setup-code-title">🔗 チーム設定コード</div>
+    <div class="setup-code-desc">
+      管理者：GAS URLとシークレットをコード化してSlackで共有<br>
+      メンバー：コードを貼り付けて「適用」→ URLが自動入力される<br>
+      ※ APIキーは個人のものなので含まれません
+    </div>
+    <textarea class="setup-code-box" id="setup-code-input" placeholder="コードをここに貼り付け、または「生成」で作成..."></textarea>
+    <div class="setup-code-btn-row">
+      <button class="save-btn" id="apply-setup-code-btn" style="flex:1; font-size:11px;">📥 コードを適用</button>
+      <button class="save-btn" id="generate-setup-code-btn" style="flex:1; font-size:11px;">📤 コードを生成</button>
+    </div>
+    <div class="setup-code-msg" id="setup-code-msg"></div>
   </div>
 
   <button class="settings-save-btn" id="settings-save-btn">設定を保存</button>

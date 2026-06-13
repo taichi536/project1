@@ -1,4 +1,4 @@
-// content.js v1.5.10
+// content.js v1.5.11
 // 各媒体のプロフィールページからテキストを抽出する
 
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
@@ -337,7 +337,7 @@ async function recordScoutSent(candidateId, info, templateName) {
   // Googleスプレッドシートへ自動記録
   const r2 = await chrome.storage.local.get(['gasSettings', 'currentPosition']);
   const gas = r2.gasSettings || {};
-  if (gas.url && gas.recruiter) {
+  if (gas.url && gas.recruiter && gas.scoutRecordEnabled !== false) {
     const ageNum = (info.age || '').replace(/[歳才]/, '');
     const payload = {
       secret: gas.secret,
@@ -2175,11 +2175,11 @@ async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
   await chrome.storage.local.set({ snowWeFeedbacks: feedbacks });
   console.log(`[Snow-we] フィードバック保存: AI=${aiVerdict} → 訂正=${correction} (累計${feedbacks.length}件)`);
 
-  // GASスプレッドシートにも送信（設定済みの場合）
+  // GASスプレッドシートにも送信（設定済み かつ フィードバック保存がONの場合）
   const { gasSettings, screeningCriteria } = await chrome.storage.local.get(['gasSettings', 'screeningCriteria']);
   const gasUrl = gasSettings?.dbUrl || gasSettings?.url;
   const secret = gasSettings?.secret;
-  if (gasUrl && secret) {
+  if (gasUrl && secret && gasSettings?.feedbackEnabled !== false) {
     chrome.runtime.sendMessage({
       type: 'gasPost',
       url: gasUrl,
