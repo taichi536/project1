@@ -1,4 +1,4 @@
-// content.js v1.5.12
+// content.js v1.5.13
 // 各媒体のプロフィールページからテキストを抽出する
 
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
@@ -2139,7 +2139,7 @@ async function judgeSingleCandidate(apiKey, profileText, criteria) {
   let fewShotSection = '';
   if (feedbacks.length > 0) {
     const examples = feedbacks
-      .map(f => `- 「${f.profileSummary.substring(0, 80)}…」 → 正解: ${f.correction}（AIの誤判定: ${f.aiVerdict}）`)
+      .map(f => `- 「${f.profileSummary.substring(0, 200)}…」 → 正解: ${f.correction}（AIの誤判定: ${f.aiVerdict}）`)
       .join('\n');
     fewShotSection = `\n【過去の訂正例（優先参照）】\n以下はAIが誤判定して人間が訂正した実例です。同様のケースは同じ判断をしてください。\n${examples}\n`;
   }
@@ -2207,6 +2207,14 @@ async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
 }
 
 async function loadRecentFeedbacks(limit = 10) {
+  // GASから取得（チーム全員の訂正を共有）
+  try {
+    const result = await chrome.runtime.sendMessage({ type: 'getFeedbacks', limit: Math.max(limit, 30) });
+    if (result?.ok && result.feedbacks?.length > 0) {
+      return result.feedbacks.slice(0, limit);
+    }
+  } catch (_) {}
+  // GAS未設定・失敗時はローカルにフォールバック
   const stored = await chrome.storage.local.get(['snowWeFeedbacks']);
   return (stored.snowWeFeedbacks || []).slice(0, limit);
 }

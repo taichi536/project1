@@ -57,6 +57,28 @@ function doPost(e) {
       return json({ ok: true });
     }
 
+    // ── フィードバック一覧取得（チーム共有用） ──
+    if (data.action === 'getFeedbacks') {
+      const fbSheet = ss.getSheetByName(SHEET_FEEDBACK);
+      if (!fbSheet) return json({ ok: true, feedbacks: [] });
+      const rows = fbSheet.getDataRange().getValues();
+      if (rows.length <= 1) return json({ ok: true, feedbacks: [] });
+      const limit = Math.min(data.limit || 30, 100);
+      const feedbacks = rows.slice(1)
+        .reverse()
+        .slice(0, limit)
+        .map(r => ({
+          ts:             r[0] ? new Date(r[0]).getTime() : 0,
+          recruiter:      String(r[1] || ''),
+          platform:       String(r[2] || ''),
+          aiVerdict:      String(r[3] || ''),
+          correction:     String(r[4] || ''),
+          profileSummary: String(r[5] || ''),
+        }))
+        .filter(f => f.aiVerdict && f.correction && f.profileSummary);
+      return json({ ok: true, feedbacks });
+    }
+
     // ── ポジション要件取得 ──
     if (data.action === 'getPositionRequirements') {
       const posSheet  = ss.getSheetByName(SHEET_POSITIONS);
