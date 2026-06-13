@@ -213,13 +213,12 @@ function writeToDailySheet(ss, data, ts, media, ageVal, industry) {
   Logger.log('日付シート記録: ' + sheetName + ' / ' + recruiter + ' / 行' + nextRow + ' / ' + (data.position || ''));
 }
 
-// ── 業界ドロップダウンを設定（GICS産業リスト）────────────────
+// ── 業界ドロップダウンを設定（GICS産業リスト・1セル用）──────
 function applyIndustryDropdown(sheet, row, col) {
   try {
     const rule = SpreadsheetApp.newDataValidation()
       .requireValueInList(GICS_INDUSTRIES, true)
-      .setAllowInvalid(true)
-      .build();
+      .setAllowInvalid(true).build();
     sheet.getRange(row, col).setDataValidation(rule);
   } catch (err) {
     Logger.log('業界ドロップダウン設定エラー: ' + err.message);
@@ -231,23 +230,34 @@ function applyIndustryDropdown(sheet, row, col) {
 function updateAllIndustryDropdowns() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
-  let updated = 0;
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(GICS_INDUSTRIES, true)
+    .setAllowInvalid(true).build();
+  let sheetCount = 0;
 
   ss.getSheets().forEach(sheet => {
     if (!datePattern.test(sheet.getName())) return;
     const lastRow = sheet.getLastRow();
     if (lastRow < 3) return;
 
+    // 列ごとに範囲でまとめて設定（セル個別でなく範囲指定→高速）
     Object.values(MEMBER_MAP).forEach(startCol => {
       const industryCol = startCol + 5;
-      for (let row = 3; row <= lastRow; row++) {
-        applyIndustryDropdown(sheet, row, industryCol);
-        updated++;
-      }
+      const numRows = lastRow - 2; // 3行目〜lastRow
+      sheet.getRange(3, industryCol, numRows, 1).setDataValidation(rule);
     });
+    sheetCount++;
   });
 
-  const msg = updated + '件の業界セルにGICSドロップダウンを設定しました';
+  // 原本シートにも適用（今後コピーされるシートに引き継がれる）
+  const template = ss.getSheetByName(SHEET_TEMPLATE);
+  if (template) {
+    Object.values(MEMBER_MAP).forEach(startCol => {
+      template.getRange(3, startCol + 5, 500, 1).setDataValidation(rule);
+    });
+  }
+
+  const msg = sheetCount + '枚の日付シートにGICSドロップダウンを設定しました（原本シートも更新済み）';
   Logger.log(msg);
   SpreadsheetApp.getUi().alert(msg);
 }
@@ -299,28 +309,32 @@ function reclassifyAllIndustries() {
 
   ss.getSheets().forEach(sheet => {
     if (!datePattern.test(sheet.getName())) return;
-
     const lastRow = sheet.getLastRow();
     if (lastRow < 3) return;
 
-    Object.values(MEMBER_MAP).forEach(startCol => {
-      const companyCol  = startCol + 1; // 会社名
-      const industryCol = startCol + 5; // 業界
+    Object.entries(MEMBER_MAP).forEach(([, startCol]) => {
+      const companyCol  = startCol + 1; // 会社名（startColから+1）
+      const industryCol = startCol + 5; // 業界（startColから+5）
+      const numRows = lastRow - 2;
 
-      for (let row = 3; row <= lastRow; row++) {
-        const company = String(sheet.getRange(row, companyCol).getValue() || '').trim();
-        if (!company) continue;
+      // 一括読み込み（getValues）でタイムアウト防止
+      const companyVals  = sheet.getRange(3, companyCol,  numRows, 1).getValues();
+      const industryVals = sheet.getRange(3, industryCol, numRows, 1).getValues();
+
+      companyVals.forEach((r, i) => {
+        const company = String(r[0] || '').trim();
+        if (!company) return;
 
         const newIndustry = lookupIndustry(ss, company);
-        if (!newIndustry) { skipped++; continue; }
+        if (!newIndustry) { skipped++; return; }
 
-        const current = String(sheet.getRange(row, industryCol).getValue() || '').trim();
-        if (current === newIndustry) { skipped++; continue; }
+        const current = String(industryVals[i][0] || '').trim();
+        if (current === newIndustry) { skipped++; return; }
 
-        sheet.getRange(row, industryCol).setValue(newIndustry);
+        sheet.getRange(3 + i, industryCol).setValue(newIndustry);
         updated++;
-        Logger.log(sheet.getName() + ' 行' + row + ': ' + company + ' → ' + newIndustry);
-      }
+        Logger.log(sheet.getName() + ' 行' + (3 + i) + ': ' + company + ' → ' + newIndustry);
+      });
     });
   });
 
@@ -384,13 +398,15 @@ function lookupIndustry(ss, companyName) {
 }
 
 // 分類結果をマスターシートにキャッシュ（次回以降は即返却）
+// 既存シートの列構造（会社名・業界・登録方法・登録日）に合わせて追記
 function cacheIndustryToSheet(ss, indSheet, companyName, industry) {
   try {
     if (!indSheet) {
       indSheet = ss.insertSheet(SHEET_INDUSTRY);
-      indSheet.appendRow(['会社名', '業界（GICS産業）']);
+      indSheet.appendRow(['会社名', '業界', '登録方法', '登録日']);
     }
-    indSheet.appendRow([companyName, industry]);
+    const now = new Date();
+    indSheet.appendRow([companyName, industry, '自動', now]);
   } catch (_) {}
 }
 
