@@ -1,4 +1,4 @@
-// content.js v1.5.14
+// content.js v1.5.15
 // 各媒体のプロフィールページからテキストを抽出する
 
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
@@ -1228,9 +1228,11 @@ async function triggerAutoAdd() {
     await sleep(300);
 
     // <a href> でかつ別URLへのリンクならlocation.href移動（フルページロード確定・最も確実）
+    // AMBI: hrefにページ番号が含まれないためonclickを優先（location.hrefだと1ページ目に戻る）
     const nextHref = nextPage.href || nextPage.getAttribute('href');
     const baseHref = (u) => u.split('#')[0];
-    if (nextHref && nextHref !== '#' && !nextHref.startsWith('javascript') &&
+    const isAmbi = getPlatform() === 'ambi';
+    if (!isAmbi && nextHref && nextHref !== '#' && !nextHref.startsWith('javascript') &&
         nextHref !== location.href && baseHref(nextHref) !== baseHref(location.href)) {
       console.log(`[Snow-we] 次ページ: location.href移動 → ${nextHref}`);
       location.href = nextHref;
@@ -1725,6 +1727,12 @@ function getBizreachResumeNumericId(cardEl) {
     if (m) return m[1];
     el = el.parentElement;
   }
+  // 子孫要素も探す（bui-drawer-trigger 等）
+  const child = cardEl.querySelector('[id^="resume-"]');
+  if (child) {
+    const m = child.id.match(/^resume-(\d+)$/);
+    if (m) return m[1];
+  }
   return null;
 }
 
@@ -1762,20 +1770,24 @@ async function clickAddButton(cardEl, tagName) {
   if (platform === 'bizreach') {
     const starBtn = findBizreachStarButton(cardEl);
     if (!starBtn) return false;
-    if (isBizreachStarred(starBtn)) {
-      console.log('[Snow-we] すでにスター済み、スキップ');
-      return false;
-    }
-    // APIを直接呼び出す（最優先）
+
     const resumeNumericId = getBizreachResumeNumericId(cardEl);
+
     if (resumeNumericId) {
-      // セッション内で既にスター済み（別DOM要素での重複防止）
+      // resumeIdがある場合: sessionStorageを正とする
+      // （仮想スクロールでDOMが再利用されると forceBizreachStarOn の checked属性が残るため
+      //   DOM判定より sessionStorage を優先する）
       let starredIds;
       try { starredIds = new Set(JSON.parse(sessionStorage.getItem('snowWeBizreachStarred') || '[]')); }
       catch (_) { starredIds = new Set(); }
       if (starredIds.has(resumeNumericId)) {
         console.log('[Snow-we] セッション内スター済みスキップ:', resumeNumericId);
         forceBizreachStarOn(starBtn);
+        return false;
+      }
+      // DOM確認（本当にスター済みか）
+      if (isBizreachStarred(starBtn)) {
+        console.log('[Snow-we] すでにスター済み（DOM判定）、スキップ');
         return false;
       }
       const apiOk = await callBizreachFavoriteApi(resumeNumericId);
@@ -1786,8 +1798,16 @@ async function clickAddButton(cardEl, tagName) {
         try { sessionStorage.setItem('snowWeBizreachStarred', JSON.stringify([...starredIds])); } catch (_) {}
         return true;
       }
+      console.warn('[Snow-we] APIが失敗、合成クリックにフォールバック');
+    } else {
+      // resumeIdなし: DOM状態のみで判断
+      if (isBizreachStarred(starBtn)) {
+        console.log('[Snow-we] すでにスター済み、スキップ');
+        return false;
+      }
     }
-    // APIが失敗した場合は合成イベントにフォールバック
+
+    // 合成イベントにフォールバック
     const result = await clickBizreachStar(starBtn);
     console.log('[Snow-we] 星クリック結果:', result, '/ checked後:', isBizreachStarred(starBtn));
     return result;
