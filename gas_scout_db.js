@@ -17,6 +17,24 @@ const SHEET_INDUSTRY   = '🏭 業界マスタ';
 
 const STATUS_LIST = ['未返信', '返信あり', '面談設定', '書類選考', '一次面接', '最終面接', '内定', '辞退', '見送り'];
 
+// GICS産業分類（F列・全65種）
+const GICS_INDUSTRIES = [
+  'エネルギー設備・サービス','石油・ガス・消耗燃料','化学','建設資材','容器・包装',
+  '金属・鉱業','紙製品・林産品','航空宇宙・防衛','建設関連製品','建設・土木',
+  '電気設備','コングロマリット','機械','商社・流通業','商業サービス・用品',
+  '航空貨物・物流サービス','旅客航空輸送業','海運業','陸運・鉄道','運送インフラ',
+  '自動車部品','自動車','家庭用耐久財','レジャー用品','繊維・アパレル・贅沢品',
+  'ホテル・レストラン・レジャー','各種消費者サービス','メディア','販売',
+  'インターネット販売・カタログ販売','複合小売り','専門小売り','食品・生活必需品小売り',
+  '飲料','食品','タバコ','家庭用品','パーソナル用品','ヘルスケア機器・用品',
+  'ヘルスケア・プロバイダー/ヘルスケア・サービス','バイオテクノロジー','医薬品',
+  '商業銀行','貯蓄・抵当・不動産金融','各種金融サービス','消費者金融','資本市場',
+  '保険','不動産','インターネットソフトウェア・サービス','情報技術サービス',
+  'ソフトウェア','通信機器','コンピュータ・周辺機器','電子装置・機器','事務用電子機器',
+  '半導体・半導体製造装置','各種電気通信サービス','無線通信サービス',
+  '電力','ガス','総合公益事業','水道','独立系発電事業者・エネルギー販売業者',
+];
+
 const MEDIA_LABEL = {
   rds: 'RDS', bizreach: 'ビズリーチ', dodax: 'doda X',
   ambi: 'AMBI', green: 'Green', mynavi: 'マイナビ'
@@ -188,10 +206,50 @@ function writeToDailySheet(ss, data, ts, media, ageVal, industry) {
     data.position || '', media, industry, ts,
   ]]);
 
-  // ポジション名列（startCol+3）にドロップダウン設定
+  // ポジション名・業界列にドロップダウン設定
   applyPositionDropdown(ss, sheet, nextRow, startCol + 3);
+  applyIndustryDropdown(sheet, nextRow, startCol + 5);
 
   Logger.log('日付シート記録: ' + sheetName + ' / ' + recruiter + ' / 行' + nextRow + ' / ' + (data.position || ''));
+}
+
+// ── 業界ドロップダウンを設定（GICS産業リスト）────────────────
+function applyIndustryDropdown(sheet, row, col) {
+  try {
+    const rule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(GICS_INDUSTRIES, true)
+      .setAllowInvalid(true)
+      .build();
+    sheet.getRange(row, col).setDataValidation(rule);
+  } catch (err) {
+    Logger.log('業界ドロップダウン設定エラー: ' + err.message);
+  }
+}
+
+// 全日付シートの業界列ドロップダウンをGICSに一括更新
+// GASエディタから手動で1回実行してください
+function updateAllIndustryDropdowns() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+  let updated = 0;
+
+  ss.getSheets().forEach(sheet => {
+    if (!datePattern.test(sheet.getName())) return;
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 3) return;
+
+    Object.values(MEMBER_MAP).forEach(startCol => {
+      const industryCol = startCol + 5;
+      for (let row = 3; row <= lastRow; row++) {
+        applyIndustryDropdown(sheet, row, industryCol);
+        updated++;
+      }
+    });
+  });
+
+  const msg = updated + '件の業界セルにGICSドロップダウンを設定しました';
+  Logger.log(msg);
+  SpreadsheetApp.getUi().alert(msg);
 }
 
 // ── ポジション名ドロップダウンを設定 ─────────────────────────
