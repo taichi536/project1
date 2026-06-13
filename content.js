@@ -1,4 +1,4 @@
-// content.js v1.5.13
+// content.js v1.5.14
 // 各媒体のプロフィールページからテキストを抽出する
 
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
@@ -389,6 +389,22 @@ function getCandidateId(cardEl) {
     const fpLines = (cardEl.innerText || '').split('\n').map(l => l.trim()).filter(l => l.length > 3);
     const fp = fpLines.slice(0, 8).join('|');
     if (fp.length > 20) return `bizreach_fp_${simpleHash(fp)}`;
+    return null;
+  }
+
+  // AMBI: No.XXXXX からメンバーIDを抽出（findProfileUrl後にクエリ除去すると全員同じIDになるため先に処理）
+  if (getPlatform() === 'ambi') {
+    const text = cardEl.textContent || '';
+    const noMatch = text.match(/No\.(\d{5,})/);
+    if (noMatch) return `ambi_${noMatch[1]}`;
+    const idEl = cardEl.querySelector('[data-member-id],[data-id],[data-user-id]');
+    if (idEl) {
+      const mid = idEl.dataset.memberId || idEl.dataset.id || idEl.dataset.userId;
+      if (mid) return `ambi_${mid}`;
+    }
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const fp = lines.slice(0, 5).join('|');
+    if (fp.length > 10) return `ambi_h${simpleHash(fp)}`;
     return null;
   }
 
@@ -1221,14 +1237,22 @@ async function triggerAutoAdd() {
       return; // フルページロード後にsessionStorageから再開される
     }
 
-    // href なし（SPA内クリック）→ クリック後URL変化またはDOM変化を検出
+    // href なし / javascript: href（SPA内クリック）→ クリック後URL変化またはDOM変化を検出
     const getCardFingerprint = () => {
       const first = document.querySelector('li[id^="search-result-"]');
       return first ? (first.innerText || '').substring(0, 120) : '';
     };
     const prevUrl = location.href;
     const prevFingerprint = getCardFingerprint();
-    nextPage.click();
+    // AMBI等 <a href="javascript:..."> のCSP対策: href一時除去してdispatchEvent
+    if (nextPage.tagName === 'A' && (nextPage.getAttribute('href') || '').toLowerCase().startsWith('javascript:')) {
+      const savedHref = nextPage.getAttribute('href');
+      nextPage.removeAttribute('href');
+      nextPage.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      nextPage.setAttribute('href', savedHref);
+    } else {
+      nextPage.click();
+    }
 
     // SPA ナビゲーション検出: URLまたはカードDOM内容が変わったら続行（doda-x等URLが変わらないSPA対応）
     for (let w = 0; w < 40; w++) {
