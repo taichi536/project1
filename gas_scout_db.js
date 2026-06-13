@@ -418,30 +418,11 @@ function cacheIndustryToSheet(ss, indSheet, companyName, industry) {
   } catch (_) {}
 }
 
-// ── Claude API で GICS産業を自動分類 ─────────────────────────────
-// GASのスクリプトプロパティに ANTHROPIC_API_KEY を設定してください
-// （GASエディタ → プロジェクトの設定 → スクリプトプロパティ）
+// ── Claude API で GICS産業を自動分類（1社） ──────────────────────
 function classifyIndustryWithClaude(companyName) {
   try {
     const apiKey = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
     if (!apiKey) return '';
-
-    const industries = [
-      'エネルギー設備・サービス','石油・ガス・消耗燃料','化学','建設資材','容器・包装',
-      '金属・鉱業','紙製品・林産品','航空宇宙・防衛','建設関連製品','建設・土木',
-      '電気設備','コングロマリット','機械','商社・流通業','商業サービス・用品',
-      '航空貨物・物流サービス','旅客航空輸送業','海運業','陸運・鉄道','運送インフラ',
-      '自動車部品','自動車','家庭用耐久財','レジャー用品','繊維・アパレル・贅沢品',
-      'ホテル・レストラン・レジャー','各種消費者サービス','メディア','販売',
-      'インターネット販売・カタログ販売','複合小売り','専門小売り','食品・生活必需品小売り',
-      '飲料','食品','タバコ','家庭用品','パーソナル用品','ヘルスケア機器・用品',
-      'ヘルスケア・プロバイダー/ヘルスケア・サービス','バイオテクノロジー','医薬品',
-      '商業銀行','貯蓄・抵当・不動産金融','各種金融サービス','消費者金融','資本市場',
-      '保険','不動産','インターネットソフトウェア・サービス','情報技術サービス',
-      'ソフトウェア','通信機器','コンピュータ・周辺機器','電子装置・機器','事務用電子機器',
-      '半導体・半導体製造装置','各種電気通信サービス','無線通信サービス',
-      '電力','ガス','総合公益事業','水道','独立系発電事業者・エネルギー販売業者',
-    ];
 
     const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -455,7 +436,7 @@ function classifyIndustryWithClaude(companyName) {
         max_tokens: 30,
         messages: [{
           role: 'user',
-          content: `会社名「${companyName}」をGICS産業分類で分類してください。\n以下のリストから最も適切な産業名を1つだけ返してください（産業名のみ、説明不要）：\n${industries.join('\n')}`,
+          content: `会社名「${companyName}」をGICS産業分類で分類してください。\n以下のリストから最も適切な産業名を1つだけ返してください（産業名のみ、説明不要）：\n${GICS_INDUSTRIES.join('\n')}`,
         }],
       }),
       muteHttpExceptions: true,
@@ -463,10 +444,114 @@ function classifyIndustryWithClaude(companyName) {
 
     if (res.getResponseCode() !== 200) return '';
     const text = (JSON.parse(res.getContentText()).content?.[0]?.text || '').trim();
-    return industries.find(i => text.includes(i)) || '';
+    return GICS_INDUSTRIES.find(i => text.includes(i)) || '';
   } catch (_) {
     return '';
   }
+}
+
+// ── 未分類の会社をClaude APIで一括分類（20社ずつバッチ処理） ──────
+// 全シートで業界が空または旧分類の会社を収集してClaudeで一括分類し
+// マスターシートに保存する。完了後に reclassifyAllIndustries を実行すること。
+function claudeBatchClassify() {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+  if (!apiKey) {
+    SpreadsheetApp.getUi().alert('ANTHROPIC_API_KEY が設定されていません。\nプロジェクトの設定 → スクリプトプロパティ に追加してください。');
+    return;
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+
+  // 未分類の会社名を収集（重複排除）
+  const unclassified = new Set();
+  ss.getSheets().forEach(sheet => {
+    if (!datePattern.test(sheet.getName())) return;
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 3) return;
+
+    Object.entries(MEMBER_MAP).forEach(([, startCol]) => {
+      const companyCol  = startCol + 1;
+      const industryCol = startCol + 5;
+      const numRows = lastRow - 2;
+      const companyVals  = sheet.getRange(3, companyCol,  numRows, 1).getValues();
+      const industryVals = sheet.getRange(3, industryCol, numRows, 1).getValues();
+      companyVals.forEach((r, i) => {
+        const company  = String(r[0] || '').trim();
+        const industry = String(industryVals[i][0] || '').trim();
+        if (!company) return;
+        if (GICS_INDUSTRIES.includes(industry)) return; // 既に正しく分類済み
+        if (gicsAutoClassify(company)) return;          // キーワードで分類可能
+        unclassified.add(company);
+      });
+    });
+  });
+
+  if (unclassified.size === 0) {
+    SpreadsheetApp.getUi().alert('未分類の会社はありません。');
+    return;
+  }
+
+  const companies = Array.from(unclassified);
+  Logger.log('未分類会社数: ' + companies.length);
+
+  // マスターシートを取得または作成
+  let indSheet = ss.getSheetByName(SHEET_INDUSTRY);
+  if (!indSheet) {
+    indSheet = ss.insertSheet(SHEET_INDUSTRY);
+    indSheet.appendRow(['会社名', '業界', '登録方法', '登録日']);
+  }
+
+  // 20社ずつバッチでClaude APIに送る
+  const BATCH_SIZE = 20;
+  let classified = 0;
+
+  for (let i = 0; i < companies.length; i += BATCH_SIZE) {
+    const batch = companies.slice(i, i + BATCH_SIZE);
+
+    try {
+      const prompt = '以下の会社名をそれぞれGICS産業分類で分類してください。\n' +
+        '各会社について、下記リストから最も適切な産業名を1つ選んでください。\n\n' +
+        '【産業リスト】\n' + GICS_INDUSTRIES.join('\n') + '\n\n' +
+        '【会社リスト】\n' + batch.map((c, j) => (j+1) + '. ' + c).join('\n') + '\n\n' +
+        '【回答形式】番号と産業名のみ、各行に1件：\n1. 産業名\n2. 産業名\n...';
+
+      const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        payload: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 600,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+        muteHttpExceptions: true,
+      });
+
+      if (res.getResponseCode() === 200) {
+        const text = (JSON.parse(res.getContentText()).content?.[0]?.text || '');
+        const lines = text.trim().split('\n');
+        batch.forEach((company, j) => {
+          const line = lines[j] || '';
+          const industry = GICS_INDUSTRIES.find(ind => line.includes(ind)) || '';
+          if (industry) {
+            indSheet.appendRow([company, industry, 'Claude一括', new Date()]);
+            classified++;
+            Logger.log(company + ' → ' + industry);
+          }
+        });
+      }
+    } catch (_) {}
+
+    if (i + BATCH_SIZE < companies.length) Utilities.sleep(500);
+  }
+
+  const msg = companies.length + '社中 ' + classified + '社を分類しマスターに保存しました。\n次に reclassifyAllIndustries を実行してください。';
+  Logger.log(msg);
+  SpreadsheetApp.getUi().alert(msg);
 }
 
 // ── GICS F列（産業）キーワード自動分類 ───────────────────────────
