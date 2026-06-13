@@ -313,11 +313,16 @@ function reclassifyAllIndustries() {
     if (lastRow < 3) return;
 
     Object.entries(MEMBER_MAP).forEach(([, startCol]) => {
-      const companyCol  = startCol + 1; // 会社名（startColから+1）
-      const industryCol = startCol + 5; // 業界（startColから+5）
+      const companyCol  = startCol + 1;
+      const industryCol = startCol + 5;
       const numRows = lastRow - 2;
 
-      // 一括読み込み（getValues）でタイムアウト防止
+      // 書き込み前に業界列のバリデーションをGICS+allowInvalid(true)に統一
+      const gicsRule = SpreadsheetApp.newDataValidation()
+        .requireValueInList(GICS_INDUSTRIES, true)
+        .setAllowInvalid(true).build();
+      sheet.getRange(3, industryCol, numRows, 1).setDataValidation(gicsRule);
+
       const companyVals  = sheet.getRange(3, companyCol,  numRows, 1).getValues();
       const industryVals = sheet.getRange(3, industryCol, numRows, 1).getValues();
 
@@ -374,7 +379,10 @@ function lookupIndustry(ss, companyName) {
         const name = norm(String(row[0] || ''));
         if (!name) continue;
         if (name === normCompany || normCompany.includes(name) || name.includes(normCompany)) {
-          return String(row[1] || '');
+          const industry = String(row[1] || '');
+          // GICSリストにある値のみ返す（古い42分類は無視してキーワード/APIで再分類）
+          if (GICS_INDUSTRIES.includes(industry)) return industry;
+          break;
         }
       }
     } catch (_) {}
