@@ -577,8 +577,8 @@ function gicsAutoClassify(companyName) {
   if (/野村総研|nri/.test(n))                                 return '情報技術サービス';
   if (/伊藤忠テクノ|ctc/.test(n))                             return '情報技術サービス';
   if (/インフォシス|infosys|tcs|wipro/.test(n))               return '情報技術サービス';
-  if (/デロイト|deloitte|pwc|kpmg|ey |アーンスト/.test(n))    return '各種商業・専門サービス';
-  if (/マッキンゼー|mckinsey|ボストンコンサル|bcg|roland berger|ローランドベルガー|bain|ベイン/.test(n)) return '各種商業・専門サービス';
+  if (/デロイト|deloitte|pwc|kpmg|ey |アーンスト/.test(n))    return '商業サービス・用品';
+  if (/マッキンゼー|mckinsey|ボストンコンサル|bcg|roland berger|ローランドベルガー|bain|ベイン/.test(n)) return '商業サービス・用品';
 
   // 通信
   if (/softbank|ソフトバンク/.test(n))                        return '無線通信サービス';
