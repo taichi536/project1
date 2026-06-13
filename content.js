@@ -1,4 +1,4 @@
-// content.js v1.5.15
+// content.js v1.5.16
 // 各媒体のプロフィールページからテキストを抽出する
 
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
@@ -706,6 +706,41 @@ document.addEventListener('click', e => {
 }, true);
 
 // -------------------------------------------------------
+// Bizreach: バッチ開始前に一番下まで事前スクロール → 先頭に戻る
+// CDK仮想スクロールを初期化し、他サイトと同様の「下まで読んでから先頭処理」を実現
+async function bizreachPreScroll() {
+  showAutoStatus('📥 候補者リストを読み込み中... (下までスクロール)');
+  const viewport = document.querySelector('cdk-virtual-scroll-viewport') ||
+    (() => {
+      const firstCard = document.querySelector('ess-resume-list-item');
+      if (!firstCard) return null;
+      let el = firstCard.parentElement;
+      for (let i = 0; i < 8 && el; i++, el = el.parentElement) {
+        const s = window.getComputedStyle(el);
+        if ((s.overflowY === 'scroll' || s.overflowY === 'auto') && el.scrollHeight > el.clientHeight + 50) return el;
+      }
+      return null;
+    })();
+
+  if (!viewport) {
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    await sleep(1500);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    await sleep(800);
+    return;
+  }
+
+  // 一番下へ（大きな値を指定）
+  const scrollHeight = viewport.scrollHeight || 999999;
+  viewport.scrollTo({ top: scrollHeight, behavior: 'smooth' });
+  await sleep(1500);
+
+  // 先頭へ戻る
+  showAutoStatus('📥 先頭から判定を開始します...');
+  viewport.scrollTo({ top: 0, behavior: 'smooth' });
+  await sleep(1000);
+}
+
 // 「さらに読み込む」ボタンを押して全候補者をDOMに展開
 // -------------------------------------------------------
 async function loadAllCandidatesIntoDOM() {
@@ -980,6 +1015,12 @@ async function triggerAutoAdd() {
 
   // Bizreachは仮想スクロール監視を開始
   if (getPlatform() === 'bizreach') startBizreachBadgeObserver();
+
+  // Bizreach: 初回起動時は一番下までスクロールして先頭に戻る
+  // （他サイトの loadAllCandidatesIntoDOM と同様の動作。CDK仮想スクロールの初期化を安定させる）
+  if (getPlatform() === 'bizreach' && isFreshStart) {
+    await bizreachPreScroll();
+  }
 
   await loadAllCandidatesIntoDOM();
 
@@ -1638,8 +1679,9 @@ function isBizreachStarred(starEl) {
   const aria = toggle.getAttribute('aria-checked');
   if (aria === 'true')  return true;
   if (aria === 'false') return false;
-  // フォールバック：HTML attribute
-  return toggle.getAttribute('checked') === 'true';
+  // getAttribute('checked') は forceBizreachStarOn が書き込む可能性があり
+  // 仮想スクロールDOM再利用で false positive になるためフォールバックとして使わない
+  return false;
 }
 
 // Bizreach 星ボタンを実際にクリックする（API応答を待ってポーリングでチェック）
@@ -2294,10 +2336,23 @@ function showFeedbackPopup(badgeEl) {
         await saveFeedback(profileSummary, aiVerdict, value, platform);
       } catch (_) {}
       // saveFeedbackが失敗してもバッジは必ず更新する
+      const correctedText = value === 'OK' ? '↩ 訂正: OK' : '↩ 訂正: NG';
       badgeEl.className = badgeEl.className.replace(/\b(ok|ng|warn)\b/, 'corrected');
-      badgeEl.textContent = value === 'OK' ? '↩ 訂正: OK' : '↩ 訂正: NG';
+      badgeEl.textContent = correctedText;
       badgeEl.style.cursor = 'default';
       badgeEl.removeEventListener('click', badgeEl._fbHandler);
+      // Bizreach: スクロール後も訂正バッジが保持されるようレジストリを更新
+      if (getPlatform() === 'bizreach') {
+        const cardEl = badgeEl.closest('ess-resume-list-item');
+        if (cardEl) {
+          const resumeId = getBizreachResumeNumericId(cardEl);
+          const key = resumeId || ('fp:' + cardEl.textContent.trim().substring(0, 60));
+          _bizreachBadgeRegistry.set(key, {
+            cls: 'corrected', text: correctedText, tooltip: '',
+            profileSummary: profileSummary, aiVerdict: aiVerdict,
+          });
+        }
+      }
     });
     row.appendChild(btn);
   });
