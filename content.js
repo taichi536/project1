@@ -643,6 +643,12 @@ document.addEventListener('click', e => {
           const positionList = res?.positions || [];
           console.log('[Snow-we] ポジション一覧件数:', positionList.length, '/ 先頭3件:', positionList.slice(0, 3));
           console.log('[Snow-we] メール本文先頭200字:', bodyText.substring(0, 200));
+          // DEBUG: coreTitle先頭5件を確認
+          const debugCoreTitles = sorted.slice(0, 10).map(p => {
+            const core = p.split(/\s[-–—－]\s/)[0].trim();
+            return core.replace(/^[A-Za-z０-９]+[）)]\s*/u, '').trim();
+          });
+          console.log('[Snow-we] DEBUG coreTitle先頭10件:', debugCoreTitles);
           const sorted = [...positionList].sort((a, b) => b.length - a.length);
           const stripSuffix2 = p => p
             .replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '')
