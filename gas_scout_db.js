@@ -232,6 +232,45 @@ function findNextRow(sheet, startCol) {
   return lastRow + 1;
 }
 
+// ── 過去データの業界を一括GICS再分類 ────────────────────────────
+// GASエディタから手動で実行してください（メニュー → 関数を選択 → reclassifyAllIndustries）
+function reclassifyAllIndustries() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+  let updated = 0, skipped = 0;
+
+  ss.getSheets().forEach(sheet => {
+    if (!datePattern.test(sheet.getName())) return;
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 3) return;
+
+    Object.values(MEMBER_MAP).forEach(startCol => {
+      const companyCol  = startCol + 1; // 会社名
+      const industryCol = startCol + 5; // 業界
+
+      for (let row = 3; row <= lastRow; row++) {
+        const company = String(sheet.getRange(row, companyCol).getValue() || '').trim();
+        if (!company) continue;
+
+        const newIndustry = lookupIndustry(ss, company);
+        if (!newIndustry) { skipped++; continue; }
+
+        const current = String(sheet.getRange(row, industryCol).getValue() || '').trim();
+        if (current === newIndustry) { skipped++; continue; }
+
+        sheet.getRange(row, industryCol).setValue(newIndustry);
+        updated++;
+        Logger.log(sheet.getName() + ' 行' + row + ': ' + company + ' → ' + newIndustry);
+      }
+    });
+  });
+
+  const msg = '完了: ' + updated + '件を更新、' + skipped + '件はスキップ（分類不明 or 変更なし）';
+  Logger.log(msg);
+  SpreadsheetApp.getUi().alert(msg);
+}
+
 // ── 日付シート名を取得（送信時刻をJSTに変換して決定） ────────
 // data.ts（Unixミリ秒）を使うのでGASのタイムゾーン設定に依存しない
 function getSheetNameForTs(tsMs) {
