@@ -245,12 +245,17 @@ function getSheetNameForTs(tsMs) {
   return year + '年' + month + '月' + day + '日(' + weekdays[isoDay % 7] + ')';
 }
 
-// ── 業界マスタから業界を取得（マスター未登録時はGICSキーワード自動分類）──
+// ── 業界マスタから業界を取得 ───────────────────────────────────
+// 優先順位: ①マスターシート手動登録 → ②キーワード自動分類 → ③Claude API分類
 function lookupIndustry(ss, companyName) {
   if (!companyName) return '';
-  try {
-    const indSheet = ss.getSheetByName(SHEET_INDUSTRY);
-    if (indSheet) {
+
+  let indSheet = null;
+  try { indSheet = ss.getSheetByName(SHEET_INDUSTRY); } catch (_) {}
+
+  // ① マスターシートを検索
+  if (indSheet) {
+    try {
       const norm = s => s.replace(/[　\s]/g, '').toLowerCase();
       const normCompany = norm(companyName);
       const rows = indSheet.getDataRange().getValues().slice(1);
@@ -261,9 +266,86 @@ function lookupIndustry(ss, companyName) {
           return String(row[1] || '');
         }
       }
+    } catch (_) {}
+  }
+
+  // ② キーワード自動分類
+  const kwResult = gicsAutoClassify(companyName);
+  if (kwResult) {
+    cacheIndustryToSheet(ss, indSheet, companyName, kwResult);
+    return kwResult;
+  }
+
+  // ③ Claude API で分類（APIキーが設定されている場合のみ）
+  const aiResult = classifyIndustryWithClaude(companyName);
+  if (aiResult) {
+    cacheIndustryToSheet(ss, indSheet, companyName, aiResult);
+    return aiResult;
+  }
+
+  return '';
+}
+
+// 分類結果をマスターシートにキャッシュ（次回以降は即返却）
+function cacheIndustryToSheet(ss, indSheet, companyName, industry) {
+  try {
+    if (!indSheet) {
+      indSheet = ss.insertSheet(SHEET_INDUSTRY);
+      indSheet.appendRow(['会社名', '業界（GICS産業）']);
     }
+    indSheet.appendRow([companyName, industry]);
   } catch (_) {}
-  return gicsAutoClassify(companyName);
+}
+
+// ── Claude API で GICS産業を自動分類 ─────────────────────────────
+// GASのスクリプトプロパティに ANTHROPIC_API_KEY を設定してください
+// （GASエディタ → プロジェクトの設定 → スクリプトプロパティ）
+function classifyIndustryWithClaude(companyName) {
+  try {
+    const apiKey = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+    if (!apiKey) return '';
+
+    const industries = [
+      'エネルギー設備・サービス','石油・ガス・消耗燃料','化学','建設資材','容器・包装',
+      '金属・鉱業','紙製品・林産品','航空宇宙・防衛','建設関連製品','建設・土木',
+      '電気設備','コングロマリット','機械','商社・流通業','商業サービス・用品',
+      '航空貨物・物流サービス','旅客航空輸送業','海運業','陸運・鉄道','運送インフラ',
+      '自動車部品','自動車','家庭用耐久財','レジャー用品','繊維・アパレル・贅沢品',
+      'ホテル・レストラン・レジャー','各種消費者サービス','メディア','販売',
+      'インターネット販売・カタログ販売','複合小売り','専門小売り','食品・生活必需品小売り',
+      '飲料','食品','タバコ','家庭用品','パーソナル用品','ヘルスケア機器・用品',
+      'ヘルスケア・プロバイダー/ヘルスケア・サービス','バイオテクノロジー','医薬品',
+      '商業銀行','貯蓄・抵当・不動産金融','各種金融サービス','消費者金融','資本市場',
+      '保険','不動産','インターネットソフトウェア・サービス','情報技術サービス',
+      'ソフトウェア','通信機器','コンピュータ・周辺機器','電子装置・機器','事務用電子機器',
+      '半導体・半導体製造装置','各種電気通信サービス','無線通信サービス',
+      '電力','ガス','総合公益事業','水道','独立系発電事業者・エネルギー販売業者',
+    ];
+
+    const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      payload: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 30,
+        messages: [{
+          role: 'user',
+          content: `会社名「${companyName}」をGICS産業分類で分類してください。\n以下のリストから最も適切な産業名を1つだけ返してください（産業名のみ、説明不要）：\n${industries.join('\n')}`,
+        }],
+      }),
+      muteHttpExceptions: true,
+    });
+
+    if (res.getResponseCode() !== 200) return '';
+    const text = (JSON.parse(res.getContentText()).content?.[0]?.text || '').trim();
+    return industries.find(i => text.includes(i)) || '';
+  } catch (_) {
+    return '';
+  }
 }
 
 // ── GICS F列（産業）キーワード自動分類 ───────────────────────────
