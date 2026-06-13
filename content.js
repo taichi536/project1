@@ -1,4 +1,4 @@
-// content.js v1.5.9
+// content.js v1.5.10
 // 各媒体のプロフィールページからテキストを抽出する
 
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
@@ -2193,7 +2193,7 @@ async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
         profileSummary,
         ts,
       }
-    });
+    }).catch(err => console.error('[Snow-we] フィードバックGAS送信エラー:', err));
   }
 }
 
