@@ -648,7 +648,7 @@ document.addEventListener('click', e => {
             .replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '')
             .replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '')
             .trim();
-          // 1. 完全一致 → 2. サフィックス除いたタイトルで照合 → 3. コア部分で照合
+          // 1. 完全一致 → 2. サフィックス除去 → 3. コア → 4. プレフィックス（AC）等）も除去
           matched = sorted.find(p => {
             if (!p) return false;
             if (bodyText.includes(p)) return true;
@@ -656,6 +656,8 @@ document.addEventListener('click', e => {
             if (title && title.length >= 8 && bodyText.includes(title)) return true;
             const core = p.split(/\s[-–—－]\s/)[0].trim();
             if (core && core.length >= 8 && bodyText.includes(core)) return true;
+            const coreTitle = core.replace(/^[A-Za-z０-９]+[）)]\s*/u, '').trim();
+            if (coreTitle && coreTitle.length >= 6 && bodyText.includes(coreTitle)) return true;
             return false;
           }) || '';
         } catch (_) {}
