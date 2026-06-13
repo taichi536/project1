@@ -1,4 +1,4 @@
-// content.js v1.5.8
+// content.js v1.5.9
 // 各媒体のプロフィールページからテキストを抽出する
 
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
@@ -1513,6 +1513,32 @@ function findProfileUrl(cardEl) {
     console.log(`[Snow-we] findProfileUrl: doda-x ID未取得 cardId=${cardEl.id}`);
   }
 
+  // AMBI: js_userSet カードは<a>タグを持たない → No.XXXXXXからメンバーIDを抽出してURL構築
+  if (platform === 'ambi') {
+    const cardText = cardEl.textContent || '';
+    const noMatch = cardText.match(/No\.(\d{5,})/);
+    if (noMatch) {
+      const memberId = noMatch[1];
+      const params = new URLSearchParams(location.search);
+      const searchId = params.get('SearchID') || '';
+      const pk = params.get('PK') || '';
+      const qs = [searchId && `SearchID=${searchId}`, pk && `PK=${pk}`].filter(Boolean).join('&');
+      const url = `${location.origin}/company/scout/member/?MemberID=${memberId}${qs ? '&' + qs : ''}`;
+      console.log(`[Snow-we] findProfileUrl: AMBI No.${memberId} → ${url}`);
+      return url;
+    }
+    // data属性からIDを試みる
+    const idEl = cardEl.querySelector('[data-member-id],[data-id],[data-user-id]');
+    if (idEl) {
+      const mid = idEl.dataset.memberId || idEl.dataset.id || idEl.dataset.userId;
+      if (mid) {
+        const url = `${location.origin}/company/scout/member/?MemberID=${mid}`;
+        console.log(`[Snow-we] findProfileUrl: AMBI data属性 MemberID=${mid} → ${url}`);
+        return url;
+      }
+    }
+  }
+
   console.log(`[Snow-we] findProfileUrl: URL未発見 platform=${platform} cardTag=${cardEl.tagName} cardClass=${cardEl.className.substring(0, 50)}`);
   return null;
 }
@@ -2341,18 +2367,24 @@ function findNextPageButton() {
   if (allNumericEls.length > 0) {
     let currentPage = null;
 
-    const activeEl = allNumericEls.find(el => {
+    // Pass 1: 明示的なアクティブクラスで検出（fontWeightより先に判定することで誤検出を防ぐ）
+    // 'on' はAMBIのアクティブページクラス
+    let activeEl = allNumericEls.find(el => {
       if (el.classList.contains('active') || el.classList.contains('current') ||
           el.classList.contains('is-active') || el.classList.contains('is-current') ||
-          el.classList.contains('selected') || el.classList.contains('is-selected')) return true;
+          el.classList.contains('selected') || el.classList.contains('is-selected') ||
+          el.classList.contains('on')) return true;
       if (el.getAttribute('aria-current') === 'page' || el.getAttribute('aria-selected') === 'true') return true;
       if (el.getAttribute('aria-disabled') === 'true' || el.disabled) return true;
-      if (parseInt(getComputedStyle(el).fontWeight) >= 700) return true;
       const parent = el.parentElement;
       if (parent && (parent.classList.contains('active') || parent.classList.contains('current') ||
           parent.classList.contains('is-active') || parent.classList.contains('is-current'))) return true;
       return false;
     });
+    // Pass 2: fontWeightフォールバック（明示クラスで見つからなかった場合のみ）
+    if (!activeEl) {
+      activeEl = allNumericEls.find(el => parseInt(getComputedStyle(el).fontWeight) >= 700);
+    }
 
     if (activeEl) {
       currentPage = parseInt((activeEl.innerText || '').trim(), 10);
