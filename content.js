@@ -1,4 +1,4 @@
-// content.js v1.5.11
+// content.js v1.5.12
 // 各媒体のプロフィールページからテキストを抽出する
 
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
@@ -1844,7 +1844,16 @@ async function clickAddButton(cardEl, tagName) {
   }
   if (!btn) return false;
 
-  btn.click();
+  // AMBI の <a href="javascript:..."> はそのまま click() すると CSP 違反になるため
+  // href を一時的に除去してから click し、直後に戻す
+  if (btn.tagName === 'A' && (btn.getAttribute('href') || '').toLowerCase().startsWith('javascript:')) {
+    const savedHref = btn.getAttribute('href');
+    btn.removeAttribute('href');
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    btn.setAttribute('href', savedHref);
+  } else {
+    btn.click();
+  }
   await sleep(600);
 
   // ダイアログが開いた場合：タグ名入力＋確定
