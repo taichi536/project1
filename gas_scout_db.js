@@ -784,3 +784,162 @@ function setWeeklyTrigger() {
     .timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(9).create();
   Logger.log('週次トリガー設定完了（毎週月曜9時）');
 }
+
+// ── 未分類会社を25シートずつ処理（何度でも実行可・途中再開対応）──
+function batchClassify() {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const props = PropertiesService.getScriptProperties();
+  const apiKey = props.getProperty('ANTHROPIC_API_KEY');
+  if (!apiKey) { SpreadsheetApp.getUi().alert('ANTHROPIC_API_KEY が未設定です。'); return; }
+
+  const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+  const allSheetNames = ss.getSheets().map(s => s.getName()).filter(n => datePattern.test(n));
+  const doneSheets    = new Set(JSON.parse(props.getProperty('BATCH_DONE_SHEETS') || '[]'));
+  const pendingSheets = allSheetNames.filter(n => !doneSheets.has(n));
+
+  if (pendingSheets.length === 0) {
+    props.deleteProperty('BATCH_DONE_SHEETS');
+    SpreadsheetApp.getUi().alert('全シート処理完了！\n次に reclassifyAllIndustries を実行してください。');
+    return;
+  }
+
+  const thisRound = pendingSheets.slice(0, 25);
+
+  let indSheet = ss.getSheetByName(SHEET_INDUSTRY);
+  if (!indSheet) {
+    indSheet = ss.insertSheet(SHEET_INDUSTRY);
+    indSheet.appendRow(['会社名', '業界', '登録方法', '登録日']);
+  }
+  const existingMap = {};
+  indSheet.getDataRange().getValues().slice(1).forEach(r => {
+    const name = String(r[0] || '').trim();
+    const ind  = String(r[1] || '').trim();
+    if (name) existingMap[name] = ind;
+  });
+
+  const maxCol = Math.max(...Object.values(MEMBER_MAP).map(s => s + 5));
+  const unclassified = new Set();
+  thisRound.forEach(sheetName => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return;
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 3) return;
+    const data = sheet.getRange(3, 1, lastRow - 2, maxCol).getValues();
+    Object.values(MEMBER_MAP).forEach(startCol => {
+      data.forEach(row => {
+        const company = String(row[startCol] || '').trim();
+        if (!company || /^\d+$/.test(company)) return;
+        if (existingMap[company] && GICS_INDUSTRIES.includes(existingMap[company])) return;
+        if (gicsAutoClassify(company)) return;
+        unclassified.add(company);
+      });
+    });
+  });
+
+  const companies = Array.from(unclassified);
+  const BATCH = 20;
+  let classified = 0;
+  const newRows = [];
+  for (let i = 0; i < companies.length; i += BATCH) {
+    const batch = companies.slice(i, i + BATCH);
+    try {
+      const prompt = '以下の会社名をGICS産業分類してください。下記リストから1つ選んでください。\n\n【産業リスト】\n' +
+        GICS_INDUSTRIES.join('\n') + '\n\n【会社リスト】\n' +
+        batch.map((c, j) => (j+1)+'. '+c).join('\n') +
+        '\n\n【回答形式】番号と産業名のみ：\n1. 産業名\n2. 産業名\n...';
+      const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        payload: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 600,
+          messages: [{ role: 'user', content: prompt }] }),
+        muteHttpExceptions: true,
+      });
+      if (res.getResponseCode() === 200) {
+        const lines = (JSON.parse(res.getContentText()).content?.[0]?.text || '').trim().split('\n');
+        batch.forEach((company, j) => {
+          const ind = GICS_INDUSTRIES.find(x => (lines[j]||'').includes(x)) || '';
+          if (ind) { newRows.push([company, ind, 'Claude一括', new Date()]); classified++; }
+        });
+      }
+    } catch(_) {}
+    if (i + BATCH < companies.length) Utilities.sleep(300);
+  }
+
+  if (newRows.length > 0) {
+    indSheet.getRange(indSheet.getLastRow()+1, 1, newRows.length, 4).setValues(newRows);
+  }
+
+  thisRound.forEach(n => doneSheets.add(n));
+  props.setProperty('BATCH_DONE_SHEETS', JSON.stringify(Array.from(doneSheets)));
+
+  const remaining = pendingSheets.length - thisRound.length;
+  SpreadsheetApp.getUi().alert(
+    '【' + thisRound.length + 'シート処理完了】\n' +
+    '今回: ' + companies.length + '社収集 → ' + classified + '社分類\n\n' +
+    (remaining > 0
+      ? 'あと ' + remaining + 'シート残っています。\nもう一度 batchClassify を実行してください。'
+      : '全シート完了！\n次に reclassifyAllIndustries を実行してください。'));
+}
+
+// ── 送信日時の表示形式を「yyyy/MM/dd HH:mm」に統一（一度だけ実行）──
+function fixTimestampFormat() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+  const fmt = 'yyyy/MM/dd HH:mm';
+  let count = 0;
+
+  ss.getSheets().forEach(sheet => {
+    if (!datePattern.test(sheet.getName())) return;
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 3) return;
+    Object.values(MEMBER_MAP).forEach(startCol => {
+      sheet.getRange(3, startCol + 6, lastRow - 2, 1).setNumberFormat(fmt);
+    });
+    count++;
+  });
+
+  const tmpl = ss.getSheetByName(SHEET_TEMPLATE);
+  if (tmpl) {
+    Object.values(MEMBER_MAP).forEach(startCol => {
+      tmpl.getRange(3, startCol + 6, 500, 1).setNumberFormat(fmt);
+    });
+  }
+  SpreadsheetApp.getUi().alert(count + '枚のシートに日時フォーマットを適用しました。');
+}
+
+// ── 会社名入力時に業界を自動入力するトリガー設定（一度だけ実行）──
+function setupOnEditTrigger() {
+  ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === 'onEditIndustry') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('onEditIndustry')
+    .forSpreadsheet(SpreadsheetApp.getActiveSpreadsheet())
+    .onEdit()
+    .create();
+  SpreadsheetApp.getUi().alert('設定完了。会社名を入力すると業界が自動入力されます。');
+}
+
+function onEditIndustry(e) {
+  try {
+    const sheet = e.range.getSheet();
+    const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+    if (!datePattern.test(sheet.getName())) return;
+    const col = e.range.getColumn();
+    const row = e.range.getRow();
+    if (row < 3) return;
+    const colMap = {};
+    Object.values(MEMBER_MAP).forEach(startCol => { colMap[startCol + 1] = startCol + 5; });
+    const industryCol = colMap[col];
+    if (!industryCol) return;
+    const companyName = String(e.range.getValue() || '').trim();
+    if (!companyName) return;
+    const current = String(sheet.getRange(row, industryCol).getValue() || '').trim();
+    if (GICS_INDUSTRIES.includes(current)) return;
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const industry = lookupIndustry(ss, companyName);
+    if (industry) {
+      sheet.getRange(row, industryCol).setValue(industry);
+      applyIndustryDropdown(sheet, row, industryCol);
+    }
+  } catch (_) {}
+}
