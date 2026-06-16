@@ -59,8 +59,8 @@ def get_signal(df: pd.DataFrame) -> str:
     hist_now = hist.iloc[-1]
     hist_prev = hist.iloc[-2]
 
-    rsi_buy = rsi < 35
-    rsi_sell = rsi > 65
+    rsi_buy = rsi < 45
+    rsi_sell = rsi > 55
     macd_buy = hist_prev < 0 and hist_now >= 0
     macd_sell = hist_prev > 0 and hist_now <= 0
 
