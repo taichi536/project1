@@ -1,4 +1,4 @@
-// content.js v1.18.29
+// content.js v1.18.30
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -635,12 +635,6 @@ document.addEventListener('click', e => {
           .replace(/[（]/g, '(').replace(/[）]/g, ')')
           .replace(/　/g, ' ').replace(/\s*[-－–—]\s*/g, '-')
           .trim().toLowerCase();
-        // 末尾の部署コード・チーム名を除去（大文字小文字・日本語対応）
-        const stripSuffix = p => p
-          .replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '')
-          .replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '')
-          .trim();
-
         const sorted = [...positionList].sort((a, b) => b.length - a.length);
         const stripSuffix = p => p
           .replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '')
@@ -656,16 +650,15 @@ document.addEventListener('click', e => {
         const matched = candidates.length === 1 ? candidates[0] : '';
         console.log('[Snow-we] テンプレート照合試行: tmplName=', tmplName, '/ matched=', matched || 'なし（templateRawを使用）');
 
+        // 生のテンプレート名は照合結果に関わらず常に保存（照合失敗時のフォールバック用）
+        pending.templateRaw = tmplName;
         if (matched) {
-          // 生のテンプレート名は照合結果に関わらず常に保存（照合失敗時のフォールバック用）
-          pending.templateRaw = tmplName;
-          if (matched) {
-            pending.templateName = matched;
-            console.log('[Snow-we] テンプレート名からポジション照合成功:', matched);
-          } else {
-            console.log('[Snow-we] テンプレート名照合失敗。templateRaw として保存:', tmplName);
-          }
-          sessionStorage.setItem('pendingScout', JSON.stringify(pending));
+          pending.templateName = matched;
+          console.log('[Snow-we] テンプレート名からポジション照合成功:', matched);
+        } else {
+          console.log('[Snow-we] テンプレート名照合失敗。templateRaw として保存:', tmplName);
+        }
+        sessionStorage.setItem('pendingScout', JSON.stringify(pending));
       } catch (err) {
         console.log('[Snow-we] 確定ハンドラエラー:', err);
       }
