@@ -1,4 +1,4 @@
-// popup.js v1.14.0
+// popup.js v1.14.1
 
 const $ = id => document.getElementById(id);
 
@@ -6,13 +6,19 @@ const $ = id => document.getElementById(id);
 // 初期化
 // ============================================================
 document.addEventListener('DOMContentLoaded', async () => {
-  const result = await chrome.storage.local.get(['apiKey', 'currentPosition']);
+  try {
+  const result = await chrome.storage.local.get(['apiKey', 'currentPosition']).catch(() => ({}));
   if (result.apiKey) $('api-key').value = result.apiKey;
 
   // background.js からポジション一覧を取得してセレクタを初期化
+  // MV3サービスワーカーが停止中の場合 sendMessage が失敗することがあるため try-catch
   const currentPosSel = $('current-position-select');
   const posSel = $('position-select');
-  const { positions } = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+  let positions = [];
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+    positions = resp?.positions || [];
+  } catch (_) {}
   (positions || []).forEach(name => {
     const opt = new Option(name, name);
     posSel.appendChild(opt);
@@ -57,6 +63,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   await loadSettings();
+  } catch (e) {
+    console.error('[Snow-we] popup初期化エラー:', e);
+  }
 });
 
 // ============================================================
@@ -117,8 +126,6 @@ async function loadSettings() {
   if (gas.dbUrl) $('gas-db-url').value = gas.dbUrl;
   if (gas.secret) $('gas-secret').value = gas.secret;
   if (gas.positionUrl) $('position-gas-url').value = gas.positionUrl;
-  $('toggle-scout-record').checked = gas.scoutRecordEnabled !== false;
-  $('toggle-feedback').checked = gas.feedbackEnabled !== false;
 
   if (c.companyTiers && c.companyTiers.length > 0) {
     document.querySelectorAll('#company-tier-group .checkbox-item').forEach(label => {
@@ -164,8 +171,6 @@ $('settings-save-btn').addEventListener('click', async () => {
     dbUrl: $('gas-db-url').value.trim(),
     secret: $('gas-secret').value.trim(),
     positionUrl: $('position-gas-url').value.trim(),
-    scoutRecordEnabled: $('toggle-scout-record').checked,
-    feedbackEnabled: $('toggle-feedback').checked,
   };
 
   await chrome.storage.local.set({ screeningCriteria: criteria, gasSettings });
@@ -380,7 +385,7 @@ ${profileText}`;
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 200,
       messages: [{ role: 'user', content: prompt }]
     })
@@ -578,7 +583,7 @@ ${profileText}
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 800,
       messages: [{ role: 'user', content: prompt }]
     })
@@ -1054,56 +1059,6 @@ function renderScreeningResult(result) {
   // コメント
   $('screening-comment').textContent = result.comment || '';
 }
-
-// ============================================================
-// チーム設定コード 生成・適用
-// ============================================================
-$('generate-setup-code-btn').addEventListener('click', async () => {
-  const r = await chrome.storage.local.get(['gasSettings']);
-  const gas = r.gasSettings || {};
-  const msg = $('setup-code-msg');
-  if (!gas.url && !gas.dbUrl) {
-    msg.textContent = '❌ 先にGAS URLを設定・保存してください';
-    msg.style.color = '#A32D2D';
-    msg.style.display = 'block';
-    return;
-  }
-  const payload = { v: 1, url: gas.url || '', secret: gas.secret || '' };
-  if (gas.dbUrl) payload.dbUrl = gas.dbUrl;
-  if (gas.positionUrl) payload.positionUrl = gas.positionUrl;
-  const code = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
-  $('setup-code-input').value = code;
-  $('setup-code-input').select();
-  msg.textContent = '✅ コードを生成しました。全選択してコピーしSlackで共有してください（APIキーは含まれません）';
-  msg.style.color = '#085041';
-  msg.style.display = 'block';
-});
-
-$('apply-setup-code-btn').addEventListener('click', async () => {
-  const code = $('setup-code-input').value.trim();
-  const msg = $('setup-code-msg');
-  if (!code) {
-    msg.textContent = '❌ コードを入力してください';
-    msg.style.color = '#A32D2D';
-    msg.style.display = 'block';
-    return;
-  }
-  try {
-    const data = JSON.parse(decodeURIComponent(escape(atob(code))));
-    if (data.v !== 1) throw new Error('バージョン不一致');
-    if (data.url)         $('gas-url').value         = data.url;
-    if (data.dbUrl)       $('gas-db-url').value       = data.dbUrl;
-    if (data.secret)      $('gas-secret').value       = data.secret;
-    if (data.positionUrl) $('position-gas-url').value = data.positionUrl;
-    msg.textContent = '✅ 設定を反映しました。下の「設定を保存」ボタンを押してください。';
-    msg.style.color = '#085041';
-    msg.style.display = 'block';
-  } catch (e) {
-    msg.textContent = '❌ コードが正しくありません。コピーし直してください。';
-    msg.style.color = '#A32D2D';
-    msg.style.display = 'block';
-  }
-});
 
 // ============================================================
 // APIキー接続テスト

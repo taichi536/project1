@@ -141,32 +141,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  // フィードバック一覧をGASから取得（チーム共有）
-  if (msg.type === 'getFeedbacks') {
-    chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {
-      const url    = gasSettings?.dbUrl || gasSettings?.url;
-      const secret = gasSettings?.secret;
-      if (!url || !secret) {
-        sendResponse({ ok: false, feedbacks: [] });
-        return;
-      }
-      fetch(url, {
-        method: 'POST',
-        body: JSON.stringify({ secret, action: 'getFeedbacks', limit: msg.limit || 30 }),
-      })
-        .then(r => r.json())
-        .then(data => sendResponse(data))
-        .catch(() => sendResponse({ ok: false, feedbacks: [] }));
-    });
-    return true;
-  }
-
   // ポジション一覧を返す（GASスプレッドシートから取得、失敗時はハードコードで代替）
   if (msg.type === 'getPositionList') {
     chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {
-      const positionUrl = gasSettings?.positionUrl || gasSettings?.dbUrl || gasSettings?.url;
+      const positionUrl = gasSettings?.positionUrl;
       const secret = gasSettings?.secret;
-      if (!positionUrl || !secret) {
+      if (!positionUrl) {
         sendResponse({ positions: POSITION_LIST });
         return;
       }
