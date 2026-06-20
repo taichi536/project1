@@ -1,4 +1,4 @@
-// content.js v1.18.47
+// content.js v1.18.48
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -747,7 +747,10 @@ document.addEventListener('click', e => {
         }
         if (!tmplRaw) {
           const activeLabel = searchRoot.querySelector('[class*="selected"] [class*="title"], [class*="active"] [class*="title"], [class*="template"][class*="name"]');
-          if (activeLabel) tmplRaw = (activeLabel.textContent || '').trim();
+          if (activeLabel) {
+            const t = (activeLabel.textContent || '').trim();
+            if (!_cIgnoreTexts.includes(t)) tmplRaw = t;
+          }
         }
 
         // 確定ステップで照合済みなら再照合をスキップ
@@ -809,8 +812,8 @@ document.addEventListener('click', e => {
           }
         } catch (_) {}
 
-        // 生テンプレート名・照合結果を保存（templateRaw は照合失敗時のフォールバック）
-        if (tmplRaw && !pending.templateRaw) pending.templateRaw = tmplRaw;
+        // 生テンプレート名・照合結果を保存（templateRaw は照合失敗時のフォールバック。無効値は保存しない）
+        if (tmplRaw && !pending.templateRaw && !_cIgnoreTexts.includes(tmplRaw)) pending.templateRaw = tmplRaw;
         if (matched) {
           pending.templateName = matched;
           console.log('[Snow-we] ポジション照合成功:', matched);
