@@ -49,6 +49,42 @@ const MEMBER_MAP = {
   'れいしろう': 33,   // AG=年齢, AH=会社名, AI=大学, AJ=ポジション名, AK=媒体, AL=業界, AM=送信日時
 };
 
+// ── 手動入力時の送信日時自動入力（onEdit シンプルトリガー） ──────
+// 日付シート：年齢列（各メンバーの先頭列）に値を入れたとき
+//             送信日時列（年齢列+6）が空なら現在時刻を自動セット
+// スカウト管理DB：担当者列(B)に値を入れたとき送信日時列(A)が空なら現在時刻をセット
+function onEdit(e) {
+  if (!e) return;
+  const sheet = e.range.getSheet();
+  const name  = sheet.getName();
+  const col   = e.range.getColumn();
+  const row   = e.range.getRow();
+  if (row < 3) return; // ヘッダー・集計行は無視
+
+  // ── 日付シート ──
+  if (/\d{4}年\d{1,2}月\d{1,2}日/.test(name)) {
+    const ageCols = Object.values(MEMBER_MAP); // [3, 13, 23, 33]
+    if (!ageCols.includes(col)) return;
+    const val = e.range.getValue();
+    if (val === '' || val === null || val === undefined) return; // 年齢を消しても送信日時はそのまま
+    const tsCell = sheet.getRange(row, col + 6); // 送信日時は年齢から6列後
+    if (tsCell.getValue() === '' || tsCell.getValue() === null || tsCell.getValue() === undefined) {
+      tsCell.setValue(new Date()).setNumberFormat('yyyy/MM/dd HH:mm');
+    }
+    return;
+  }
+
+  // ── スカウト管理DB ──
+  if (name === SHEET_DB && col === 2) { // B列 = 担当者
+    const tsCell = sheet.getRange(row, 1); // A列 = 送信日時
+    const val = e.range.getValue();
+    if (val !== '' && val !== null && val !== undefined &&
+        (tsCell.getValue() === '' || tsCell.getValue() === null || tsCell.getValue() === undefined)) {
+      tsCell.setValue(new Date()).setNumberFormat('yyyy/MM/dd HH:mm');
+    }
+  }
+}
+
 // ── doPost ──────────────────────────────────────────────────
 function doPost(e) {
   try {
@@ -185,7 +221,8 @@ function writeToDailySheet(ss, data, ts, media, ageVal, industry) {
 
   // 送信時刻に対応する日付シートを取得（なければ原本からコピー）
   const sheetName = getSheetNameForTs(data.ts);
-  let sheet = ss.getSheetByName(sheetName);
+  const sheetNameAlt = sheetName.replace('(', '（').replace(')', '）');
+  let sheet = ss.getSheetByName(sheetName) || ss.getSheetByName(sheetNameAlt);
   if (!sheet) {
     const template = ss.getSheetByName(SHEET_TEMPLATE);
     if (!template) {
@@ -305,6 +342,29 @@ function findNextRow(sheet, startCol) {
 function reclassifyAllIndustries() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+
+  // マスターシートを最初に一度だけ読み込む
+  const norm = s => s.replace(/[　\s]/g, '').toLowerCase();
+  const masterMap = {};
+  const indSheet = ss.getSheetByName(SHEET_INDUSTRY);
+  if (indSheet) {
+    indSheet.getDataRange().getValues().slice(1).forEach(r => {
+      const name = String(r[0] || '').trim();
+      const ind  = String(r[1] || '').trim();
+      if (name && GICS_INDUSTRIES.includes(ind)) masterMap[norm(name)] = ind;
+    });
+  }
+  function fastLookup(companyName) {
+    if (!companyName) return '';
+    const nc = norm(companyName);
+    for (const [name, ind] of Object.entries(masterMap)) {
+      if (name === nc || nc.includes(name) || name.includes(nc)) return ind;
+    }
+    return gicsAutoClassify(companyName); // Claude APIは呼ばない
+  }
+
+  const gicsRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(GICS_INDUSTRIES, true).setAllowInvalid(true).build();
   let updated = 0, skipped = 0;
 
   ss.getSheets().forEach(sheet => {
@@ -315,31 +375,30 @@ function reclassifyAllIndustries() {
     Object.entries(MEMBER_MAP).forEach(([, startCol]) => {
       const companyCol  = startCol + 1;
       const industryCol = startCol + 5;
-      const numRows = lastRow - 2;
+      const numRows     = lastRow - 2;
 
-      // 書き込み前に業界列のバリデーションをGICS+allowInvalid(true)に統一
-      const gicsRule = SpreadsheetApp.newDataValidation()
-        .requireValueInList(GICS_INDUSTRIES, true)
-        .setAllowInvalid(true).build();
       sheet.getRange(3, industryCol, numRows, 1).setDataValidation(gicsRule);
 
       const companyVals  = sheet.getRange(3, companyCol,  numRows, 1).getValues();
       const industryVals = sheet.getRange(3, industryCol, numRows, 1).getValues();
 
-      companyVals.forEach((r, i) => {
-        const company = String(r[0] || '').trim();
-        if (!company) return;
-
-        const newIndustry = lookupIndustry(ss, company);
-        if (!newIndustry) { skipped++; return; }
-
-        const current = String(industryVals[i][0] || '').trim();
-        if (current === newIndustry) { skipped++; return; }
-
-        sheet.getRange(3 + i, industryCol).setValue(newIndustry);
+      // 新しい値を配列に収集してから一括書き込み（setValue連発を避ける）
+      let changed = false;
+      const newVals = industryVals.map((r, i) => {
+        const company = String(companyVals[i][0] || '').trim();
+        if (!company) { skipped++; return r; }
+        const current = String(r[0] || '').trim();
+        if (GICS_INDUSTRIES.includes(current)) { skipped++; return r; } // 既に正しい→スキップ
+        const newInd = fastLookup(company);
+        if (!newInd || newInd === current) { skipped++; return r; }
         updated++;
-        Logger.log(sheet.getName() + ' 行' + (3 + i) + ': ' + company + ' → ' + newIndustry);
+        changed = true;
+        return [newInd];
       });
+
+      if (changed) {
+        sheet.getRange(3, industryCol, numRows, 1).setValues(newVals);
+      }
     });
   });
 
@@ -760,7 +819,7 @@ function sendWeeklyReport() {
     topPos.map(([p,c])=>'　• '+p+'：'+c+'件').join('\n'),
     '', '*累計*',
     '　• 累計送信：'+rows.length+'件',
-    '　• 返信率：'+（rows.length>0?Math.round(totalReplied/rows.length*100):0)+'%（'+totalReplied+'件）',
+    '　• 返信率：'+(rows.length>0?Math.round(totalReplied/rows.length*100):0)+'%（'+totalReplied+'件）',
   ].join('\n');
 
   postToSlack(msg);

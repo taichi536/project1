@@ -1,4 +1,4 @@
-// content.js v1.18.48
+// content.js v1.18.29
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -338,13 +338,13 @@ async function getScoutHistory() {
     const r = await chrome.storage.local.get([SCOUT_KEY]);
     return r[SCOUT_KEY] || {};
   } catch (e) {
-    if (!e?.message?.includes('Extension context invalidated'))
-      console.warn('[Snow-we] getScoutHistory error:', e?.message);
+    if (!e.message?.includes('Extension context invalidated'))
+      console.warn('[Snow-we] getScoutHistory error:', e.message);
     return {};
   }
 }
 
-async function recordScoutSent(candidateId, info, templateName, templateRaw = '') {
+async function recordScoutSent(candidateId, info, templateName, templateRaw = '', fallbackPosition = '') {
   if (!candidateId) return;
   const now = Date.now();
   const platform = getPlatform();
@@ -359,12 +359,12 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
   try {
     await chrome.storage.local.set({ [SCOUT_KEY]: history });
   } catch (e) {
-    if (!e?.message?.includes('Extension context invalidated')) console.warn('[Snow-we] recordScoutSent storage error:', e?.message);
+    if (!e.message?.includes('Extension context invalidated')) console.warn('[Snow-we] recordScoutSent storage error:', e.message);
   }
 
   // Googleスプレッドシートへ自動記録
   let r2 = {};
-  try { r2 = await chrome.storage.local.get(['gasSettings']); } catch (_) {}
+  try { r2 = await chrome.storage.local.get(['gasSettings', 'currentPosition']); } catch (_) {}
   const gas = r2.gasSettings || {};
   if (gas.url && gas.recruiter) {
     const ageNum = (info.age || '').replace(/[歳才]/, '');
@@ -375,27 +375,22 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
       age: ageNum,
       univ: info.univ || '',
       media: platform,
-      position: templateName || templateRaw || '',
+      position: templateName || templateRaw || fallbackPosition || r2.currentPosition || '',
       ts: now,
     };
 
-    console.log('[Snow-we] GAS送信payload:', JSON.stringify({ recruiter: payload.recruiter, media: payload.media, position: payload.position, company: payload.company, age: payload.age }));
     // バックグラウンド経由でGASへ送信（content.jsから直接fetchするとCORS/401になるため）
     const sendGas = async (url) => {
       try {
         const r = await chrome.runtime.sendMessage({ type: 'gasPost', url, payload });
-        if (!r?.ok) {
-          console.warn('[Snow-we] GASエラー:', r?.gasError || 'unknown', '/ payload:', JSON.stringify(payload));
-          throw new Error('GAS returned ok:false: ' + (r?.gasError || ''));
-        }
+        if (!r?.ok) throw new Error('GAS returned ok:false');
         console.log('[Snow-we] GAS送信成功:', url.substring(0, 60));
       } catch (e) {
         console.warn('[Snow-we] GAS送信失敗、1秒後リトライ:', e.message);
         await new Promise(resolve => setTimeout(resolve, 1000));
         try {
-          const r2 = await chrome.runtime.sendMessage({ type: 'gasPost', url, payload });
-          if (!r2?.ok) console.warn('[Snow-we] GASリトライもエラー:', r2?.gasError || 'unknown');
-          else console.log('[Snow-we] GAS送信リトライ成功');
+          await chrome.runtime.sendMessage({ type: 'gasPost', url, payload });
+          console.log('[Snow-we] GAS送信リトライ成功');
         } catch (e2) {
           console.warn('[Snow-we] GAS送信リトライも失敗:', e2.message);
         }
@@ -539,7 +534,7 @@ document.addEventListener('click', e => {
 
   const isScoutBtn           = text === 'スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする');
   const isConfirmBtn         = text === '確認';
-  const isSendBtn            = text === '送信' || text === '送信する' || text === 'スカウトを送信する' || text === 'スカウトメールを送信する' || (text.endsWith('送信する') && text.length <= 20);
+  const isSendBtn            = text === '送信' || text === '送信する';
   const isTemplateConfirmBtn = text === '確定';
   if (!isScoutBtn && !isConfirmBtn && !isSendBtn && !isTemplateConfirmBtn) return;
 
@@ -549,6 +544,14 @@ document.addEventListener('click', e => {
   if (isScoutBtn) {
     const cards = findCandidateCardsByPlatform();
     let card = cards.find(c => c.contains(btn) || c === btn.closest('[class*="card"],[class*="row"],li,article'));
+
+    // RDS: ボタンが詳細パネル内にある場合は詳細パネルを優先（リストカードと混同しない）
+    if (getPlatform() === 'rds') {
+      const detailPanel = findRDSDetailPanel();
+      if (detailPanel && detailPanel.contains(btn)) {
+        card = detailPanel;
+      }
+    }
 
     if (!card) {
       if (_selectedCard) {
@@ -577,6 +580,22 @@ document.addEventListener('click', e => {
           id, info: extractBasicInfo(card), ts: Date.now()
         }));
         console.log('[Snow-we] pendingScout を sessionStorage に保存しました');
+        // スカウトボタン押下時のポジション名をフォールバック用に保存（照合失敗時も正しいポジションを記録するため）
+        (async () => {
+          try {
+            const { currentPosition } = await chrome.storage.local.get(['currentPosition']);
+            if (currentPosition) {
+              const raw2 = sessionStorage.getItem('pendingScout');
+              if (raw2) {
+                const p2 = JSON.parse(raw2);
+                if (!p2.fallbackPosition) {
+                  p2.fallbackPosition = currentPosition;
+                  sessionStorage.setItem('pendingScout', JSON.stringify(p2));
+                }
+              }
+            }
+          } catch (_) {}
+        })();
       } else {
         console.log('[Snow-we] candidateId が取得できなかったため保存スキップ');
       }
@@ -589,87 +608,42 @@ document.addEventListener('click', e => {
     const raw = sessionStorage.getItem('pendingScout');
     if (!raw) return;
 
-    // ★ モーダルが閉じる前に同期的にテンプレート名を取得する
-    const _ignoreTexts = ['テンプレートの選択', '選択してください', '-- 選択 --', 'テンプレート選択', '職務要約', '自己PR', '志望動機', 'テンプレート'];
-    let tmplName = '';
-
-    // 戦略1: ラジオボタン選択行
+    // ★ モーダルが閉じる前に同期的にテンプレート名を取得する（非同期にすると消える）
     const checkedRadio = document.querySelector('input[type="radio"]:checked');
-    if (!tmplName && checkedRadio) {
+    let tmplName = '';
+    if (checkedRadio) {
       const row = checkedRadio.closest('tr, [role="row"]') || checkedRadio.closest('li, [class*="row"], [class*="item"]');
       if (row) {
         for (const cell of row.querySelectorAll('td, [role="cell"]')) {
           if (cell.querySelector('input')) continue;
-          const t = (cell.textContent || '').trim();
+          const t = cell.textContent?.trim() || '';
           if (t.length > 3) { tmplName = t; break; }
         }
         if (!tmplName) {
           for (const el of row.querySelectorAll('div, span, p')) {
             if (el.querySelector('input, button')) continue;
-            const t = (el.textContent || '').trim();
+            const t = el.textContent?.trim() || '';
             if (t.length > 3 && t.length < 80) { tmplName = t; break; }
           }
         }
       }
     }
-
-    // 戦略2: チェックボックス行
-    if (!tmplName) {
-      const checkedBox = document.querySelector('input[type="checkbox"]:checked');
-      if (checkedBox) {
-        const row = checkedBox.closest('tr, [role="row"], li, [class*="row"], [class*="item"]');
-        if (row) {
-          for (const el of row.querySelectorAll('td, [role="cell"], span, p')) {
-            if (el.querySelector('input, button')) continue;
-            const t = (el.textContent || '').trim();
-            if (t.length > 3 && t.length < 100) { tmplName = t; break; }
-          }
-        }
-      }
-    }
-
-    // 戦略3: aria-selected / aria-checked
-    if (!tmplName) {
-      const ariaEl = document.querySelector('[aria-selected="true"], [aria-checked="true"]');
-      if (ariaEl) {
-        const row = ariaEl.closest('tr, li, [role="row"], [role="option"]') || ariaEl;
-        for (const el of [row, ...row.querySelectorAll('td, span, p, div')]) {
-          if (el.querySelector('input, button')) continue;
-          const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
-          if (t.length > 3 && t.length < 100) { tmplName = t; break; }
-        }
-      }
-    }
-
-    // 戦略4: セレクトボックス（ignoreTexts を除外）
-    if (!tmplName) {
-      for (const sel of document.querySelectorAll('select')) {
-        const t = (sel.options[sel.selectedIndex]?.text || '').trim();
-        if (t.length > 5 && !_ignoreTexts.includes(t)) { tmplName = t; break; }
-      }
-    }
-
-    // 戦略5: [class*="selected"], [class*="active"] のテキスト（snow-we 系を除外）
-    if (!tmplName) {
-      for (const el of document.querySelectorAll(
-        '[class*="selected"]:not([class*="snow"]):not(body):not(html), ' +
-        '[class*="active"]:not([class*="snow"]):not(body):not(html)'
-      )) {
-        if (el.querySelectorAll('*').length > 10) continue;
-        const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        if (t.length > 5 && t.length < 100 && !_ignoreTexts.includes(t)) { tmplName = t; break; }
-      }
-    }
-
-    console.log('[Snow-we] 確定ボタン: tmplName=', tmplName || '(取得失敗)', '/ radio=', !!checkedRadio);
-    // 求人票タイトル（ポジション名ではない）を除外
-    if (tmplName.startsWith('求人票') || tmplName.startsWith('求人情報')) tmplName = '';
     if (!tmplName) return;
+    console.log('[Snow-we] テンプレート名検出 (同期取得):', tmplName);
 
     (async () => {
       try {
         const pending = JSON.parse(raw);
         if (pending.templateName) return;
+
+        // AC）/ BC( で始まるテンプレート名はポジション名そのもの（スプレッドシートのドロップダウンと同形式）
+        if (/^[AB]C[）(]/.test(tmplName)) {
+          pending.templateRaw = tmplName;
+          pending.templateName = tmplName;
+          console.log('[Snow-we] AC/BC形式テンプレートを直接採用:', tmplName);
+          sessionStorage.setItem('pendingScout', JSON.stringify(pending));
+          return;
+        }
 
         const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
         const positionList = res?.positions || [];
@@ -688,7 +662,7 @@ document.addEventListener('click', e => {
         // 完全一致 → サフィックス除去後一致（一意の場合のみ）の順で照合
         const exactHits = sorted.filter(p => p && normT(tmplName) === normT(p));
         const stripHits = exactHits.length === 0
-          ? sorted.filter(p => { if (!p || typeof p !== 'string') return false; const t = stripSuffix(p); return t.length >= 8 && normT(tmplName) === normT(t); })
+          ? sorted.filter(p => { const t = stripSuffix(p); return t.length >= 8 && normT(tmplName) === normT(t); })
           : [];
         // 候補が複数ある場合は誤マッチを避けるため採用しない
         const candidates = exactHits.length > 0 ? exactHits : stripHits;
@@ -734,27 +708,20 @@ document.addEventListener('click', e => {
           bodyText = histIdx > 50 ? rawPageText.substring(0, histIdx) : rawPageText;
         }
 
-        // 確定ステップで保存済みの templateRaw を優先使用（求人票タイトルは除外）
-        const _cIgnoreTexts = ['テンプレートの選択', '選択してください', '-- 選択 --', 'テンプレート選択', '職務要約', '自己PR', '志望動機', 'テンプレート'];
-        let tmplRaw = pending.templateRaw || '';
-        if (tmplRaw.startsWith('求人票') || tmplRaw.startsWith('求人情報')) tmplRaw = '';
-        if (!tmplRaw) {
-          const tmplSel = searchRoot.querySelector('select');
-          if (tmplSel) {
-            const selText = (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim();
-            if (selText && selText.length > 3 && !_cIgnoreTexts.includes(selText)) tmplRaw = selText;
-          }
+        // モーダル内の選択中テンプレート名を取得（select や data属性）
+        let tmplRaw = '';
+        const tmplSel = searchRoot.querySelector('select');
+        if (tmplSel) {
+          const selText = (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim();
+          if (selText && selText.length > 3) tmplRaw = selText;
         }
         if (!tmplRaw) {
+          // テンプレート名ラベルを探す（selected/active な行のタイトル等）
           const activeLabel = searchRoot.querySelector('[class*="selected"] [class*="title"], [class*="active"] [class*="title"], [class*="template"][class*="name"]');
-          if (activeLabel) {
-            const t = (activeLabel.textContent || '').trim();
-            if (!_cIgnoreTexts.includes(t)) tmplRaw = t;
-          }
+          if (activeLabel) tmplRaw = (activeLabel.textContent || '').trim();
         }
 
-        // 確定ステップで照合済みなら再照合をスキップ
-        let matched = pending.templateName || '';
+        let matched = '';
         try {
           const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
           const positionList = res?.positions || [];
@@ -765,55 +732,48 @@ document.addEventListener('click', e => {
           const stripSuffix2 = p => p
             .replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '')
             .replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '')
-            .replace(/[（(][^（(）)]*[）)]\s*$/, '')
             .trim();
-          // ポジション名は常に本文先頭に登場するため400字に限定（後半の誤マッチを防止）
-          const normBody = normStr(bodyText.substring(0, 400));
+          const normBody = normStr(bodyText);
           console.log('[Snow-we] メール本文先頭200字:', bodyText.substring(0, 200));
           // テンプレート名一致（取得できた場合）→ 本文内ポジション一致（一意のみ）の順で照合
           if (tmplRaw) {
-            const exactHits = sorted.filter(p => p && normStr(tmplRaw) === normStr(p));
-            const stripHits = exactHits.length === 0
-              ? sorted.filter(p => { if (!p || typeof p !== 'string') return false; const t = stripSuffix2(p); return t.length >= 8 && normStr(tmplRaw) === normStr(t); })
-              : [];
-            const tmplCandidates = exactHits.length > 0 ? exactHits : stripHits;
-            if (tmplCandidates.length === 1) matched = tmplCandidates[0];
+            // AC）/ BC( 形式はスプレッドシートのドロップダウンと同形式なので直接採用
+            if (/^[AB]C[）(]/.test(tmplRaw)) {
+              matched = tmplRaw;
+            } else {
+              const exactHits = sorted.filter(p => p && normStr(tmplRaw) === normStr(p));
+              const stripHits = exactHits.length === 0
+                ? sorted.filter(p => { const t = stripSuffix2(p); return t.length >= 8 && normStr(tmplRaw) === normStr(t); })
+                : [];
+              const tmplCandidates = exactHits.length > 0 ? exactHits : stripHits;
+              if (tmplCandidates.length === 1) matched = tmplCandidates[0];
+            }
+          }
+          // 「」引用テキスト照合（BC（FAS）→「FASグループ」等の略称マッチを含む）
+          if (!matched) {
+            const quotedList = [...bodyText.substring(0, 400).matchAll(/「([^」]+)」/g)].map(m => normStr(m[1].trim()));
+            for (const qn of quotedList) {
+              if (qn.length < 3) continue;
+              const qHits = sorted.filter(p => {
+                if (!p || typeof p !== 'string') return false;
+                const np = normStr(p), ns = normStr(stripSuffix2(p));
+                if (np === qn || ns === qn) return true;
+                if (np.startsWith(qn) || ns.startsWith(qn)) return true;
+                const inner = (p.match(/[（(]([^）)]{2,6})[）)]/) || [])[1] || '';
+                return inner && qn.startsWith(normStr(inner));
+              });
+              if (qHits.length === 1) { matched = qHits[0]; break; }
+            }
           }
           // テンプレート名で照合できなかった場合のみ本文照合（一意チェック付き）
           if (!matched) {
             const bodyHits = sorted.filter(p => p && normBody.includes(normStr(p)));
             if (bodyHits.length === 1) matched = bodyHits[0];
           }
-          // フルネーム不一致の場合、サフィックス除去後で再照合
-          if (!matched) {
-            const stripBodyHits = sorted.filter(p => {
-              const stripped = normStr(stripSuffix2(p));
-              return stripped.length >= 8 && normBody.includes(stripped);
-            });
-            if (stripBodyHits.length === 1) matched = stripBodyHits[0];
-          }
-          // さらに、ポジション名の先頭セグメント（/ 前）で照合（一意の場合のみ）
-          if (!matched) {
-            const segBodyHits = sorted.filter(p => {
-              if (!p || typeof p !== 'string') return false;
-              const seg = normStr(p.split('/')[0]).trim();
-              return seg.length >= 6 && normBody.includes(seg);
-            });
-            if (segBodyHits.length === 1) matched = segBodyHits[0];
-          }
-          // 括弧内キーワードで照合（例: （ライフサイエンス領域）→本文中の「ライフサイエンス領域コンサルタント」）
-          if (!matched) {
-            const parenKeyHits = sorted.filter(p => {
-              if (!p || typeof p !== 'string') return false;
-              const inner = (p.match(/[（(]([^）)]{4,})[）)]/) || [])[1] || '';
-              return inner && normBody.includes(normStr(inner));
-            });
-            if (parenKeyHits.length === 1) matched = parenKeyHits[0];
-          }
         } catch (_) {}
 
-        // 生テンプレート名・照合結果を保存（templateRaw は照合失敗時のフォールバック。無効値は保存しない）
-        if (tmplRaw && !pending.templateRaw && !_cIgnoreTexts.includes(tmplRaw)) pending.templateRaw = tmplRaw;
+        // 生テンプレート名・照合結果を保存（templateRaw は照合失敗時のフォールバック）
+        if (tmplRaw && !pending.templateRaw) pending.templateRaw = tmplRaw;
         if (matched) {
           pending.templateName = matched;
           console.log('[Snow-we] ポジション照合成功:', matched);
@@ -835,62 +795,28 @@ document.addEventListener('click', e => {
       try {
         const pending = JSON.parse(raw);
         if (pending && pending.id && Date.now() - pending.ts < 30 * 60 * 1000) {
-          // ポジション取得：まだ未取得ならモーダルから最終手段で取得
-          if (!pending.templateName && !pending.templateRaw) {
-            const modal = document.querySelector('[role="dialog"], [class*="modal" i], [class*="dialog" i], [class*="scout" i]');
-            const searchRoot = modal || document.body;
-
-            // 1. select ドロップダウンから取得（AMBI含む全プラットフォーム）
-            const tmplSel = searchRoot.querySelector('select');
+          // AMBIはテンプレートドロップダウンからポジションを取得
+          if (!pending.templateName && getPlatform() === 'ambi') {
+            const tmplSel = document.querySelector('select');
             const tmplVal = tmplSel ? (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim() : '';
-            const ignoreTexts = ['テンプレートの選択', '選択してください', '-- 選択 --', 'テンプレート選択', '職務要約', '自己PR', '志望動機', 'テンプレート'];
-            if (tmplVal && tmplVal.length > 5 && !ignoreTexts.includes(tmplVal)) {
-              pending.templateRaw = tmplVal;
+            if (tmplVal && tmplVal !== 'テンプレートの選択') {
+              if (!pending.templateRaw) pending.templateRaw = tmplVal;
+              const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+              const positionList = res?.positions || [];
+              const sorted = [...positionList].sort((a, b) => b.length - a.length);
+              const normStr = s => s.replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim();
+              const stripSuffix3 = p => p.replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '').replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '').trim();
+              // 完全一致 → サフィックス除去一致（一意の場合のみ）の順で照合
+              const exactHits = sorted.filter(p => p && normStr(tmplVal) === normStr(p));
+              const stripHits = exactHits.length === 0
+                ? sorted.filter(p => { const t = stripSuffix3(p); return t.length >= 8 && normStr(tmplVal) === normStr(t); })
+                : [];
+              const candidates = exactHits.length > 0 ? exactHits : stripHits;
+              pending.templateName = candidates.length === 1 ? candidates[0] : '';
             }
-
-            // 2. ラジオボタン選択行から取得
-            if (!pending.templateRaw) {
-              const checked = searchRoot.querySelector('input[type="radio"]:checked');
-              if (checked) {
-                const row = checked.closest('tr, li, [class*="row"], [class*="item"]');
-                if (row) {
-                  for (const cell of row.querySelectorAll('td, [role="cell"], div, span')) {
-                    if (cell.querySelector('input')) continue;
-                    const t = (cell.textContent || '').trim();
-                    if (t.length > 3 && t.length < 100) { pending.templateRaw = t; break; }
-                  }
-                }
-              }
-            }
-
-            // 3. モーダル全文をポジション一覧と照合（最長一致）
-            if (!pending.templateName) {
-              try {
-                const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
-                const positionList = res?.positions || [];
-                const normS = s => s.replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim().toLowerCase();
-                const modalText = normS(searchRoot.innerText || '');
-                const hits = positionList.filter(p => p && modalText.includes(normS(p)));
-                if (hits.length >= 1) {
-                  hits.sort((a, b) => b.length - a.length);
-                  pending.templateName = hits[0];
-                  console.log('[Snow-we] 送信時モーダルからポジション照合:', hits[0], '/ 候補数:', hits.length);
-                } else if (pending.templateRaw) {
-                  // templateRaw をポジション一覧と照合
-                  const strNorm = s => s.replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim().toLowerCase();
-                  const stripS = p => p.replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '').replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '').trim();
-                  const sorted = [...positionList].sort((a, b) => b.length - a.length);
-                  const exactH = sorted.filter(p => p && strNorm(pending.templateRaw) === strNorm(p));
-                  const stripH = exactH.length === 0 ? sorted.filter(p => { if (!p || typeof p !== 'string') return false; const t = stripS(p); return t.length >= 8 && strNorm(pending.templateRaw) === strNorm(t); }) : [];
-                  const cands = exactH.length > 0 ? exactH : stripH;
-                  if (cands.length === 1) pending.templateName = cands[0];
-                }
-              } catch (_) {}
-            }
-            console.log('[Snow-we] 送信時ポジション最終結果: templateName=', pending.templateName || 'なし', '/ templateRaw=', pending.templateRaw || 'なし');
           }
-          console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし', '/ templateRaw:', pending.templateRaw || 'なし');
-          recordScoutSent(pending.id, pending.info || {}, pending.templateName || '', pending.templateRaw || '');
+          console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし', '/ templateRaw:', pending.templateRaw || 'なし', '/ fallback:', pending.fallbackPosition || 'なし');
+          recordScoutSent(pending.id, pending.info || {}, pending.templateName || '', pending.templateRaw || '', pending.fallbackPosition || '');
         }
       } catch (_) {}
     })();
@@ -1440,43 +1366,10 @@ async function triggerAutoAdd() {
 
   // doda-x: 全カード処理後、右パネルが開いたままだとページネーションが隠れるためEscapeで閉じる
   if (getPlatform() === 'dodax') {
-    const panel = findDodaxDetailPanel();
-    const escOn = (el) => {
-      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
-      el.dispatchEvent(new KeyboardEvent('keyup',   { key: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
-    };
-    if (panel) {
-      // パネル内の閉じるボタンを探す（×ボタン、Backボタン等）
-      const closeSels = [
-        'button[aria-label*="閉じ"]', 'button[aria-label*="close" i]', 'button[aria-label*="戻"]',
-        '[class*="close" i] button', 'button[class*="close" i]', 'button[class*="back" i]',
-        '[class*="drawer-close"]', '[class*="panel-close"]', '[class*="modal-close"]',
-        'button[class*="icon"]', 'button:first-child', 'button:last-child',
-      ];
-      let closeBtn = null;
-      for (const sel of closeSels) {
-        try { closeBtn = panel.querySelector(sel); } catch (_) {}
-        if (closeBtn) { console.log('[Snow-we] doda X 閉じるボタン発見:', sel); break; }
-      }
-      if (!closeBtn) {
-        // パネルより左側の要素をクリック（バックドロップ効果）
-        const rect = panel.getBoundingClientRect();
-        const backdropX = Math.max(10, rect.left / 2);
-        const backdropY = rect.top + rect.height / 2;
-        const backdropEl = document.elementFromPoint(backdropX, backdropY);
-        if (backdropEl && backdropEl !== panel && !panel.contains(backdropEl)) {
-          console.log('[Snow-we] doda X バックドロップクリック:', backdropEl.tagName, (backdropEl.className || '').substring(0, 40));
-          backdropEl.click();
-          await sleep(400);
-        }
-      } else {
-        closeBtn.click();
-        await sleep(400);
-      }
-      escOn(panel);
-    }
-    escOn(document.activeElement || document.body);
-    escOn(document.documentElement);
+    const closeBtn = document.querySelector('[class*="close" i][class*="panel" i], [class*="panel" i] [class*="close" i], [aria-label*="閉じ"], [aria-label*="close" i]');
+    if (closeBtn) { closeBtn.click(); await sleep(400); }
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent('keyup',   { key: 'Escape', keyCode: 27, bubbles: true }));
     await sleep(1200);
     console.log('[Snow-we] doda X: 右パネルをEscapeで閉じてページネーション検索へ');
   }
@@ -1734,13 +1627,7 @@ async function getFullProfile(cardEl, fallbackText) {
       const text = (panel.innerText || '').trim();
       if (text.length > 200) {
         console.log('[Snow-we] doda X 右パネル取得成功:', text.length, '文字');
-        // textContent は CSS非表示テキスト（転職意向の回答など）も拾う
-        const knownIntents = ['積極的に転職活動中', '転職を検討中', 'いい機会があれば', '今すぐ転職', '情報収集中', '転職は考えていない', '転職の必要性を感じていない'];
-        const tc = (panel.textContent || '').replace(/\s+/g, ' ');
-        const hiddenIntents = knownIntents.filter(k => tc.includes(k) && !text.includes(k));
-        const extra = hiddenIntents.length > 0 ? '\n転職意向: ' + hiddenIntents.join(' / ') : '';
-        if (extra) console.log('[Snow-we] doda X textContent補完 転職意向:', hiddenIntents.join(' / '));
-        return (text + extra).substring(0, 5000);
+        return text.substring(0, 5000);
       }
     }
     console.log('[Snow-we] doda X 右パネル未取得 → カードテキストで代替');
@@ -2224,7 +2111,8 @@ function checkJobChangeIntentNG(profileText) {
   const _intentLines = profileText.split('\n');
   const _intentIdx = _intentLines.findIndex(l => l.includes('転職意向') || l.includes('転職への'));
   if (_intentIdx >= 0) {
-    const _ctx = _intentLines.slice(Math.max(0, _intentIdx - 1), _intentIdx + 10)
+    // 前後2行のコンテキストを出力して構造を把握
+    const _ctx = _intentLines.slice(Math.max(0, _intentIdx - 1), _intentIdx + 4)
       .map((l, i) => `[${_intentIdx - 1 + i}]"${l.trim()}"`)
       .join(' / ');
     console.log('[Snow-we] doda X 転職意向コンテキスト:', _ctx);
@@ -2241,8 +2129,6 @@ function checkJobChangeIntentNG(profileText) {
     '特に転職は考えていない',
     '転職の意向はない',
     '転職意向なし',
-    '転職は考えていない',
-    '転職の必要性を感じていない',
   ];
   const found = ngPhrases.find(p => profileText.includes(p));
   if (found) {
@@ -2833,7 +2719,7 @@ async function saveAutoAddProgress(data) {
     await chrome.storage.local.set({ autoAddProgress: data });
   } catch (e) {
     // Extension context invalidated（拡張機能再読み込み時）は無視
-    if (!e?.message?.includes('Extension context invalidated')) console.warn('[Snow-we] saveAutoAddProgress error:', e?.message);
+    if (!e.message?.includes('Extension context invalidated')) console.warn('[Snow-we] saveAutoAddProgress error:', e.message);
   }
 }
 
