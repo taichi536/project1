@@ -642,10 +642,6 @@ document.addEventListener('click', e => {
           .trim();
 
         const sorted = [...positionList].sort((a, b) => b.length - a.length);
-        const stripSuffix = p => p
-          .replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '')
-          .replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '')
-          .trim();
         // 完全一致 → サフィックス除去後一致（一意の場合のみ）の順で照合
         const exactHits = sorted.filter(p => p && normT(tmplName) === normT(p));
         const stripHits = exactHits.length === 0
