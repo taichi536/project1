@@ -2073,9 +2073,13 @@ function checkJobChangeIntentNG(profileText) {
   const _intentLines = profileText.split('\n');
   const _intentIdx = _intentLines.findIndex(l => l.includes('転職意向') || l.includes('転職への'));
   if (_intentIdx >= 0) {
-    const _label = _intentLines[_intentIdx].trim();
-    const _value = (_intentIdx + 1 < _intentLines.length) ? _intentLines[_intentIdx + 1].trim() : '';
-    console.log('[Snow-we] doda X 転職意向検出:', _value ? `${_label}: ${_value}` : _label);
+    // 前後2行のコンテキストを出力して構造を把握
+    const _ctx = _intentLines.slice(Math.max(0, _intentIdx - 1), _intentIdx + 4)
+      .map((l, i) => `[${_intentIdx - 1 + i}]"${l.trim()}"`)
+      .join(' / ');
+    console.log('[Snow-we] doda X 転職意向コンテキスト:', _ctx);
+  } else {
+    console.log('[Snow-we] doda X 転職意向: フィールド未検出（プロフィールに記載なし）');
   }
 
   // NG 判定（転職意向なし系の表現）
@@ -2085,6 +2089,8 @@ function checkJobChangeIntentNG(profileText) {
     '転職を考えていない',
     'とくに転職は考えていない',
     '特に転職は考えていない',
+    '転職の意向はない',
+    '転職意向なし',
   ];
   const found = ngPhrases.find(p => profileText.includes(p));
   if (found) {
