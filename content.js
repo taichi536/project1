@@ -1,4 +1,4 @@
-// content.js v1.18.29
+// content.js v1.18.37
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -1328,10 +1328,43 @@ async function triggerAutoAdd() {
 
   // doda-x: 全カード処理後、右パネルが開いたままだとページネーションが隠れるためEscapeで閉じる
   if (getPlatform() === 'dodax') {
-    const closeBtn = document.querySelector('[class*="close" i][class*="panel" i], [class*="panel" i] [class*="close" i], [aria-label*="閉じ"], [aria-label*="close" i]');
-    if (closeBtn) { closeBtn.click(); await sleep(400); }
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
-    document.dispatchEvent(new KeyboardEvent('keyup',   { key: 'Escape', keyCode: 27, bubbles: true }));
+    const panel = findDodaxDetailPanel();
+    const escOn = (el) => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
+      el.dispatchEvent(new KeyboardEvent('keyup',   { key: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
+    };
+    if (panel) {
+      // パネル内の閉じるボタンを探す（×ボタン、Backボタン等）
+      const closeSels = [
+        'button[aria-label*="閉じ"]', 'button[aria-label*="close" i]', 'button[aria-label*="戻"]',
+        '[class*="close" i] button', 'button[class*="close" i]', 'button[class*="back" i]',
+        '[class*="drawer-close"]', '[class*="panel-close"]', '[class*="modal-close"]',
+        'button[class*="icon"]', 'button:first-child', 'button:last-child',
+      ];
+      let closeBtn = null;
+      for (const sel of closeSels) {
+        try { closeBtn = panel.querySelector(sel); } catch (_) {}
+        if (closeBtn) { console.log('[Snow-we] doda X 閉じるボタン発見:', sel); break; }
+      }
+      if (!closeBtn) {
+        // パネルより左側の要素をクリック（バックドロップ効果）
+        const rect = panel.getBoundingClientRect();
+        const backdropX = Math.max(10, rect.left / 2);
+        const backdropY = rect.top + rect.height / 2;
+        const backdropEl = document.elementFromPoint(backdropX, backdropY);
+        if (backdropEl && backdropEl !== panel && !panel.contains(backdropEl)) {
+          console.log('[Snow-we] doda X バックドロップクリック:', backdropEl.tagName, (backdropEl.className || '').substring(0, 40));
+          backdropEl.click();
+          await sleep(400);
+        }
+      } else {
+        closeBtn.click();
+        await sleep(400);
+      }
+      escOn(panel);
+    }
+    escOn(document.activeElement || document.body);
+    escOn(document.documentElement);
     await sleep(1200);
     console.log('[Snow-we] doda X: 右パネルをEscapeで閉じてページネーション検索へ');
   }
@@ -1589,7 +1622,13 @@ async function getFullProfile(cardEl, fallbackText) {
       const text = (panel.innerText || '').trim();
       if (text.length > 200) {
         console.log('[Snow-we] doda X 右パネル取得成功:', text.length, '文字');
-        return text.substring(0, 5000);
+        // textContent は CSS非表示テキスト（転職意向の回答など）も拾う
+        const knownIntents = ['積極的に転職活動中', '転職を検討中', 'いい機会があれば', '今すぐ転職', '情報収集中', '転職は考えていない', '転職の必要性を感じていない'];
+        const tc = (panel.textContent || '').replace(/\s+/g, ' ');
+        const hiddenIntents = knownIntents.filter(k => tc.includes(k) && !text.includes(k));
+        const extra = hiddenIntents.length > 0 ? '\n転職意向: ' + hiddenIntents.join(' / ') : '';
+        if (extra) console.log('[Snow-we] doda X textContent補完 転職意向:', hiddenIntents.join(' / '));
+        return (text + extra).substring(0, 5000);
       }
     }
     console.log('[Snow-we] doda X 右パネル未取得 → カードテキストで代替');
@@ -2073,8 +2112,7 @@ function checkJobChangeIntentNG(profileText) {
   const _intentLines = profileText.split('\n');
   const _intentIdx = _intentLines.findIndex(l => l.includes('転職意向') || l.includes('転職への'));
   if (_intentIdx >= 0) {
-    // 前後2行のコンテキストを出力して構造を把握
-    const _ctx = _intentLines.slice(Math.max(0, _intentIdx - 1), _intentIdx + 4)
+    const _ctx = _intentLines.slice(Math.max(0, _intentIdx - 1), _intentIdx + 10)
       .map((l, i) => `[${_intentIdx - 1 + i}]"${l.trim()}"`)
       .join(' / ');
     console.log('[Snow-we] doda X 転職意向コンテキスト:', _ctx);
@@ -2091,6 +2129,8 @@ function checkJobChangeIntentNG(profileText) {
     '特に転職は考えていない',
     '転職の意向はない',
     '転職意向なし',
+    '転職は考えていない',
+    '転職の必要性を感じていない',
   ];
   const found = ngPhrases.find(p => profileText.includes(p));
   if (found) {
