@@ -1,4 +1,4 @@
-// content.js v1.18.44
+// content.js v1.18.45
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -704,6 +704,7 @@ document.addEventListener('click', e => {
           const stripSuffix2 = p => p
             .replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '')
             .replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '')
+            .replace(/[（(][^（(）)]*[）)]\s*$/, '')
             .trim();
           const normBody = normStr(bodyText);
           console.log('[Snow-we] メール本文先頭200字:', bodyText.substring(0, 200));
@@ -732,10 +733,20 @@ document.addEventListener('click', e => {
           // さらに、ポジション名の先頭セグメント（/ 前）で照合（一意の場合のみ）
           if (!matched) {
             const segBodyHits = sorted.filter(p => {
+              if (!p || typeof p !== 'string') return false;
               const seg = normStr(p.split('/')[0]).trim();
               return seg.length >= 6 && normBody.includes(seg);
             });
             if (segBodyHits.length === 1) matched = segBodyHits[0];
+          }
+          // 括弧内キーワードで照合（例: （ライフサイエンス領域）→本文中の「ライフサイエンス領域コンサルタント」）
+          if (!matched) {
+            const parenKeyHits = sorted.filter(p => {
+              if (!p || typeof p !== 'string') return false;
+              const inner = (p.match(/[（(]([^）)]{4,})[）)]/) || [])[1] || '';
+              return inner && normBody.includes(normStr(inner));
+            });
+            if (parenKeyHits.length === 1) matched = parenKeyHits[0];
           }
         } catch (_) {}
 
