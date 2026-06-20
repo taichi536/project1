@@ -608,9 +608,12 @@ document.addEventListener('click', e => {
     const raw = sessionStorage.getItem('pendingScout');
     if (!raw) return;
 
+    const _ignoreTexts = ['テンプレートの選択', '選択してください', '-- 選択 --', 'テンプレート選択', '職務要約', '自己PR', '志望動機', 'テンプレート'];
+
     // ★ モーダルが閉じる前に同期的にテンプレート名を取得する（非同期にすると消える）
     const checkedRadio = document.querySelector('input[type="radio"]:checked');
     let tmplName = '';
+    // 戦略1: ラジオボタン選択行
     if (checkedRadio) {
       const row = checkedRadio.closest('tr, [role="row"]') || checkedRadio.closest('li, [class*="row"], [class*="item"]');
       if (row) {
@@ -623,11 +626,51 @@ document.addEventListener('click', e => {
           for (const el of row.querySelectorAll('div, span, p')) {
             if (el.querySelector('input, button')) continue;
             const t = el.textContent?.trim() || '';
-            if (t.length > 3 && t.length < 80) { tmplName = t; break; }
+            if (t.length > 3 && t.length < 120) { tmplName = t; break; }
           }
         }
       }
     }
+    // 戦略2: チェックボックス行
+    if (!tmplName) {
+      const checkedBox = document.querySelector('input[type="checkbox"]:checked');
+      if (checkedBox) {
+        const row = checkedBox.closest('tr, [role="row"]') || checkedBox.closest('li, [class*="row"], [class*="item"]');
+        if (row) {
+          for (const el of row.querySelectorAll('div, span, p, td')) {
+            if (el.querySelector('input, button')) continue;
+            const t = el.textContent?.trim() || '';
+            if (t.length > 3 && t.length < 120 && !_ignoreTexts.includes(t)) { tmplName = t; break; }
+          }
+        }
+      }
+    }
+    // 戦略3: aria-selected / aria-checked
+    if (!tmplName) {
+      const selected = document.querySelector('[aria-selected="true"], [aria-checked="true"]');
+      if (selected) {
+        const t = selected.textContent?.trim() || '';
+        if (t.length > 3 && t.length < 120 && !_ignoreTexts.includes(t)) tmplName = t;
+      }
+    }
+    // 戦略4: セレクトボックス
+    if (!tmplName) {
+      const sel = document.querySelector('select');
+      if (sel) {
+        const t = (sel.options[sel.selectedIndex]?.text || '').trim();
+        if (t.length > 3 && !_ignoreTexts.includes(t)) tmplName = t;
+      }
+    }
+    // 戦略5: [class*="selected"]/[class*="active"]（snow-we系を除外）
+    if (!tmplName) {
+      const activeEl = document.querySelector('[class*="selected"]:not([class*="snow-we"]) [class*="title"], [class*="active"]:not([class*="snow-we"]) [class*="title"], [class*="template"][class*="name"]');
+      if (activeEl) {
+        const t = activeEl.textContent?.trim() || '';
+        if (t.length > 3 && t.length < 120 && !_ignoreTexts.includes(t)) tmplName = t;
+      }
+    }
+    console.log('[Snow-we] 確定ボタン: tmplName=', tmplName || '(取得失敗)', '/ radio=', !!checkedRadio);
+    if (tmplName.startsWith('求人票') || tmplName.startsWith('求人情報')) tmplName = '';
     if (!tmplName) return;
     console.log('[Snow-we] テンプレート名検出 (同期取得):', tmplName);
 
@@ -708,20 +751,27 @@ document.addEventListener('click', e => {
           bodyText = histIdx > 50 ? rawPageText.substring(0, histIdx) : rawPageText;
         }
 
-        // モーダル内の選択中テンプレート名を取得（select や data属性）
-        let tmplRaw = '';
-        const tmplSel = searchRoot.querySelector('select');
-        if (tmplSel) {
-          const selText = (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim();
-          if (selText && selText.length > 3) tmplRaw = selText;
+        const _cIgnoreTexts = ['テンプレートの選択', '選択してください', '-- 選択 --', 'テンプレート選択', '職務要約', '自己PR', '志望動機', 'テンプレート'];
+        // 確定ステップで保存済みの templateRaw を優先使用
+        let tmplRaw = pending.templateRaw || '';
+        if (tmplRaw.startsWith('求人票') || tmplRaw.startsWith('求人情報')) tmplRaw = '';
+        if (!tmplRaw) {
+          const tmplSel = searchRoot.querySelector('select');
+          if (tmplSel) {
+            const selText = (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim();
+            if (selText && selText.length > 3 && !_cIgnoreTexts.includes(selText)) tmplRaw = selText;
+          }
         }
         if (!tmplRaw) {
-          // テンプレート名ラベルを探す（selected/active な行のタイトル等）
           const activeLabel = searchRoot.querySelector('[class*="selected"] [class*="title"], [class*="active"] [class*="title"], [class*="template"][class*="name"]');
-          if (activeLabel) tmplRaw = (activeLabel.textContent || '').trim();
+          if (activeLabel) {
+            const t = (activeLabel.textContent || '').trim();
+            if (!_cIgnoreTexts.includes(t)) tmplRaw = t;
+          }
         }
 
-        let matched = '';
+        // 確定ステップで照合済みなら再照合をスキップ
+        let matched = pending.templateName || '';
         try {
           const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
           const positionList = res?.positions || [];
@@ -733,7 +783,8 @@ document.addEventListener('click', e => {
             .replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '')
             .replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '')
             .trim();
-          const normBody = normStr(bodyText);
+          // ポジション名は本文先頭に登場するため400字に限定（後半の誤マッチを防止）
+          const normBody = normStr(bodyText.substring(0, 400));
           console.log('[Snow-we] メール本文先頭200字:', bodyText.substring(0, 200));
           // テンプレート名一致（取得できた場合）→ 本文内ポジション一致（一意のみ）の順で照合
           if (tmplRaw) {
@@ -772,8 +823,8 @@ document.addEventListener('click', e => {
           }
         } catch (_) {}
 
-        // 生テンプレート名・照合結果を保存（templateRaw は照合失敗時のフォールバック）
-        if (tmplRaw && !pending.templateRaw) pending.templateRaw = tmplRaw;
+        // 生テンプレート名・照合結果を保存（無効値は保存しない）
+        if (tmplRaw && !pending.templateRaw && !_cIgnoreTexts.includes(tmplRaw)) pending.templateRaw = tmplRaw;
         if (matched) {
           pending.templateName = matched;
           console.log('[Snow-we] ポジション照合成功:', matched);
