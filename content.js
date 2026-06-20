@@ -1,4 +1,4 @@
-// content.js v1.18.39
+// content.js v1.18.40
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -715,6 +715,22 @@ document.addEventListener('click', e => {
           if (!matched) {
             const bodyHits = sorted.filter(p => p && normBody.includes(normStr(p)));
             if (bodyHits.length === 1) matched = bodyHits[0];
+          }
+          // フルネーム不一致の場合、サフィックス除去後で再照合
+          if (!matched) {
+            const stripBodyHits = sorted.filter(p => {
+              const stripped = normStr(stripSuffix2(p));
+              return stripped.length >= 8 && normBody.includes(stripped);
+            });
+            if (stripBodyHits.length === 1) matched = stripBodyHits[0];
+          }
+          // さらに、ポジション名の先頭セグメント（/ 前）で照合（一意の場合のみ）
+          if (!matched) {
+            const segBodyHits = sorted.filter(p => {
+              const seg = normStr(p.split('/')[0]).trim();
+              return seg.length >= 6 && normBody.includes(seg);
+            });
+            if (segBodyHits.length === 1) matched = segBodyHits[0];
           }
         } catch (_) {}
 
