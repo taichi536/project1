@@ -1,4 +1,4 @@
-// content.js v1.18.38
+// content.js v1.18.39
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -534,7 +534,7 @@ document.addEventListener('click', e => {
 
   const isScoutBtn           = text === 'スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする');
   const isConfirmBtn         = text === '確認';
-  const isSendBtn            = text === '送信' || text === '送信する';
+  const isSendBtn            = text === '送信' || text === '送信する' || text === 'スカウトを送信する' || text === 'スカウトメールを送信する' || (text.endsWith('送信する') && text.length <= 20);
   const isTemplateConfirmBtn = text === '確定';
   if (!isScoutBtn && !isConfirmBtn && !isSendBtn && !isTemplateConfirmBtn) return;
 
@@ -741,25 +741,59 @@ document.addEventListener('click', e => {
       try {
         const pending = JSON.parse(raw);
         if (pending && pending.id && Date.now() - pending.ts < 30 * 60 * 1000) {
-          // AMBIはテンプレートドロップダウンからポジションを取得
-          if (!pending.templateName && getPlatform() === 'ambi') {
-            const tmplSel = document.querySelector('select');
+          // ポジション取得：まだ未取得ならモーダルから最終手段で取得
+          if (!pending.templateName && !pending.templateRaw) {
+            const modal = document.querySelector('[role="dialog"], [class*="modal" i], [class*="dialog" i], [class*="scout" i]');
+            const searchRoot = modal || document.body;
+
+            // 1. select ドロップダウンから取得（AMBI含む全プラットフォーム）
+            const tmplSel = searchRoot.querySelector('select');
             const tmplVal = tmplSel ? (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim() : '';
-            if (tmplVal && tmplVal !== 'テンプレートの選択') {
-              if (!pending.templateRaw) pending.templateRaw = tmplVal;
-              const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
-              const positionList = res?.positions || [];
-              const sorted = [...positionList].sort((a, b) => b.length - a.length);
-              const normStr = s => s.replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim();
-              const stripSuffix3 = p => p.replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '').replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '').trim();
-              // 完全一致 → サフィックス除去一致（一意の場合のみ）の順で照合
-              const exactHits = sorted.filter(p => p && normStr(tmplVal) === normStr(p));
-              const stripHits = exactHits.length === 0
-                ? sorted.filter(p => { const t = stripSuffix3(p); return t.length >= 8 && normStr(tmplVal) === normStr(t); })
-                : [];
-              const candidates = exactHits.length > 0 ? exactHits : stripHits;
-              pending.templateName = candidates.length === 1 ? candidates[0] : '';
+            const ignoreTexts = ['テンプレートの選択', '選択してください', '-- 選択 --', 'テンプレート選択'];
+            if (tmplVal && tmplVal.length > 3 && !ignoreTexts.includes(tmplVal)) {
+              pending.templateRaw = tmplVal;
             }
+
+            // 2. ラジオボタン選択行から取得
+            if (!pending.templateRaw) {
+              const checked = searchRoot.querySelector('input[type="radio"]:checked');
+              if (checked) {
+                const row = checked.closest('tr, li, [class*="row"], [class*="item"]');
+                if (row) {
+                  for (const cell of row.querySelectorAll('td, [role="cell"], div, span')) {
+                    if (cell.querySelector('input')) continue;
+                    const t = (cell.textContent || '').trim();
+                    if (t.length > 3 && t.length < 100) { pending.templateRaw = t; break; }
+                  }
+                }
+              }
+            }
+
+            // 3. モーダル全文をポジション一覧と照合（最長一致）
+            if (!pending.templateName) {
+              try {
+                const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+                const positionList = res?.positions || [];
+                const normS = s => s.replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim().toLowerCase();
+                const modalText = normS(searchRoot.innerText || '');
+                const hits = positionList.filter(p => p && modalText.includes(normS(p)));
+                if (hits.length >= 1) {
+                  hits.sort((a, b) => b.length - a.length);
+                  pending.templateName = hits[0];
+                  console.log('[Snow-we] 送信時モーダルからポジション照合:', hits[0], '/ 候補数:', hits.length);
+                } else if (pending.templateRaw) {
+                  // templateRaw をポジション一覧と照合
+                  const strNorm = s => s.replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim().toLowerCase();
+                  const stripS = p => p.replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '').replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '').trim();
+                  const sorted = [...positionList].sort((a, b) => b.length - a.length);
+                  const exactH = sorted.filter(p => p && strNorm(pending.templateRaw) === strNorm(p));
+                  const stripH = exactH.length === 0 ? sorted.filter(p => { const t = stripS(p); return t.length >= 8 && strNorm(pending.templateRaw) === strNorm(t); }) : [];
+                  const cands = exactH.length > 0 ? exactH : stripH;
+                  if (cands.length === 1) pending.templateName = cands[0];
+                }
+              } catch (_) {}
+            }
+            console.log('[Snow-we] 送信時ポジション最終結果: templateName=', pending.templateName || 'なし', '/ templateRaw=', pending.templateRaw || 'なし');
           }
           console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし', '/ templateRaw:', pending.templateRaw || 'なし');
           recordScoutSent(pending.id, pending.info || {}, pending.templateName || '', pending.templateRaw || '');
