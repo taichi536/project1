@@ -1,4 +1,4 @@
-// content.js v1.18.45
+// content.js v1.18.46
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -589,28 +589,80 @@ document.addEventListener('click', e => {
     const raw = sessionStorage.getItem('pendingScout');
     if (!raw) return;
 
-    // ★ モーダルが閉じる前に同期的にテンプレート名を取得する（非同期にすると消える）
-    const checkedRadio = document.querySelector('input[type="radio"]:checked');
+    // ★ モーダルが閉じる前に同期的にテンプレート名を取得する
+    const _ignoreTexts = ['テンプレートの選択', '選択してください', '-- 選択 --', 'テンプレート選択', '職務要約', '自己PR', '志望動機', 'テンプレート'];
     let tmplName = '';
-    if (checkedRadio) {
+
+    // 戦略1: ラジオボタン選択行
+    const checkedRadio = document.querySelector('input[type="radio"]:checked');
+    if (!tmplName && checkedRadio) {
       const row = checkedRadio.closest('tr, [role="row"]') || checkedRadio.closest('li, [class*="row"], [class*="item"]');
       if (row) {
         for (const cell of row.querySelectorAll('td, [role="cell"]')) {
           if (cell.querySelector('input')) continue;
-          const t = cell.textContent?.trim() || '';
+          const t = (cell.textContent || '').trim();
           if (t.length > 3) { tmplName = t; break; }
         }
         if (!tmplName) {
           for (const el of row.querySelectorAll('div, span, p')) {
             if (el.querySelector('input, button')) continue;
-            const t = el.textContent?.trim() || '';
+            const t = (el.textContent || '').trim();
             if (t.length > 3 && t.length < 80) { tmplName = t; break; }
           }
         }
       }
     }
+
+    // 戦略2: チェックボックス行
+    if (!tmplName) {
+      const checkedBox = document.querySelector('input[type="checkbox"]:checked');
+      if (checkedBox) {
+        const row = checkedBox.closest('tr, [role="row"], li, [class*="row"], [class*="item"]');
+        if (row) {
+          for (const el of row.querySelectorAll('td, [role="cell"], span, p')) {
+            if (el.querySelector('input, button')) continue;
+            const t = (el.textContent || '').trim();
+            if (t.length > 3 && t.length < 100) { tmplName = t; break; }
+          }
+        }
+      }
+    }
+
+    // 戦略3: aria-selected / aria-checked
+    if (!tmplName) {
+      const ariaEl = document.querySelector('[aria-selected="true"], [aria-checked="true"]');
+      if (ariaEl) {
+        const row = ariaEl.closest('tr, li, [role="row"], [role="option"]') || ariaEl;
+        for (const el of [row, ...row.querySelectorAll('td, span, p, div')]) {
+          if (el.querySelector('input, button')) continue;
+          const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+          if (t.length > 3 && t.length < 100) { tmplName = t; break; }
+        }
+      }
+    }
+
+    // 戦略4: セレクトボックス（ignoreTexts を除外）
+    if (!tmplName) {
+      for (const sel of document.querySelectorAll('select')) {
+        const t = (sel.options[sel.selectedIndex]?.text || '').trim();
+        if (t.length > 5 && !_ignoreTexts.includes(t)) { tmplName = t; break; }
+      }
+    }
+
+    // 戦略5: [class*="selected"], [class*="active"] のテキスト（snow-we 系を除外）
+    if (!tmplName) {
+      for (const el of document.querySelectorAll(
+        '[class*="selected"]:not([class*="snow"]):not(body):not(html), ' +
+        '[class*="active"]:not([class*="snow"]):not(body):not(html)'
+      )) {
+        if (el.querySelectorAll('*').length > 10) continue;
+        const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (t.length > 5 && t.length < 100 && !_ignoreTexts.includes(t)) { tmplName = t; break; }
+      }
+    }
+
+    console.log('[Snow-we] 確定ボタン: tmplName=', tmplName || '(取得失敗)', '/ radio=', !!checkedRadio);
     if (!tmplName) return;
-    console.log('[Snow-we] テンプレート名検出 (同期取得):', tmplName);
 
     (async () => {
       try {
@@ -680,20 +732,22 @@ document.addEventListener('click', e => {
           bodyText = histIdx > 50 ? rawPageText.substring(0, histIdx) : rawPageText;
         }
 
-        // モーダル内の選択中テンプレート名を取得（select や data属性）
-        let tmplRaw = '';
-        const tmplSel = searchRoot.querySelector('select');
-        if (tmplSel) {
-          const selText = (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim();
-          if (selText && selText.length > 3) tmplRaw = selText;
+        // 確定ステップで保存済みの templateRaw を優先使用
+        let tmplRaw = pending.templateRaw || '';
+        if (!tmplRaw) {
+          const tmplSel = searchRoot.querySelector('select');
+          if (tmplSel) {
+            const selText = (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim();
+            if (selText && selText.length > 3) tmplRaw = selText;
+          }
         }
         if (!tmplRaw) {
-          // テンプレート名ラベルを探す（selected/active な行のタイトル等）
           const activeLabel = searchRoot.querySelector('[class*="selected"] [class*="title"], [class*="active"] [class*="title"], [class*="template"][class*="name"]');
           if (activeLabel) tmplRaw = (activeLabel.textContent || '').trim();
         }
 
-        let matched = '';
+        // 確定ステップで照合済みなら再照合をスキップ
+        let matched = pending.templateName || '';
         try {
           const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
           const positionList = res?.positions || [];
