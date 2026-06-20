@@ -1,4 +1,4 @@
-// content.js v1.18.43
+// content.js v1.18.44
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -338,8 +338,8 @@ async function getScoutHistory() {
     const r = await chrome.storage.local.get([SCOUT_KEY]);
     return r[SCOUT_KEY] || {};
   } catch (e) {
-    if (!e.message?.includes('Extension context invalidated'))
-      console.warn('[Snow-we] getScoutHistory error:', e.message);
+    if (!e?.message?.includes('Extension context invalidated'))
+      console.warn('[Snow-we] getScoutHistory error:', e?.message);
     return {};
   }
 }
@@ -359,7 +359,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
   try {
     await chrome.storage.local.set({ [SCOUT_KEY]: history });
   } catch (e) {
-    if (!e.message?.includes('Extension context invalidated')) console.warn('[Snow-we] recordScoutSent storage error:', e.message);
+    if (!e?.message?.includes('Extension context invalidated')) console.warn('[Snow-we] recordScoutSent storage error:', e?.message);
   }
 
   // Googleスプレッドシートへ自動記録
@@ -634,7 +634,7 @@ document.addEventListener('click', e => {
         // 完全一致 → サフィックス除去後一致（一意の場合のみ）の順で照合
         const exactHits = sorted.filter(p => p && normT(tmplName) === normT(p));
         const stripHits = exactHits.length === 0
-          ? sorted.filter(p => { const t = stripSuffix(p); return t.length >= 8 && normT(tmplName) === normT(t); })
+          ? sorted.filter(p => { if (!p || typeof p !== 'string') return false; const t = stripSuffix(p); return t.length >= 8 && normT(tmplName) === normT(t); })
           : [];
         // 候補が複数ある場合は誤マッチを避けるため採用しない
         const candidates = exactHits.length > 0 ? exactHits : stripHits;
@@ -711,7 +711,7 @@ document.addEventListener('click', e => {
           if (tmplRaw) {
             const exactHits = sorted.filter(p => p && normStr(tmplRaw) === normStr(p));
             const stripHits = exactHits.length === 0
-              ? sorted.filter(p => { const t = stripSuffix2(p); return t.length >= 8 && normStr(tmplRaw) === normStr(t); })
+              ? sorted.filter(p => { if (!p || typeof p !== 'string') return false; const t = stripSuffix2(p); return t.length >= 8 && normStr(tmplRaw) === normStr(t); })
               : [];
             const tmplCandidates = exactHits.length > 0 ? exactHits : stripHits;
             if (tmplCandidates.length === 1) matched = tmplCandidates[0];
@@ -808,7 +808,7 @@ document.addEventListener('click', e => {
                   const stripS = p => p.replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '').replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '').trim();
                   const sorted = [...positionList].sort((a, b) => b.length - a.length);
                   const exactH = sorted.filter(p => p && strNorm(pending.templateRaw) === strNorm(p));
-                  const stripH = exactH.length === 0 ? sorted.filter(p => { const t = stripS(p); return t.length >= 8 && strNorm(pending.templateRaw) === strNorm(t); }) : [];
+                  const stripH = exactH.length === 0 ? sorted.filter(p => { if (!p || typeof p !== 'string') return false; const t = stripS(p); return t.length >= 8 && strNorm(pending.templateRaw) === strNorm(t); }) : [];
                   const cands = exactH.length > 0 ? exactH : stripH;
                   if (cands.length === 1) pending.templateName = cands[0];
                 }
@@ -2760,7 +2760,7 @@ async function saveAutoAddProgress(data) {
     await chrome.storage.local.set({ autoAddProgress: data });
   } catch (e) {
     // Extension context invalidated（拡張機能再読み込み時）は無視
-    if (!e.message?.includes('Extension context invalidated')) console.warn('[Snow-we] saveAutoAddProgress error:', e.message);
+    if (!e?.message?.includes('Extension context invalidated')) console.warn('[Snow-we] saveAutoAddProgress error:', e?.message);
   }
 }
 
