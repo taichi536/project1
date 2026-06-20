@@ -2591,6 +2591,17 @@ function findNextPageButton() {
     return false;
   };
 
+  // doda-x: フィルターなしで数字テキスト要素をダンプ（ページネーション構造調査用）
+  if (getPlatform() === 'dodax') {
+    const rawDigitEls = Array.from(document.querySelectorAll('a,button,[role="button"],span,div,li,p'))
+      .filter(el => /^\d{1,3}$/.test((el.innerText || '').trim()));
+    console.log('[Snow-we] dodax 数字要素dump (フィルターなし):', rawDigitEls.slice(0, 15).map(e =>
+      `${e.tagName}[${(e.getAttribute('class')||'').substring(0,40)}] ch:${e.children.length} parent:[${(e.parentElement?.getAttribute('class')||'').substring(0,40)}] txt:"${(e.innerText||'').trim()}"`));
+    // paginationクラスを持つ要素も調査
+    const paginationEls = document.querySelectorAll('[class*="pagination" i],[class*="pager" i],[class*="page-num" i],[class*="pageNum" i]');
+    if (paginationEls.length > 0) console.log('[Snow-we] dodax pagination要素:', Array.from(paginationEls).slice(0,5).map(e => `${e.tagName}[${(e.getAttribute('class')||'').substring(0,50)}] txt:"${(e.innerText||'').substring(0,30)}"`));
+  }
+
   const allNumericEls = Array.from(document.querySelectorAll('a,button,[role="button"],span,div,li'))
     .filter(el => {
       const t = (el.innerText || '').trim();
