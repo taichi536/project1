@@ -2597,15 +2597,25 @@ function findNextPageButton() {
     return false;
   };
 
-  // doda-x: フィルターなしで数字テキスト要素をダンプ（ページネーション構造調査用）
+  // doda-x 専用: prts-paging 構造から次ページを取得
   if (getPlatform() === 'dodax') {
-    const rawDigitEls = Array.from(document.querySelectorAll('a,button,[role="button"],span,div,li,p'))
-      .filter(el => /^\d{1,3}$/.test((el.innerText || '').trim()));
-    console.log('[Snow-we] dodax 数字要素dump (フィルターなし):', rawDigitEls.slice(0, 15).map(e =>
-      `${e.tagName}[${(e.getAttribute('class')||'').substring(0,40)}] ch:${e.children.length} parent:[${(e.parentElement?.getAttribute('class')||'').substring(0,40)}] txt:"${(e.innerText||'').trim()}"`));
-    // paginationクラスを持つ要素も調査
-    const paginationEls = document.querySelectorAll('[class*="pagination" i],[class*="pager" i],[class*="page-num" i],[class*="pageNum" i]');
-    if (paginationEls.length > 0) console.log('[Snow-we] dodax pagination要素:', Array.from(paginationEls).slice(0,5).map(e => `${e.tagName}[${(e.getAttribute('class')||'').substring(0,50)}] txt:"${(e.innerText||'').substring(0,30)}"`));
+    const paging = document.querySelector('[class*="prts-paging"]');
+    if (paging) {
+      const items = Array.from(paging.querySelectorAll('li, a'));
+      const activeItem = items.find(el => el.classList.contains('active'));
+      const currentNum = activeItem ? parseInt((activeItem.innerText || '').trim(), 10) : 1;
+      const nextItem = items.find(el => {
+        if (el.classList.contains('active') || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+        const n = parseInt((el.innerText || '').trim(), 10);
+        return !isNaN(n) && n === currentNum + 1;
+      });
+      if (nextItem) {
+        console.log(`[Snow-we] dodax prts-paging 次ページ: ${currentNum} → ${currentNum + 1}`);
+        return nextItem;
+      }
+      console.log(`[Snow-we] dodax prts-paging: 最終ページ (currentPage=${currentNum})`);
+      return null;
+    }
   }
 
   const allNumericEls = Array.from(document.querySelectorAll('a,button,[role="button"],span,div,li'))
