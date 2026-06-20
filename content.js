@@ -1,4 +1,4 @@
-// content.js v1.18.40
+// content.js v1.18.41
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -383,14 +383,18 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     const sendGas = async (url) => {
       try {
         const r = await chrome.runtime.sendMessage({ type: 'gasPost', url, payload });
-        if (!r?.ok) throw new Error('GAS returned ok:false');
+        if (!r?.ok) {
+          console.warn('[Snow-we] GASエラー:', r?.gasError || 'unknown', '/ payload:', JSON.stringify(payload));
+          throw new Error('GAS returned ok:false: ' + (r?.gasError || ''));
+        }
         console.log('[Snow-we] GAS送信成功:', url.substring(0, 60));
       } catch (e) {
         console.warn('[Snow-we] GAS送信失敗、1秒後リトライ:', e.message);
         await new Promise(resolve => setTimeout(resolve, 1000));
         try {
-          await chrome.runtime.sendMessage({ type: 'gasPost', url, payload });
-          console.log('[Snow-we] GAS送信リトライ成功');
+          const r2 = await chrome.runtime.sendMessage({ type: 'gasPost', url, payload });
+          if (!r2?.ok) console.warn('[Snow-we] GASリトライもエラー:', r2?.gasError || 'unknown');
+          else console.log('[Snow-we] GAS送信リトライ成功');
         } catch (e2) {
           console.warn('[Snow-we] GAS送信リトライも失敗:', e2.message);
         }

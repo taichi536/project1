@@ -115,8 +115,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     const { url, payload } = msg;
     if (!url) { sendResponse({ ok: false }); return true; }
     fetch(url, { method: 'POST', body: JSON.stringify(payload) })
-      .then(() => sendResponse({ ok: true }))
-      .catch(() => sendResponse({ ok: false }));
+      .then(r => r.json())
+      .then(data => sendResponse({ ok: data.ok !== false, gasError: data.error || null }))
+      .catch(err => sendResponse({ ok: false, gasError: err.message }));
     return true;
   }
 
