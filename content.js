@@ -1,4 +1,4 @@
-// content.js v1.18.41
+// content.js v1.18.42
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -379,6 +379,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
       ts: now,
     };
 
+    console.log('[Snow-we] GAS送信payload:', JSON.stringify({ recruiter: payload.recruiter, media: payload.media, position: payload.position, company: payload.company, age: payload.age }));
     // バックグラウンド経由でGASへ送信（content.jsから直接fetchするとCORS/401になるため）
     const sendGas = async (url) => {
       try {
