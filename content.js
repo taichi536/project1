@@ -1,4 +1,4 @@
-// content.js v1.18.46
+// content.js v1.18.47
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -662,6 +662,8 @@ document.addEventListener('click', e => {
     }
 
     console.log('[Snow-we] 確定ボタン: tmplName=', tmplName || '(取得失敗)', '/ radio=', !!checkedRadio);
+    // 求人票タイトル（ポジション名ではない）を除外
+    if (tmplName.startsWith('求人票') || tmplName.startsWith('求人情報')) tmplName = '';
     if (!tmplName) return;
 
     (async () => {
@@ -732,13 +734,15 @@ document.addEventListener('click', e => {
           bodyText = histIdx > 50 ? rawPageText.substring(0, histIdx) : rawPageText;
         }
 
-        // 確定ステップで保存済みの templateRaw を優先使用
+        // 確定ステップで保存済みの templateRaw を優先使用（求人票タイトルは除外）
+        const _cIgnoreTexts = ['テンプレートの選択', '選択してください', '-- 選択 --', 'テンプレート選択', '職務要約', '自己PR', '志望動機', 'テンプレート'];
         let tmplRaw = pending.templateRaw || '';
+        if (tmplRaw.startsWith('求人票') || tmplRaw.startsWith('求人情報')) tmplRaw = '';
         if (!tmplRaw) {
           const tmplSel = searchRoot.querySelector('select');
           if (tmplSel) {
             const selText = (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim();
-            if (selText && selText.length > 3) tmplRaw = selText;
+            if (selText && selText.length > 3 && !_cIgnoreTexts.includes(selText)) tmplRaw = selText;
           }
         }
         if (!tmplRaw) {
@@ -760,7 +764,8 @@ document.addEventListener('click', e => {
             .replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '')
             .replace(/[（(][^（(）)]*[）)]\s*$/, '')
             .trim();
-          const normBody = normStr(bodyText);
+          // ポジション名は常に本文先頭に登場するため400字に限定（後半の誤マッチを防止）
+          const normBody = normStr(bodyText.substring(0, 400));
           console.log('[Snow-we] メール本文先頭200字:', bodyText.substring(0, 200));
           // テンプレート名一致（取得できた場合）→ 本文内ポジション一致（一意のみ）の順で照合
           if (tmplRaw) {
