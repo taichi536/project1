@@ -652,16 +652,14 @@ document.addEventListener('click', e => {
         const matched = candidates.length === 1 ? candidates[0] : '';
         console.log('[Snow-we] テンプレート照合試行: tmplName=', tmplName, '/ matched=', matched || 'なし（templateRawを使用）');
 
+        pending.templateRaw = tmplName;
         if (matched) {
-          // 生のテンプレート名は照合結果に関わらず常に保存（照合失敗時のフォールバック用）
-          pending.templateRaw = tmplName;
-          if (matched) {
-            pending.templateName = matched;
-            console.log('[Snow-we] テンプレート名からポジション照合成功:', matched);
-          } else {
-            console.log('[Snow-we] テンプレート名照合失敗。templateRaw として保存:', tmplName);
-          }
-          sessionStorage.setItem('pendingScout', JSON.stringify(pending));
+          pending.templateName = matched;
+          console.log('[Snow-we] テンプレート名からポジション照合成功:', matched);
+        } else {
+          console.log('[Snow-we] テンプレート名照合失敗。templateRaw として保存:', tmplName);
+        }
+        sessionStorage.setItem('pendingScout', JSON.stringify(pending));
       } catch (err) {
         console.log('[Snow-we] 確定ハンドラエラー:', err);
       }
