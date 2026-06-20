@@ -1,4 +1,4 @@
-// content.js v1.18.30
+// content.js v1.18.29
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -635,6 +635,12 @@ document.addEventListener('click', e => {
           .replace(/[（]/g, '(').replace(/[）]/g, ')')
           .replace(/　/g, ' ').replace(/\s*[-－–—]\s*/g, '-')
           .trim().toLowerCase();
+        // 末尾の部署コード・チーム名を除去（大文字小文字・日本語対応）
+        const stripSuffix = p => p
+          .replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '')
+          .replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '')
+          .trim();
+
         const sorted = [...positionList].sort((a, b) => b.length - a.length);
         const stripSuffix = p => p
           .replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '')
@@ -650,15 +656,16 @@ document.addEventListener('click', e => {
         const matched = candidates.length === 1 ? candidates[0] : '';
         console.log('[Snow-we] テンプレート照合試行: tmplName=', tmplName, '/ matched=', matched || 'なし（templateRawを使用）');
 
-        // 生のテンプレート名は照合結果に関わらず常に保存（照合失敗時のフォールバック用）
-        pending.templateRaw = tmplName;
         if (matched) {
-          pending.templateName = matched;
-          console.log('[Snow-we] テンプレート名からポジション照合成功:', matched);
-        } else {
-          console.log('[Snow-we] テンプレート名照合失敗。templateRaw として保存:', tmplName);
-        }
-        sessionStorage.setItem('pendingScout', JSON.stringify(pending));
+          // 生のテンプレート名は照合結果に関わらず常に保存（照合失敗時のフォールバック用）
+          pending.templateRaw = tmplName;
+          if (matched) {
+            pending.templateName = matched;
+            console.log('[Snow-we] テンプレート名からポジション照合成功:', matched);
+          } else {
+            console.log('[Snow-we] テンプレート名照合失敗。templateRaw として保存:', tmplName);
+          }
+          sessionStorage.setItem('pendingScout', JSON.stringify(pending));
       } catch (err) {
         console.log('[Snow-we] 確定ハンドラエラー:', err);
       }
@@ -1327,9 +1334,11 @@ async function triggerAutoAdd() {
 
   // doda-x: 全カード処理後、右パネルが開いたままだとページネーションが隠れるためEscapeで閉じる
   if (getPlatform() === 'dodax') {
+    const closeBtn = document.querySelector('[class*="close" i][class*="panel" i], [class*="panel" i] [class*="close" i], [aria-label*="閉じ"], [aria-label*="close" i]');
+    if (closeBtn) { closeBtn.click(); await sleep(400); }
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
     document.dispatchEvent(new KeyboardEvent('keyup',   { key: 'Escape', keyCode: 27, bubbles: true }));
-    await sleep(600);
+    await sleep(1200);
     console.log('[Snow-we] doda X: 右パネルをEscapeで閉じてページネーション検索へ');
   }
 
@@ -2067,9 +2076,12 @@ function checkJobChangeIntentNG(profileText) {
   if (!profileText || getPlatform() !== 'dodax') return null;
 
   // 転職意向フィールドの行を抽出してログ出力（確認用）
-  const intentLine = profileText.split('\n').find(l => l.includes('転職意向') || l.includes('転職への'));
-  if (intentLine) {
-    console.log('[Snow-we] doda X 転職意向検出:', intentLine.trim());
+  const _intentLines = profileText.split('\n');
+  const _intentIdx = _intentLines.findIndex(l => l.includes('転職意向') || l.includes('転職への'));
+  if (_intentIdx >= 0) {
+    const _label = _intentLines[_intentIdx].trim();
+    const _value = (_intentIdx + 1 < _intentLines.length) ? _intentLines[_intentIdx + 1].trim() : '';
+    console.log('[Snow-we] doda X 転職意向検出:', _value ? `${_label}: ${_value}` : _label);
   }
 
   // NG 判定（転職意向なし系の表現）
@@ -2589,7 +2601,7 @@ function findNextPageButton() {
     .filter(el => {
       const t = (el.innerText || '').trim();
       const n = parseInt(t, 10);
-      if (!/^\d{1,3}$/.test(t) || el.children.length !== 0) return false;
+      if (!/^\d{1,3}$/.test(t) || el.children.length > 1) return false;
       if (n < 1) return false; // 0 は件数表示の可能性が高いので除外
       if (isInModal(el)) return false;
       if (isResultCountEl(el)) return false;
