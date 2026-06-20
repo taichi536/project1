@@ -1,4 +1,4 @@
-// content.js v1.18.42
+// content.js v1.18.43
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -770,8 +770,8 @@ document.addEventListener('click', e => {
             // 1. select ドロップダウンから取得（AMBI含む全プラットフォーム）
             const tmplSel = searchRoot.querySelector('select');
             const tmplVal = tmplSel ? (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim() : '';
-            const ignoreTexts = ['テンプレートの選択', '選択してください', '-- 選択 --', 'テンプレート選択'];
-            if (tmplVal && tmplVal.length > 3 && !ignoreTexts.includes(tmplVal)) {
+            const ignoreTexts = ['テンプレートの選択', '選択してください', '-- 選択 --', 'テンプレート選択', '職務要約', '自己PR', '志望動機', 'テンプレート'];
+            if (tmplVal && tmplVal.length > 5 && !ignoreTexts.includes(tmplVal)) {
               pending.templateRaw = tmplVal;
             }
 
