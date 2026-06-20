@@ -12,7 +12,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // background.js からポジション一覧を取得してセレクタを初期化
   // MV3サービスワーカーが停止中の場合 sendMessage が失敗することがあるため try-catch
-  const currentPosSel = $('current-position-select');
   const posSel = $('position-select');
   let positions = [];
   try {
@@ -20,26 +19,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     positions = resp?.positions || [];
   } catch (_) {}
   (positions || []).forEach(name => {
-    const opt = new Option(name, name);
-    posSel.appendChild(opt);
-    currentPosSel.appendChild(new Option(name, name));
-  });
-  if (result.currentPosition) {
-    posSel.value = result.currentPosition;
-    currentPosSel.value = result.currentPosition;
-  }
-
-  // 上部セレクタ変更 → currentPosition 保存 & 隠しセレクタも同期
-  currentPosSel.addEventListener('change', () => {
-    const val = currentPosSel.value;
-    posSel.value = val;
-    chrome.storage.local.set({ currentPosition: val });
-  });
-
-  // 隠しセレクタ変更時も上部セレクタと同期
-  posSel.addEventListener('change', () => {
-    currentPosSel.value = posSel.value;
-    chrome.storage.local.set({ currentPosition: posSel.value });
+    posSel.appendChild(new Option(name, name));
   });
 
   // タブ切り替え

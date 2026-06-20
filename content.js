@@ -1,4 +1,4 @@
-// content.js v1.18.37
+// content.js v1.18.38
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -344,7 +344,7 @@ async function getScoutHistory() {
   }
 }
 
-async function recordScoutSent(candidateId, info, templateName, templateRaw = '', fallbackPosition = '') {
+async function recordScoutSent(candidateId, info, templateName, templateRaw = '') {
   if (!candidateId) return;
   const now = Date.now();
   const platform = getPlatform();
@@ -364,7 +364,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
 
   // Googleスプレッドシートへ自動記録
   let r2 = {};
-  try { r2 = await chrome.storage.local.get(['gasSettings', 'currentPosition']); } catch (_) {}
+  try { r2 = await chrome.storage.local.get(['gasSettings']); } catch (_) {}
   const gas = r2.gasSettings || {};
   if (gas.url && gas.recruiter) {
     const ageNum = (info.age || '').replace(/[歳才]/, '');
@@ -375,7 +375,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
       age: ageNum,
       univ: info.univ || '',
       media: platform,
-      position: templateName || templateRaw || fallbackPosition || r2.currentPosition || '',
+      position: templateName || templateRaw || '',
       ts: now,
     };
 
@@ -572,22 +572,6 @@ document.addEventListener('click', e => {
           id, info: extractBasicInfo(card), ts: Date.now()
         }));
         console.log('[Snow-we] pendingScout を sessionStorage に保存しました');
-        // スカウトボタン押下時のポジション名をフォールバック用に保存（照合失敗時も正しいポジションを記録するため）
-        (async () => {
-          try {
-            const { currentPosition } = await chrome.storage.local.get(['currentPosition']);
-            if (currentPosition) {
-              const raw2 = sessionStorage.getItem('pendingScout');
-              if (raw2) {
-                const p2 = JSON.parse(raw2);
-                if (!p2.fallbackPosition) {
-                  p2.fallbackPosition = currentPosition;
-                  sessionStorage.setItem('pendingScout', JSON.stringify(p2));
-                }
-              }
-            }
-          } catch (_) {}
-        })();
       } else {
         console.log('[Snow-we] candidateId が取得できなかったため保存スキップ');
       }
@@ -777,8 +761,8 @@ document.addEventListener('click', e => {
               pending.templateName = candidates.length === 1 ? candidates[0] : '';
             }
           }
-          console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし', '/ templateRaw:', pending.templateRaw || 'なし', '/ fallback:', pending.fallbackPosition || 'なし');
-          recordScoutSent(pending.id, pending.info || {}, pending.templateName || '', pending.templateRaw || '', pending.fallbackPosition || '');
+          console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし', '/ templateRaw:', pending.templateRaw || 'なし');
+          recordScoutSent(pending.id, pending.info || {}, pending.templateName || '', pending.templateRaw || '');
         }
       } catch (_) {}
     })();
