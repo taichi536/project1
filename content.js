@@ -611,7 +611,12 @@ document.addEventListener('click', e => {
     const _ignoreTexts = ['テンプレートの選択', '選択してください', '-- 選択 --', 'テンプレート選択', '職務要約', '自己PR', '志望動機', 'テンプレート'];
 
     // ★ モーダルが閉じる前に同期的にテンプレート名を取得する（非同期にすると消える）
-    const checkedRadio = document.querySelector('input[type="radio"]:checked');
+    // 検索範囲をモーダル内に限定（ページ全体から古いactive状態を誤検出するのを防ぐ）
+    const tmplModal = document.querySelector('[role="dialog"]') ||
+                      document.querySelector('[class*="modal" i]') ||
+                      document.querySelector('[class*="dialog" i]') ||
+                      document.body;
+    const checkedRadio = tmplModal.querySelector('input[type="radio"]:checked');
     let tmplName = '';
     // 戦略1: ラジオボタン選択行
     if (checkedRadio) {
@@ -633,7 +638,7 @@ document.addEventListener('click', e => {
     }
     // 戦略2: チェックボックス行
     if (!tmplName) {
-      const checkedBox = document.querySelector('input[type="checkbox"]:checked');
+      const checkedBox = tmplModal.querySelector('input[type="checkbox"]:checked');
       if (checkedBox) {
         const row = checkedBox.closest('tr, [role="row"]') || checkedBox.closest('li, [class*="row"], [class*="item"]');
         if (row) {
@@ -645,29 +650,27 @@ document.addEventListener('click', e => {
         }
       }
     }
-    // 戦略3: aria-selected / aria-checked
+    // 戦略3: aria-selected / aria-checked（モーダル内・一意のみ）
     if (!tmplName) {
-      const selected = document.querySelector('[aria-selected="true"], [aria-checked="true"]');
-      if (selected) {
-        const t = selected.textContent?.trim() || '';
+      const ariaEls = tmplModal.querySelectorAll('[aria-selected="true"], [aria-checked="true"]');
+      if (ariaEls.length === 1) {
+        const t = ariaEls[0].textContent?.trim() || '';
         if (t.length > 3 && t.length < 120 && !_ignoreTexts.includes(t)) tmplName = t;
       }
     }
-    // 戦略4: セレクトボックス
+    // 戦略4: セレクトボックス（モーダル内）
     if (!tmplName) {
-      const sel = document.querySelector('select');
+      const sel = tmplModal.querySelector('select');
       if (sel) {
         const t = (sel.options[sel.selectedIndex]?.text || '').trim();
         if (t.length > 3 && !_ignoreTexts.includes(t)) tmplName = t;
       }
     }
-    // 戦略5: [class*="selected"]/[class*="active"]（snow-we系を除外）
+    // 戦略5: [class*="selected"]/[class*="active"]（モーダル内・一意のみ・snow-we系を除外）
     if (!tmplName) {
-      const activeEl = document.querySelector('[class*="selected"]:not([class*="snow-we"]) [class*="title"], [class*="active"]:not([class*="snow-we"]) [class*="title"], [class*="template"][class*="name"]');
-      if (activeEl) {
-        const t = activeEl.textContent?.trim() || '';
-        if (t.length > 3 && t.length < 120 && !_ignoreTexts.includes(t)) tmplName = t;
-      }
+      const activeEls = Array.from(tmplModal.querySelectorAll('[class*="selected"]:not([class*="snow-we"]) [class*="title"], [class*="active"]:not([class*="snow-we"]) [class*="title"], [class*="template"][class*="name"]'))
+        .filter(el => { const t = el.textContent?.trim() || ''; return t.length > 3 && t.length < 120 && !_ignoreTexts.includes(t) && !t.startsWith('求人票') && !t.startsWith('求人情報'); });
+      if (activeEls.length === 1) tmplName = activeEls[0].textContent?.trim() || '';
     }
     console.log('[Snow-we] 確定ボタン: tmplName=', tmplName || '(取得失敗)', '/ radio=', !!checkedRadio);
     if (tmplName.startsWith('求人票') || tmplName.startsWith('求人情報')) tmplName = '';
