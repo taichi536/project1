@@ -20,6 +20,7 @@ const _posReqCache = new Map();
 
 // Bizreach仮想スクロール対応：バッジ状態レジストリ
 const _bizreachBadgeRegistry = new Map(); // resumeId → {cls, text, tooltip, profileSummary, aiVerdict}
+const _bizreachProfileCache  = new Map(); // resumeId → profileText（同一候補者の2重取得防止）
 let _bizreachObserver = null;
 let _reapplyBizreachTimer = null;
 
@@ -1154,6 +1155,7 @@ async function triggerAutoAdd() {
     document.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
     if (getPlatform() === 'bizreach') {
       _bizreachBadgeRegistry.clear();
+      _bizreachProfileCache.clear();
       if (_bizreachObserver) { _bizreachObserver.disconnect(); _bizreachObserver = null; }
     }
   }
@@ -1611,6 +1613,10 @@ async function getFullProfile(cardEl, fallbackText) {
   // Bizreach: APIでフルプロフィール取得（カードクリックはCDK仮想スクロールを破壊するため使用不可）
   if (platform === 'bizreach') {
     const resumeId = getBizreachResumeNumericId(cardEl);
+    if (resumeId && _bizreachProfileCache.has(resumeId)) {
+      console.log('[Snow-we] Bizreachプロフィールキャッシュヒット:', resumeId);
+      return _bizreachProfileCache.get(resumeId);
+    }
     if (resumeId) {
       let xsrfToken = '';
       for (const part of document.cookie.split(';')) {
@@ -1637,6 +1643,7 @@ async function getFullProfile(cardEl, fallbackText) {
               const profileText = extractBizreachProfileText(data);
               if (profileText && profileText.length > 300) {
                 console.log(`[Snow-we] Bizreachプロフィール取得成功 (${endpoint}):`, profileText.length, '文字');
+                _bizreachProfileCache.set(resumeId, profileText);
                 return profileText;
               }
             } else if (contentType.includes('text/html')) {
@@ -1646,7 +1653,9 @@ async function getFullProfile(cardEl, fallbackText) {
               const text = (doc.body?.innerText || doc.body?.textContent || '').replace(/\s+/g, ' ').trim();
               if (text.length > 300) {
                 console.log(`[Snow-we] BizreachプロフィールHTML取得成功 (${endpoint}):`, text.length, '文字');
-                return text.substring(0, 5000);
+                const cached = text.substring(0, 5000);
+                _bizreachProfileCache.set(resumeId, cached);
+                return cached;
               }
             }
             console.log(`[Snow-we] Bizreachプロフィール取得: テキスト不足 (${endpoint}) status=${res.status}`);
@@ -1863,16 +1872,44 @@ function findBizreachStarButton(cardEl) {
 // Bizreach の星ボタンが既スター済みかどうかを返す
 // Angular は JS property を更新する（attribute は初期値のみ反映のことがある）
 function isBizreachStarred(starEl) {
-  const toggle = starEl.querySelector('b-ui-icon-toggle') || starEl;
-  // Angular は JS property を優先的に更新する
+  // Shadow DOM 内も含めて b-ui-icon-toggle を探す
+  const findToggle = (root) => {
+    const t = root.querySelector('b-ui-icon-toggle');
+    if (t) return t;
+    for (const el of root.querySelectorAll('*')) {
+      if (el.shadowRoot) {
+        const inner = el.shadowRoot.querySelector('b-ui-icon-toggle');
+        if (inner) return inner;
+      }
+    }
+    return null;
+  };
+  const toggle = findToggle(starEl) || starEl;
+
+  // 1. Angular JS property（最優先）
   if (toggle.checked === true)  return true;
   if (toggle.checked === false) return false;
-  // aria-checked（Angular が DOM attribute として反映する場合）
+  // 2. aria-checked
   const aria = toggle.getAttribute('aria-checked');
   if (aria === 'true')  return true;
   if (aria === 'false') return false;
-  // フォールバック：HTML attribute
-  return toggle.getAttribute('checked') === 'true';
+  // 3. HTML checked attribute
+  if (toggle.getAttribute('checked') === 'true') return true;
+  // 4. アイコンクラスで判定（star-fill = ON）
+  const icon = toggle.querySelector('b-ui-icon') || toggle.shadowRoot?.querySelector('b-ui-icon');
+  if (icon) {
+    const onIcon = toggle.getAttribute('onicon') || 'star-fill';
+    if (icon.className?.includes(`bui-icon-${onIcon}`)) return true;
+  }
+  // 5. Angular コンポーネントの checked プロパティを直接参照
+  try {
+    const ng = window.ng;
+    if (ng) {
+      const comp = ng.getComponent?.(toggle) || ng.getComponent?.(starEl);
+      if (comp && typeof comp.checked === 'boolean') return comp.checked;
+    }
+  } catch (_) {}
+  return false;
 }
 
 // Bizreach 星ボタンを実際にクリックする（API応答を待ってポーリングでチェック）
@@ -1988,15 +2025,20 @@ async function callBizreachFavoriteApi(resumeNumericId) {
     'Accept': 'application/json',
   };
   if (xsrfToken) headers['X-XSRF-TOKEN'] = xsrfToken;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
   try {
     const res = await fetch(
       `${location.origin}/v1/api/resume-favorite/${resumeNumericId}`,
-      { method: 'PUT', credentials: 'include', headers, body: JSON.stringify({ favorite: true }) }
+      { method: 'PUT', credentials: 'include', headers, body: JSON.stringify({ favorite: true }), signal: controller.signal }
     );
+    clearTimeout(timeoutId);
     console.log('[Snow-we] お気に入りAPI:', res.status, resumeNumericId);
     return res.status === 204 || res.status === 200 || res.ok;
   } catch (e) {
-    console.warn('[Snow-we] お気に入りAPI失敗:', e.message);
+    clearTimeout(timeoutId);
+    if (e.name === 'AbortError') console.warn('[Snow-we] お気に入りAPIタイムアウト:', resumeNumericId);
+    else console.warn('[Snow-we] お気に入りAPI失敗:', e.message);
     return false;
   }
 }
