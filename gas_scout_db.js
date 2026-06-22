@@ -315,11 +315,12 @@ function applyPositionDropdown(ss, sheet, row, col) {
   try {
     const posSheet = ss.getSheetByName(SHEET_POSITIONS);
     if (!posSheet) return;
-    const posNames = posSheet.getDataRange().getValues()
-      .slice(1).map(r => String(r[0] || '')).filter(Boolean);
-    if (posNames.length === 0) return;
+    const lastRow = posSheet.getLastRow();
+    if (lastRow < 2) return;
+    // 範囲参照型（手動設定と同じ形式）で既存ドロップダウンと一致させる
+    const sourceRange = posSheet.getRange(2, 1, lastRow - 1, 1);
     const rule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(posNames, true)
+      .requireValueInRange(sourceRange, true)
       .setAllowInvalid(true)
       .build();
     sheet.getRange(row, col).setDataValidation(rule);
