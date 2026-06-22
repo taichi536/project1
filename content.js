@@ -2071,6 +2071,13 @@ function forceBizreachStarOff(starBtn) {
 
 // Bizreach カード要素から resume の数値IDを取得する
 function getBizreachResumeNumericId(cardEl) {
+  // 子孫を先に探す（bui-drawer-trigger 等に id="resume-xxx" が設定されているケースが多い）
+  const child = cardEl.querySelector?.('[id^="resume-"]');
+  if (child) {
+    const mc = child.id.match(/^resume-(\d+)$/);
+    if (mc) return mc[1];
+  }
+  // 自身・親要素を順に探す
   let el = cardEl;
   for (let i = 0; i < 8; i++) {
     if (!el) break;
@@ -2809,9 +2816,19 @@ function reapplyBizreachBadges() {
       setBatchBadge(el, state.cls, state.text, state.tooltip, state.profileSummary, state.aiVerdict);
       // NGまたはNG訂正のカードはDOM再利用で星がONになることがあるためOFFに戻す
       const isNg = state.cls === 'ng' || (state.cls === 'corrected' && state.aiVerdict === 'NG');
+      // OKまたはOK訂正のカードは星を再適用（CDK再レンダリングでAngularが星をリセットするため）
+      const isOk = state.cls === 'ok' || (state.cls === 'corrected' && state.aiVerdict === 'OK');
       if (isNg) {
         const starBtn = findBizreachStarButton(el);
         if (starBtn && isBizreachStarred(starBtn)) forceBizreachStarOff(starBtn);
+      } else if (isOk) {
+        let starredIds;
+        try { starredIds = new Set(JSON.parse(sessionStorage.getItem('snowWeBizreachStarred') || '[]')); }
+        catch (_) { starredIds = new Set(); }
+        if (starredIds.has(resumeId)) {
+          const starBtn = findBizreachStarButton(el);
+          if (starBtn && !isBizreachStarred(starBtn)) forceBizreachStarOn(starBtn);
+        }
       }
     });
   }, 300);
