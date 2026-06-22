@@ -1932,6 +1932,18 @@ function forceBizreachStarOn(starBtn) {
   }
 }
 
+// API失敗時またはNG再適用時に星のDOM状態を強制的にOFFにする
+function forceBizreachStarOff(starBtn) {
+  const toggle = starBtn.querySelector('b-ui-icon-toggle') || starBtn;
+  toggle.removeAttribute('checked');
+  const icon = toggle.querySelector('b-ui-icon');
+  if (icon) {
+    const offIcon = toggle.getAttribute('officon') || 'star';
+    const onIcon  = toggle.getAttribute('onicon')  || 'star-fill';
+    icon.className = icon.className.replace(`bui-icon-${onIcon}`, `bui-icon-${offIcon}`);
+  }
+}
+
 // Bizreach カード要素から resume の数値IDを取得する
 function getBizreachResumeNumericId(cardEl) {
   let el = cardEl;
@@ -2572,9 +2584,24 @@ function showFeedbackPopup(badgeEl) {
       } catch (_) {}
       // saveFeedbackが失敗してもバッジは必ず更新する
       badgeEl.className = badgeEl.className.replace(/\b(ok|ng|warn)\b/, 'corrected');
-      badgeEl.textContent = value === 'OK' ? '↩ 訂正: OK' : '↩ 訂正: NG';
+      const correctedText = value === 'OK' ? '↩ 訂正: OK' : '↩ 訂正: NG';
+      badgeEl.textContent = correctedText;
       badgeEl.style.cursor = 'default';
       badgeEl.removeEventListener('click', badgeEl._fbHandler);
+      // CDK仮想スクロール後も訂正が消えないようにレジストリを更新
+      if (platform === 'bizreach') {
+        const cardEl = badgeEl.parentElement;
+        const resumeId = getBizreachResumeNumericId(cardEl);
+        if (resumeId) {
+          _bizreachBadgeRegistry.set(resumeId, {
+            cls: 'corrected',
+            text: correctedText,
+            tooltip: '',
+            profileSummary: profileSummary || '',
+            aiVerdict: value,
+          });
+        }
+      }
     });
     row.appendChild(btn);
   });
@@ -2631,6 +2658,12 @@ function reapplyBizreachBadges() {
       const state = _bizreachBadgeRegistry.get(resumeId);
       if (!state) return;
       setBatchBadge(el, state.cls, state.text, state.tooltip, state.profileSummary, state.aiVerdict);
+      // NGまたはNG訂正のカードはDOM再利用で星がONになることがあるためOFFに戻す
+      const isNg = state.cls === 'ng' || (state.cls === 'corrected' && state.aiVerdict === 'NG');
+      if (isNg) {
+        const starBtn = findBizreachStarButton(el);
+        if (starBtn && isBizreachStarred(starBtn)) forceBizreachStarOff(starBtn);
+      }
     });
   }, 300);
 }
@@ -2941,6 +2974,7 @@ function buildCriteriaText(criteria, platform) {
   lines.push(`【絶対NG】`);
   lines.push(`- 職歴にアクセンチュアが含まれる場合は即NG`);
   lines.push(`- 職歴にベイカレントが含まれる場合は原則即NG。ただし43歳以上かつ財務・経理・FP&A等の職歴がある場合は「要確認」`);
+  lines.push(`- 職歴に野村総合研究所（NRI）が含まれる場合は即NG`);
   lines.push(`- 秘書が実際の職歴・業務内容・職種として含まれる場合は即NG。ただし「総務・法務・知財・秘書」のようなカテゴリ名に秘書が含まれるだけで、実際の職種（「/」以降や業務内容）が法務・総務・人事等の場合はNG対象外`);
   lines.push(`- ITエンジニア系で保守運用のみの場合は即NG`);
   lines.push(`- 46歳以上で文系職（コンサル・営業・マーケ・経営企画・人事・金融営業・システム営業・IT営業等）かつ財務・経理・FP&A・CFO・財務戦略等の職歴が一切ない場合は即NG（年収が高くても）`);
