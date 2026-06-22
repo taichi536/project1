@@ -2748,6 +2748,12 @@ function setBatchBadge(el, cls, text, tooltip, profileSummary, aiVerdict) {
   }
   el.appendChild(badge);
 
+  // Bizreach NG: DOM再利用でOK候補の星が残っている場合に即消す
+  if (getPlatform() === 'bizreach' && cls === 'ng') {
+    const starBtn = findBizreachStarButton(el);
+    if (starBtn && isBizreachStarred(starBtn)) forceBizreachStarOff(starBtn);
+  }
+
   // Bizreach仮想スクロール: checkingを除く確定判定をレジストリに保存（スクロール後の再表示に使用）
   if (getPlatform() === 'bizreach' && cls !== 'checking') {
     const resumeId = getBizreachResumeNumericId(el);
