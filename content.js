@@ -1241,6 +1241,12 @@ async function triggerAutoAdd() {
     }
 
     setBatchBadge(el, 'checking', '📥 取得中...');
+    // Bizreach: DOM再利用で前候補者の星がONのままになっている場合にリセット
+    // （しないと isBizreachStarred が真を返し、OK候補者がスターされずスキップされる）
+    if (getPlatform() === 'bizreach') {
+      const starBtn = findBizreachStarButton(el);
+      if (starBtn && isBizreachStarred(starBtn)) forceBizreachStarOff(starBtn);
+    }
     let profileText = cardText;
     try { profileText = await getFullProfile(el, cardText); } catch (_) {}
 
