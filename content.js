@@ -1131,6 +1131,9 @@ async function triggerAutoAdd() {
     stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria']);
   } catch (e) {
     console.warn('[Snow-we] triggerAutoAdd: ストレージ読み込みエラー', e.message);
+    if (e.message?.includes('Extension context invalidated')) {
+      showAutoStatus('⚠️ 拡張機能が再起動されました。ページをリロードして再度ボタンを押してください。', 10000);
+    }
     return;
   }
   const apiKey = (stored.apiKey || '').replace(/[^\x21-\x7E]/g, '').trim();
@@ -1584,6 +1587,30 @@ function extractBizreachProfileText(data) {
   return result.substring(0, 5000);
 }
 
+// skipKeysを無視してJSON全体から意味のありそうな文字列を全収集（extractBizreachProfileTextで不足時のフォールバック）
+function extractAllStringsFromJson(data) {
+  const seen = new Set();
+  const lines = [];
+  function walk(v, depth) {
+    if (depth > 10 || v == null) return;
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (s.length >= 4 && !seen.has(s) && !/^https?:\/\/|^data:|^\d{4}-\d{2}-\d{2}T/.test(s)) {
+        seen.add(s);
+        lines.push(s);
+      }
+    } else if (typeof v === 'number' && String(v).length <= 6) {
+      lines.push(String(v));
+    } else if (Array.isArray(v)) {
+      v.forEach(item => walk(item, depth + 1));
+    } else if (typeof v === 'object') {
+      Object.values(v).forEach(val => walk(val, depth + 1));
+    }
+  }
+  walk(data, 0);
+  return lines.join(' / ').substring(0, 5000);
+}
+
 async function getFullProfile(cardEl, fallbackText) {
   const platform = getPlatform();
 
@@ -1627,6 +1654,7 @@ async function getFullProfile(cardEl, fallbackText) {
         `${location.origin}/v1/api/resumes/${resumeId}`,
         `${location.origin}/v1/api/scout/resume/${resumeId}`,
       ];
+      let bestText = '';
       for (const endpoint of endpoints) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -1637,26 +1665,34 @@ async function getFullProfile(cardEl, fallbackText) {
             const contentType = res.headers.get('content-type') || '';
             if (contentType.includes('application/json')) {
               const data = await res.json();
-              const profileText = extractBizreachProfileText(data);
-              if (profileText && profileText.length > 300) {
+              // 通常抽出
+              let profileText = extractBizreachProfileText(data);
+              // 通常抽出で足りない場合はJSON全体から文字列を積極的に収集
+              if (profileText.length < 150) {
+                profileText = extractAllStringsFromJson(data);
+              }
+              if (profileText.length > bestText.length) bestText = profileText;
+              if (profileText.length >= 150) {
                 console.log(`[Snow-we] Bizreachプロフィール取得成功 (${endpoint}):`, profileText.length, '文字');
                 _bizreachProfileCache.set(resumeId, profileText);
                 return profileText;
               }
+              console.log(`[Snow-we] Bizreachプロフィール取得: テキスト不足 (${endpoint}) ${profileText.length}文字 → 次のエンドポイントを試行`);
             } else if (contentType.includes('text/html')) {
               const html = await res.text();
               const doc = new DOMParser().parseFromString(html, 'text/html');
               doc.querySelectorAll('script,style,noscript,nav,header,footer').forEach(e => e.remove());
               const text = (doc.body?.innerText || doc.body?.textContent || '').replace(/\s+/g, ' ').trim();
-              if (text.length > 300) {
+              if (text.length > bestText.length) bestText = text.substring(0, 5000);
+              if (text.length >= 150) {
                 console.log(`[Snow-we] BizreachプロフィールHTML取得成功 (${endpoint}):`, text.length, '文字');
                 const cached = text.substring(0, 5000);
                 _bizreachProfileCache.set(resumeId, cached);
                 return cached;
               }
+            } else {
+              console.log(`[Snow-we] Bizreachプロフィール取得: status=${res.status} (${endpoint})`);
             }
-            console.log(`[Snow-we] Bizreachプロフィール取得: テキスト不足 (${endpoint}) status=${res.status}`);
-            break;
           } else {
             console.log(`[Snow-we] Bizreachプロフィール取得: status=${res.status} (${endpoint})`);
           }
@@ -1664,10 +1700,16 @@ async function getFullProfile(cardEl, fallbackText) {
           clearTimeout(timeoutId);
           if (e.name === 'AbortError') {
             console.warn(`[Snow-we] Bizreachプロフィール取得タイムアウト (${endpoint})`);
-            break;
+          } else {
+            console.warn(`[Snow-we] Bizreachプロフィール取得失敗 (${endpoint}):`, e.message);
           }
-          console.warn(`[Snow-we] Bizreachプロフィール取得失敗 (${endpoint}):`, e.message);
         }
+      }
+      // 全エンドポイント試行後に最善テキストをキャッシュして返す
+      if (bestText.length > 0) {
+        console.log('[Snow-we] Bizreachプロフィール取得(最善テキスト):', bestText.length, '文字');
+        _bizreachProfileCache.set(resumeId, bestText);
+        return bestText;
       }
     }
     // フォールバック：カードテキスト
