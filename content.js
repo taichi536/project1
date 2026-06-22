@@ -389,7 +389,8 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
         console.warn('[Snow-we] GAS送信失敗、1秒後リトライ:', e.message);
         await new Promise(resolve => setTimeout(resolve, 1000));
         try {
-          await chrome.runtime.sendMessage({ type: 'gasPost', url, payload });
+          const r2 = await chrome.runtime.sendMessage({ type: 'gasPost', url, payload });
+          if (!r2?.ok) throw new Error('GAS returned ok:false');
           console.log('[Snow-we] GAS送信リトライ成功');
         } catch (e2) {
           console.warn('[Snow-we] GAS送信リトライも失敗:', e2.message);
