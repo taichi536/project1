@@ -1405,30 +1405,27 @@ async function triggerAutoAdd() {
     // スクロール後にレジストリのバッジを再適用（仮想スクロールで消えたバッジを復元）
     reapplyBizreachBadges();
 
-    console.log(`[Snow-we] Bizreach scroll: prevTop=${prevViewportTop} newTop=${viewport?.scrollTop ?? window.scrollY} scrolled=${scrolled} fp_changed=${getCardFingerprint() !== prevFingerprint}`);
-
-    // 今バッチで新規処理ゼロ（全員すでにbatchProcessed済み）→ CDK仮想スクロールが無限ループするため完了扱い
+    const fpAfterScroll = getCardFingerprint();
+    const newCardsAppeared = fpAfterScroll !== prevFingerprint;
     const newlyProcessedThisBatch = batchProcessed.size - batchSizeBefore;
-    if (scrolled && newlyProcessedThisBatch === 0) {
-      console.log(`[Snow-we] Bizreach: 今バッチ新規処理ゼロ → 全${totalProcessed}人完了`);
+    console.log(`[Snow-we] Bizreach scroll: prevTop=${prevViewportTop} newTop=${viewport?.scrollTop ?? window.scrollY} scrolled=${scrolled} fp_changed=${newCardsAppeared} newlyProcessed=${newlyProcessedThisBatch}`);
+
+    // 完了条件: スクロール不可 OR (新規カードなし かつ 新規処理ゼロ)
+    // ※新規カードが出現していれば、すでに処理済みでも次バッチで処理するため継続
+    if (!scrolled || (!newCardsAppeared && newlyProcessedThisBatch === 0)) {
+      const reason = !scrolled ? 'スクロール不可（最下部到達）' : '新規カードなし・新規処理ゼロ';
+      console.log(`[Snow-we] Bizreach完了: ${reason} → 全${totalProcessed}人`);
       sessionStorage.removeItem(BATCH_SESSION_KEY);
       showAutoStatus(`🤖 完了！ ✅${addedCount}人を検討リストに追加 (全${totalProcessed}人中)`, 8000);
       await saveAutoAddProgress({ running: false });
       return;
     }
 
-    if (scrolled) {
-      await sleep(800); // Angular CDKのレンダリング完了を待つ
-      showAutoStatus(`🤖 次の候補者を処理中... (累計✅${addedCount}人追加)`);
-      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
-      await triggerAutoAdd();
-      return;
-    }
-
-    // スクロールしても変化なし＝全候補者処理完了
-    sessionStorage.removeItem(BATCH_SESSION_KEY);
-    showAutoStatus(`🤖 完了！ ✅${addedCount}人を検討リストに追加 (全${totalProcessed}人中)`, 8000);
-    await saveAutoAddProgress({ running: false });
+    // 新規カードあり or 新規処理あり → 次バッチへ
+    await sleep(800); // Angular CDKのレンダリング完了を待つ
+    showAutoStatus(`🤖 次の候補者を処理中... (累計✅${addedCount}人追加)`);
+    await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+    await triggerAutoAdd();
     return;
   }
 
