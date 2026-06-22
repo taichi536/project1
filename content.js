@@ -1283,15 +1283,26 @@ async function triggerAutoAdd() {
     // ─── AI判定（1人ずつ）───
     setBatchBadge(el, 'checking', '🤖 判定中...');
     showAutoStatus(`🤖 判定中 (${totalProcessed + 1}人目)... ✅${addedCount}人追加`);
-    let overall, judgeReason, judgeConfidence;
-    try {
-      const result = await judgeSingleCandidate(apiKey, profileText, criteria);
-      overall         = result.verdict;
-      judgeReason     = result.reason     || '';
-      judgeConfidence = result.confidence ?? null;
-    } catch (err) {
-      console.error('[Snow-we] judgeSingleCandidate error:', err);
-      setBatchBadge(el, 'warn', `⚠️ 判定失敗: ${(err.message || '').slice(0, 30)}`);
+    let overall, judgeReason, judgeConfidence, judgeError;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const result = await judgeSingleCandidate(apiKey, profileText, criteria);
+        overall         = result.verdict;
+        judgeReason     = result.reason     || '';
+        judgeConfidence = result.confidence ?? null;
+        judgeError      = null;
+        break;
+      } catch (err) {
+        judgeError = err;
+        if (attempt === 0) {
+          console.warn('[Snow-we] judgeSingleCandidate失敗、2秒後にリトライ:', err.message);
+          await sleep(2000);
+        }
+      }
+    }
+    if (judgeError) {
+      console.error('[Snow-we] judgeSingleCandidate error (リトライ後も失敗):', judgeError);
+      setBatchBadge(el, 'warn', `⚠️ 判定失敗: ${(judgeError.message || '').slice(0, 30)}`);
       totalProcessed++;
       await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
       await sleep(500);
@@ -1614,8 +1625,11 @@ async function getFullProfile(cardEl, fallbackText) {
         `${location.origin}/v1/api/scout/resume/${resumeId}`,
       ];
       for (const endpoint of endpoints) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
         try {
-          const res = await fetch(endpoint, { credentials: 'include', headers });
+          const res = await fetch(endpoint, { credentials: 'include', headers, signal: controller.signal });
+          clearTimeout(timeoutId);
           if (res.ok) {
             const contentType = res.headers.get('content-type') || '';
             if (contentType.includes('application/json')) {
@@ -1641,6 +1655,11 @@ async function getFullProfile(cardEl, fallbackText) {
             console.log(`[Snow-we] Bizreachプロフィール取得: status=${res.status} (${endpoint})`);
           }
         } catch (e) {
+          clearTimeout(timeoutId);
+          if (e.name === 'AbortError') {
+            console.warn(`[Snow-we] Bizreachプロフィール取得タイムアウト (${endpoint})`);
+            break;
+          }
           console.warn(`[Snow-we] Bizreachプロフィール取得失敗 (${endpoint}):`, e.message);
         }
       }
@@ -2633,6 +2652,11 @@ function setBatchBadge(el, cls, text, tooltip, profileSummary, aiVerdict) {
     badge.addEventListener('click', badge._fbHandler);
     badge.title = (tooltip ? tooltip + '\n' : '') + '（クリックで判定を訂正）';
   }
+  // DOM再利用検出用にresume IDをバッジに記録
+  if (getPlatform() === 'bizreach') {
+    const rid = getBizreachResumeNumericId(el);
+    if (rid) badge.dataset.resumeId = rid;
+  }
   el.appendChild(badge);
 
   // Bizreach仮想スクロール: checkingを除く確定判定をレジストリに保存（スクロール後の再表示に使用）
@@ -2652,10 +2676,18 @@ function reapplyBizreachBadges() {
   clearTimeout(_reapplyBizreachTimer);
   _reapplyBizreachTimer = setTimeout(() => {
     document.querySelectorAll('ess-resume-list-item').forEach(el => {
-      if (el.querySelector('.snow-we-badge.batch')) return;
       const resumeId = getBizreachResumeNumericId(el);
       if (!resumeId) return;
       const state = _bizreachBadgeRegistry.get(resumeId);
+
+      const existingBadge = el.querySelector('.snow-we-badge.batch');
+      if (existingBadge) {
+        // resume IDが一致していれば再適用不要（正しいバッジが既に表示されている）
+        if (existingBadge.dataset.resumeId === resumeId) return;
+        // IDが不一致 → DOM再利用で別候補者のバッジが残っている → 削除して正しいバッジを適用
+        existingBadge.remove();
+      }
+
       if (!state) return;
       setBatchBadge(el, state.cls, state.text, state.tooltip, state.profileSummary, state.aiVerdict);
       // NGまたはNG訂正のカードはDOM再利用で星がONになることがあるためOFFに戻す
@@ -2668,17 +2700,27 @@ function reapplyBizreachBadges() {
   }, 300);
 }
 
-// Bizreach仮想スクロール監視を開始（初回のみ・viewport未検出時は監視しない）
+// Bizreach仮想スクロール監視を開始（viewport未検出時は最大10秒リトライ）
 function startBizreachBadgeObserver() {
   if (_bizreachObserver) return;
+  const attach = (target) => {
+    _bizreachObserver = new MutationObserver(() => reapplyBizreachBadges());
+    _bizreachObserver.observe(target, { childList: true, subtree: true });
+    console.log('[Snow-we] Bizreachバッジ監視開始');
+  };
   const target = document.querySelector('cdk-virtual-scroll-viewport');
-  if (!target) {
-    console.log('[Snow-we] cdk-virtual-scroll-viewport 未検出のため監視スキップ');
-    return;
-  }
-  _bizreachObserver = new MutationObserver(() => reapplyBizreachBadges());
-  _bizreachObserver.observe(target, { childList: true, subtree: true });
-  console.log('[Snow-we] Bizreachバッジ監視開始');
+  if (target) { attach(target); return; }
+  // Angular描画完了前に呼ばれた場合は500msごとにリトライ（最大20回=10秒）
+  let attempts = 0;
+  const timer = setInterval(() => {
+    if (_bizreachObserver) { clearInterval(timer); return; }
+    const t = document.querySelector('cdk-virtual-scroll-viewport');
+    if (t) { clearInterval(timer); attach(t); return; }
+    if (++attempts >= 20) {
+      clearInterval(timer);
+      console.warn('[Snow-we] cdk-virtual-scroll-viewport 未検出のため監視スキップ（タイムアウト）');
+    }
+  }, 500);
 }
 
 // 次ページボタンを探す
