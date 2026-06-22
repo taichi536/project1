@@ -2033,6 +2033,14 @@ async function clickBizreachStar(starBtn) {
 function forceBizreachStarOn(starBtn) {
   const toggle = starBtn.querySelector('b-ui-icon-toggle') || starBtn;
   toggle.setAttribute('checked', 'true');
+  try { toggle.checked = true; } catch (_) {}
+  try {
+    const ng = window.ng;
+    if (ng) {
+      const comp = ng.getComponent?.(toggle) || ng.getComponent?.(starBtn);
+      if (comp && typeof comp.checked === 'boolean') { comp.checked = true; ng.applyChanges?.(toggle); }
+    }
+  } catch (_) {}
   const icon = toggle.querySelector('b-ui-icon');
   if (icon) {
     const offIcon = toggle.getAttribute('officon') || 'star';
@@ -2045,6 +2053,14 @@ function forceBizreachStarOn(starBtn) {
 function forceBizreachStarOff(starBtn) {
   const toggle = starBtn.querySelector('b-ui-icon-toggle') || starBtn;
   toggle.removeAttribute('checked');
+  try { toggle.checked = false; } catch (_) {}
+  try {
+    const ng = window.ng;
+    if (ng) {
+      const comp = ng.getComponent?.(toggle) || ng.getComponent?.(starBtn);
+      if (comp && typeof comp.checked === 'boolean') { comp.checked = false; ng.applyChanges?.(toggle); }
+    }
+  } catch (_) {}
   const icon = toggle.querySelector('b-ui-icon');
   if (icon) {
     const offIcon = toggle.getAttribute('officon') || 'star';
@@ -2104,11 +2120,6 @@ async function clickAddButton(cardEl, tagName) {
   if (platform === 'bizreach') {
     const starBtn = findBizreachStarButton(cardEl);
     if (!starBtn) return false;
-    if (isBizreachStarred(starBtn)) {
-      console.log('[Snow-we] すでにスター済み、スキップ');
-      return false;
-    }
-    // APIを直接呼び出す（最優先）
     const resumeNumericId = getBizreachResumeNumericId(cardEl);
     if (resumeNumericId) {
       // セッション内で既にスター済み（別DOM要素での重複防止）
@@ -2120,6 +2131,7 @@ async function clickAddButton(cardEl, tagName) {
         forceBizreachStarOn(starBtn);
         return false;
       }
+      // DOM再利用でstarのDOM状態が古い場合があるため isBizreachStarred を使わず直接API呼び出し
       const apiOk = await callBizreachFavoriteApi(resumeNumericId);
       if (apiOk) {
         console.log('[Snow-we] APIで星追加成功:', resumeNumericId);
@@ -2129,7 +2141,11 @@ async function clickAddButton(cardEl, tagName) {
         return true;
       }
     }
-    // APIが失敗した場合は合成イベントにフォールバック
+    // IDが取得できないまたはAPIが失敗した場合のフォールバック
+    if (isBizreachStarred(starBtn)) {
+      console.log('[Snow-we] すでにスター済み（フォールバック確認）、スキップ');
+      return false;
+    }
     const result = await clickBizreachStar(starBtn);
     console.log('[Snow-we] 星クリック結果:', result, '/ checked後:', isBizreachStarred(starBtn));
     return result;
