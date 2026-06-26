@@ -91,8 +91,11 @@ async function checkForUpdate() {
     const current = chrome.runtime.getManifest().version;
     if (remote.version && remote.version !== current) {
       // バッチ実行中は強制リロードを延期（コンテンツスクリプトが破棄されてバッチが止まるのを防ぐ）
+      // ただし30分以上前のバッチは異常終了とみなして延期しない（更新が永久にブロックされるのを防ぐ）
       const stored = await chrome.storage.local.get(['autoAddProgress']);
-      if (stored.autoAddProgress?.running) {
+      const prog = stored.autoAddProgress;
+      const isRecentBatch = prog?.running && prog?.ts && (Date.now() - prog.ts) < 30 * 60 * 1000;
+      if (isRecentBatch) {
         console.log(`[Snow-we] バッチ実行中のため更新を延期: ${current} → ${remote.version}`);
         return;
       }
