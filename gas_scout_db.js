@@ -397,10 +397,11 @@ function reclassifyAllIndustries() {
         const company = String(companyVals[i][0] || '').trim();
         if (!company) { skipped++; return r; }
         const current = String(r[0] || '').trim();
-        if (GICS_INDUSTRIES.includes(current)) { skipped++; return r; } // 既に正しい→スキップ
+        // 注: GICS_INDUSTRIES.includes(current) でのスキップは削除
+        // → 現在値が有効なGICSでも、会社に対して間違った分類の可能性があるため必ず再分類する
         const newInd = classify(company);
         if (!newInd) { unknown++; return r; } // 分類不明→元の値を保持
-        if (newInd === current) { skipped++; return r; }
+        if (newInd === current) { skipped++; return r; } // 正しい分類と一致→スキップ
         updated++;
         changed = true;
         return [newInd];
