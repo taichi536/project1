@@ -389,8 +389,6 @@ function reclassifyAllIndustries() {
       const industryCol = startCol + 5;
       const numRows     = lastRow - 2;
 
-      sheet.getRange(3, industryCol, numRows, 1).setDataValidation(gicsRule);
-
       const companyVals  = sheet.getRange(3, companyCol,  numRows, 1).getValues();
       const industryVals = sheet.getRange(3, industryCol, numRows, 1).getValues();
 
@@ -467,12 +465,18 @@ function lookupIndustry(ss, companyName) {
   }
 
   // ③ Claude API で分類（APIキーが設定されている場合のみ）
+  const apiKey = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+  if (!apiKey) {
+    Logger.log('[Snow-we] 業界分類スキップ: ANTHROPIC_API_KEY がスクリプトプロパティに未設定 / 会社名: ' + companyName);
+    return '';
+  }
   const aiResult = classifyIndustryWithClaude(companyName);
   if (aiResult) {
     cacheIndustryToSheet(ss, indSheet, companyName, aiResult);
     return aiResult;
   }
 
+  Logger.log('[Snow-we] 業界分類失敗: Claude APIが空を返した / 会社名: ' + companyName);
   return '';
 }
 
