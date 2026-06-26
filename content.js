@@ -1,4 +1,4 @@
-// content.js v1.18.81
+// content.js v1.18.82
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -146,37 +146,16 @@ function findCandidateCardsByPlatform() {
   }
 
   if (platform === 'ambi') {
-    // AMBIの特定クラスで先に試す（汎用ヒューリスティックより確実）
-    const AMBI_SELECTORS = [
-      '[class*="memberList__item"]', '[class*="member-list__item"]',
-      '[class*="member-list-item"]', '[class*="scout-member"]',
-      '[class*="candidate-item"]', '[class*="candidateItem"]',
-      '[class*="searchResult__item"]', '[class*="search-result__item"]',
-      'article[class*="member"]', 'li[class*="member"]', 'li[class*="candidate"]',
-    ];
-    for (const sel of AMBI_SELECTORS) {
-      try {
-        const els = dedup(Array.from(document.querySelectorAll(sel)).filter(el => {
-          const text = (el.innerText || '');
-          return agePattern.test(text) && text.length > 50;
-        }));
-        if (els.length > 0) {
-          console.log('[Snow-we] AMBI カード検出 selector:', sel, '件数:', els.length);
-          return els;
-        }
-      } catch (_) {}
+    // 実際のDOMから確認した正確なセレクター
+    const cards = Array.from(document.querySelectorAll('.js_userSet')).filter(el => {
+      // スカウト済みカードも含めてIDを取得するためフィルタは緩く
+      return (el.innerText || '').length > 30;
+    });
+    if (cards.length > 0) {
+      console.log('[Snow-we] AMBI カード検出 .js_userSet 件数:', cards.length);
+      return dedup(cards);
     }
-    // フォールバック：汎用ヒューリスティック（テキスト条件を緩和）
-    return dedup(Array.from(document.querySelectorAll('div, article, li')).filter(el => {
-      const rect = el.getBoundingClientRect();
-      const text = (el.innerText || '');
-      return rect.width > vw * 0.4 &&
-             rect.height > 100 && rect.height < 1000 &&
-             agePattern.test(text) &&
-             (text.includes('スカウト') || text.includes('検討') || text.includes('万円') ||
-              text.includes('経験') || text.includes('現在') || text.includes('職種')) &&
-             text.length > 100 && text.length < 10000;
-    }));
+    return [];
   }
 
   if (platform === 'bizreach') {
@@ -439,6 +418,20 @@ function scoutStatus(history, candidateId) {
 
 // カードから候補者の一意IDを取得（プロフィールURL を優先）
 function getCandidateId(cardEl) {
+  // AMBI: hidden input.js_sid から候補者ID取得
+  if (getPlatform() === 'ambi') {
+    const sidInput = cardEl.querySelector('input.js_sid');
+    if (sidInput?.value) return `ambi_${sidInput.value}`;
+    // フォールバック: No.XXXXXXX テキスト
+    const m = (cardEl.innerText || '').match(/No\.(\d{5,})/);
+    if (m) return `ambi_${m[1]}`;
+    // 最終フォールバック: カードテキストハッシュ
+    const lines = (cardEl.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
+    const fp = lines.slice(0, 5).join('|');
+    if (fp.length > 10) return `ambi_h${simpleHash(fp)}`;
+    return null;
+  }
+
   // Bizreach: cardEl が ess-resume-list-item 自身（新セレクタ）または祖先に持つ場合
   if (getPlatform() === 'bizreach') {
     // 直接 id を持つ場合
@@ -859,6 +852,21 @@ async function loadAllCandidatesIntoDOM() {
   // 仮想スクロールの制御はtriggerAutoAdd内の再帰スクロールループで行う
   if (platform === 'bizreach') return;
 
+  // AMBI: per_page=1000 URL パラメータで全件を1ページに表示
+  if (platform === 'ambi') {
+    const url = new URL(location.href);
+    const currentPerPage = url.searchParams.get('per_page');
+    if (currentPerPage !== '1000') {
+      url.searchParams.set('per_page', '1000');
+      console.log('[Snow-we] AMBI: per_page=1000 にリダイレクト:', url.toString());
+      location.href = url.toString();
+      // リダイレクト後はページがリロードされるため、ここで処理は止まる
+      await new Promise(r => setTimeout(r, 10000));
+    }
+    console.log('[Snow-we] AMBI: per_page=1000 確認済み、全件表示中');
+    return;
+  }
+
   const LOAD_MORE_TEXTS = ['さらに読み込む', 'もっと見る', 'Load more', '次の候補者'];
   const MAX_LOADS = 100;
   const TARGET_COUNT = 2000;
@@ -1197,6 +1205,13 @@ async function triggerAutoAdd() {
     if (getPlatform() !== 'bizreach') {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       await sleep(400);
+    }
+
+    // AMBI: スカウト済みカード (userSet--already) はスキップ
+    if (getPlatform() === 'ambi' && el.classList.contains('userSet--already')) {
+      console.log('[Snow-we] AMBI: スカウト済みスキップ (userSet--already)');
+      totalProcessed++;
+      continue;
     }
 
     const candidateId = getCandidateId(el);
@@ -1645,21 +1660,11 @@ async function getFullProfile(cardEl, fallbackText) {
     return text;
   }
 
-  // AMBI：プロフィールURLをフェッチして全文取得
+  // AMBI：カードにプロフィール全文が含まれているためカードテキストを直接使用
   if (platform === 'ambi') {
-    const profileUrl = findProfileUrl(cardEl);
-    if (profileUrl) {
-      console.log('[Snow-we] AMBI プロフィールURL取得:', profileUrl);
-      const fetched = await fetchProfilePage(profileUrl);
-      if (fetched && fetched.length > 300) {
-        console.log('[Snow-we] AMBI プロフィール取得成功:', fetched.length, '文字');
-        return fetched;
-      }
-      console.warn('[Snow-we] AMBI プロフィール取得不足 (len:', fetched?.length ?? 0, ') → カードテキスト使用');
-    } else {
-      console.warn('[Snow-we] AMBI プロフィールURL未発見 → カードテキスト使用');
-    }
-    return fallbackText.substring(0, 1200);
+    const text = fallbackText.trim();
+    console.log('[Snow-we] AMBI カードテキスト取得:', text.length, '文字');
+    return text.substring(0, 3000);
   }
 
   // doda X：カードクリック → 右パネルで全文取得（転職意向を含む）
@@ -2113,25 +2118,22 @@ async function clickAddButton(cardEl, tagName) {
 
   // AMBI：「この検討人材リストに追加」ボタンを明示処理
   if (platform === 'ambi') {
-    const AMBI_LABELS = ['この検討人材リストに追加', '検討リストに追加', '検討人材に追加', 'リストに追加'];
-    const roots = [cardEl, cardEl.parentElement, cardEl.closest('li,article,[class*="row"],[class*="item"]'), document.body].filter(Boolean);
-    let btn = null;
-    for (const root of roots) {
-      btn = Array.from(root.querySelectorAll('button,a,[role="button"]'))
-        .find(el => {
-          const text = (el.innerText || '').trim();
-          return AMBI_LABELS.some(lbl => text.includes(lbl));
-        });
-      if (btn) break;
+    // スカウト済みカードはスキップ
+    if (cardEl.classList.contains('userSet--already')) {
+      console.log('[Snow-we] AMBI: スカウト済みカードスキップ (userSet--already)');
+      return false;
     }
+    // .js_consider が確認済みの追加ボタンセレクター
+    const btn = cardEl.querySelector('.js_consider') ||
+                Array.from(cardEl.querySelectorAll('a,button')).find(el =>
+                  (el.innerText || '').includes('この検討人材リストに追加'));
     if (!btn) {
       console.warn('[Snow-we] AMBI: 追加ボタン未発見');
       return false;
     }
     // 既に追加済みの場合はスキップ
     if (btn.disabled || btn.getAttribute('aria-disabled') === 'true' ||
-        /disabled|added|済/.test(btn.className || '') ||
-        /disabled|added|済/.test(btn.getAttribute('data-state') || '')) {
+        /disabled|added|済/.test(btn.className || '')) {
       console.log('[Snow-we] AMBI: 既に追加済みとみなしスキップ');
       return false;
     }
@@ -2843,45 +2845,10 @@ function findNextPageButton() {
     return false;
   };
 
-  // AMBI 専用: ページネーション構造から次ページを取得
+  // AMBI: per_page=1000 で全件を1ページに表示するためページネーション不要
   if (getPlatform() === 'ambi') {
-    const AMBI_PAGING_SELECTORS = [
-      '[class*="paging"]', '[class*="pagination"]',
-      '[class*="Paging"]', '[class*="Pagination"]',
-      'nav[class*="page"]', 'ul[class*="page"]',
-    ];
-    for (const sel of AMBI_PAGING_SELECTORS) {
-      const paging = document.querySelector(sel);
-      if (!paging) continue;
-      // 「次へ」テキストを持つリンクを優先
-      const nextLink = Array.from(paging.querySelectorAll('a,button,[role="button"]')).find(el => {
-        const t = (el.innerText || el.getAttribute('aria-label') || '').trim();
-        return (t === '次へ' || t === '次のページ' || t === '>' || t === '›') &&
-               !el.disabled && el.getAttribute('aria-disabled') !== 'true' &&
-               !el.classList.contains('disabled');
-      });
-      if (nextLink) {
-        console.log('[Snow-we] AMBI ページネーション次ページ発見 selector:', sel);
-        return nextLink;
-      }
-      // 数字ページネーション
-      const activeEl = paging.querySelector('[class*="active"],[class*="current"],[aria-current="page"]');
-      if (activeEl) {
-        const currentNum = parseInt((activeEl.innerText || '').trim(), 10);
-        if (!isNaN(currentNum)) {
-          const nextItem = Array.from(paging.querySelectorAll('a,button,[role="button"]')).find(el => {
-            const n = parseInt((el.innerText || '').trim(), 10);
-            return n === currentNum + 1 && !el.disabled && el.getAttribute('aria-disabled') !== 'true';
-          });
-          if (nextItem) {
-            console.log(`[Snow-we] AMBI 数字ページネーション: ${currentNum} → ${currentNum + 1}`);
-            return nextItem;
-          }
-          console.log(`[Snow-we] AMBI: 最終ページ (currentPage=${currentNum})`);
-          return null;
-        }
-      }
-    }
+    console.log('[Snow-we] AMBI: per_page=1000 使用中 → ページネーション不要');
+    return null;
   }
 
   // doda-x 専用: prts-paging 構造から次ページを取得
