@@ -1,4 +1,4 @@
-// content.js v1.18.82
+// content.js v1.18.83
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -852,20 +852,9 @@ async function loadAllCandidatesIntoDOM() {
   // 仮想スクロールの制御はtriggerAutoAdd内の再帰スクロールループで行う
   if (platform === 'bizreach') return;
 
-  // AMBI: per_page=1000 URL パラメータで全件を1ページに表示
-  if (platform === 'ambi') {
-    const url = new URL(location.href);
-    const currentPerPage = url.searchParams.get('per_page');
-    if (currentPerPage !== '1000') {
-      url.searchParams.set('per_page', '1000');
-      console.log('[Snow-we] AMBI: per_page=1000 にリダイレクト:', url.toString());
-      location.href = url.toString();
-      // リダイレクト後はページがリロードされるため、ここで処理は止まる
-      await new Promise(r => setTimeout(r, 10000));
-    }
-    console.log('[Snow-we] AMBI: per_page=1000 確認済み、全件表示中');
-    return;
-  }
+  // AMBI: per_page=1000 で全件表示済み → DOMにすでに存在するため何もしない
+  // (per_page チェック＆リダイレクトは triggerAutoAdd / autoScreenCandidates で行う)
+  if (platform === 'ambi') return;
 
   const LOAD_MORE_TEXTS = ['さらに読み込む', 'もっと見る', 'Load more', '次の候補者'];
   const MAX_LOADS = 100;
@@ -927,6 +916,17 @@ async function autoScreenCandidates() {
   // 初回カードチェック：候補者一覧ページでなければ終了
   const initialCards = extractAllCandidateCards();
   if (initialCards.length === 0) return;
+
+  // AMBI: per_page=1000 でなければ自動リダイレクト（再ロード後に再実行される）
+  if (getPlatform() === 'ambi') {
+    const url = new URL(location.href);
+    if (url.searchParams.get('per_page') !== '1000') {
+      url.searchParams.set('per_page', '1000');
+      console.log('[Snow-we] AMBI autoScreen: per_page=1000 にリダイレクト');
+      location.href = url.toString();
+      return;
+    }
+  }
 
   injectStyles();
   showAutoStatus('📥 候補者を全件読み込み中...');
@@ -1127,6 +1127,19 @@ async function triggerAutoAdd() {
   const apiKey = _batchApiKey;
   const criteria = _batchCriteria;
   injectStyles();
+
+  // AMBI: per_page=1000 でなければリダイレクト → ページロード後に自動再開
+  if (getPlatform() === 'ambi') {
+    const url = new URL(location.href);
+    if (url.searchParams.get('per_page') !== '1000') {
+      url.searchParams.set('per_page', '1000');
+      showAutoStatus('📥 AMBI: 全件表示(1000件)に移動中... 自動的に再開します', 5000);
+      try { sessionStorage.setItem('snowWeAutoAdd', JSON.stringify({ resume: true })); } catch (_) {}
+      await sleep(800);
+      location.href = url.toString();
+      return;
+    }
+  }
 
   showAutoStatus('📥 読み込み中...');
 
