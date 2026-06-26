@@ -910,6 +910,91 @@ function setWeeklyTrigger() {
   Logger.log('週次トリガー設定完了（毎週月曜9時）');
 }
 
+// ── 業界マスタの古い分類をGICSに書き換える（reclassifyAllIndustriesの前に実行）──
+function reclassifyMaster() {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const props = PropertiesService.getScriptProperties();
+  const apiKey = props.getProperty('ANTHROPIC_API_KEY');
+
+  const indSheet = ss.getSheetByName(SHEET_INDUSTRY);
+  if (!indSheet) { SpreadsheetApp.getUi().alert('業界マスタシートが見つかりません'); return; }
+
+  const rows = indSheet.getDataRange().getValues().slice(1); // ヘッダー除く
+
+  // 非GICS（古い分類 or 空白）の行を特定
+  const toFix = [];
+  rows.forEach((row, i) => {
+    const name = String(row[0] || '').trim();
+    const ind  = String(row[1] || '').trim();
+    if (!name) return;
+    if (!ind || !GICS_INDUSTRIES.includes(ind)) {
+      toFix.push({ sheetRow: i + 2, name, ind }); // sheetRow: 1-indexed（ヘッダー+1）
+    }
+  });
+
+  if (toFix.length === 0) {
+    SpreadsheetApp.getUi().alert('業界マスタはすべてGICS分類済みです');
+    return;
+  }
+
+  SpreadsheetApp.getUi().alert('非GICS行が ' + toFix.length + ' 件見つかりました。再分類を開始します（キーワード→Claude API）');
+
+  // Step1: キーワード分類
+  let kwUpdated = 0;
+  const needsApi = [];
+  toFix.forEach(item => {
+    const kw = gicsAutoClassify(item.name);
+    if (kw) {
+      indSheet.getRange(item.sheetRow, 2).setValue(kw);
+      indSheet.getRange(item.sheetRow, 3).setValue('キーワード再分類');
+      kwUpdated++;
+    } else {
+      needsApi.push(item);
+    }
+  });
+
+  // Step2: Claude APIで残りを分類
+  let apiUpdated = 0;
+  if (apiKey && needsApi.length > 0) {
+    const BATCH = 20;
+    for (let i = 0; i < needsApi.length; i += BATCH) {
+      const batch = needsApi.slice(i, i + BATCH);
+      try {
+        const prompt = '以下の会社名をGICS産業分類してください。下記リストから1つ選んでください。\n\n【産業リスト】\n' +
+          GICS_INDUSTRIES.join('\n') + '\n\n【会社リスト】\n' +
+          batch.map((c, j) => (j+1)+'. '+c.name).join('\n') +
+          '\n\n【回答形式】番号と産業名のみ：\n1. 産業名\n2. 産業名\n...';
+        const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+          payload: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 600,
+            messages: [{ role: 'user', content: prompt }] }),
+          muteHttpExceptions: true,
+        });
+        if (res.getResponseCode() === 200) {
+          const lines = (JSON.parse(res.getContentText()).content?.[0]?.text || '').trim().split('\n');
+          batch.forEach((item, j) => {
+            const ind = GICS_INDUSTRIES.find(x => (lines[j]||'').includes(x)) || '';
+            if (ind) {
+              indSheet.getRange(item.sheetRow, 2).setValue(ind);
+              indSheet.getRange(item.sheetRow, 3).setValue('Claude再分類');
+              apiUpdated++;
+            }
+          });
+        }
+      } catch(e) { Logger.log('API error: ' + e.message); }
+      if (i + BATCH < needsApi.length) Utilities.sleep(300);
+    }
+  }
+
+  const remaining = toFix.length - kwUpdated - apiUpdated;
+  let msg = '業界マスタ再分類完了:\n・キーワード更新: ' + kwUpdated + '件\n・Claude更新: ' + apiUpdated + '件\n・未分類: ' + remaining + '件';
+  if (remaining > 0) msg += '\n\n未分類の会社は手動で業界マスタに追加してください。';
+  msg += '\n\n次に reclassifyAllIndustries を実行してください。';
+  Logger.log(msg);
+  SpreadsheetApp.getUi().alert(msg);
+}
+
 // ── 未分類会社を25シートずつ処理（何度でも実行可・途中再開対応）──
 function batchClassify() {
   const ss    = SpreadsheetApp.getActiveSpreadsheet();
