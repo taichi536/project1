@@ -350,69 +350,67 @@ function findNextRow(sheet, startCol) {
 }
 
 // ── 過去データの業界を一括GICS再分類 ────────────────────────────
-// GASエディタから手動で実行してください（メニュー → 関数を選択 → reclassifyAllIndustries）
+// batchClassify を先に完走させてからこの関数を実行してください。
+// ClaudeのAPI呼び出しは行わず、マスターシートとキーワードのみで適用します（高速）。
 function reclassifyAllIndustries() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
-
-  // マスターシートを最初に一度だけ読み込む
   const norm = s => s.replace(/[　\s]/g, '').toLowerCase();
-  const masterMap = {};
-  const indSheet = ss.getSheetByName(SHEET_INDUSTRY);
-  if (indSheet) {
-    indSheet.getDataRange().getValues().slice(1).forEach(r => {
-      const name = String(r[0] || '').trim();
-      const ind  = String(r[1] || '').trim();
-      if (name && GICS_INDUSTRIES.includes(ind)) masterMap[norm(name)] = ind;
-    });
+
+  // Step 1: マスターシートを読み込む
+  let indSheet = ss.getSheetByName(SHEET_INDUSTRY);
+  if (!indSheet) {
+    indSheet = ss.insertSheet(SHEET_INDUSTRY);
+    indSheet.appendRow(['会社名', '業界', '登録方法', '登録日']);
   }
-  function fastLookup(companyName) {
+  const masterMap = {};
+  indSheet.getDataRange().getValues().slice(1).forEach(r => {
+    const name = String(r[0] || '').trim();
+    const ind  = String(r[1] || '').trim();
+    if (name && GICS_INDUSTRIES.includes(ind)) masterMap[norm(name)] = ind;
+  });
+
+  function classify(companyName) {
     if (!companyName) return '';
     const nc = norm(companyName);
     for (const [name, ind] of Object.entries(masterMap)) {
       if (name === nc || nc.includes(name) || name.includes(nc)) return ind;
     }
-    return gicsAutoClassify(companyName); // Claude APIは呼ばない
+    return gicsAutoClassify(companyName);
   }
 
-  const gicsRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(GICS_INDUSTRIES, true).setAllowInvalid(true).build();
-  let updated = 0, skipped = 0;
+  // Step 2: 全日付シートに適用
+  let updated = 0, skipped = 0, unknown = 0;
 
   ss.getSheets().forEach(sheet => {
     if (!datePattern.test(sheet.getName())) return;
     const lastRow = sheet.getLastRow();
     if (lastRow < 3) return;
 
-    Object.entries(MEMBER_MAP).forEach(([, startCol]) => {
-      const companyCol  = startCol + 1;
-      const industryCol = startCol + 5;
-      const numRows     = lastRow - 2;
+    Object.values(MEMBER_MAP).forEach(startCol => {
+      const numRows      = lastRow - 2;
+      const companyVals  = sheet.getRange(3, startCol + 1, numRows, 1).getValues();
+      const industryVals = sheet.getRange(3, startCol + 5, numRows, 1).getValues();
 
-      const companyVals  = sheet.getRange(3, companyCol,  numRows, 1).getValues();
-      const industryVals = sheet.getRange(3, industryCol, numRows, 1).getValues();
-
-      // 新しい値を配列に収集してから一括書き込み（setValue連発を避ける）
       let changed = false;
       const newVals = industryVals.map((r, i) => {
         const company = String(companyVals[i][0] || '').trim();
         if (!company) { skipped++; return r; }
         const current = String(r[0] || '').trim();
         if (GICS_INDUSTRIES.includes(current)) { skipped++; return r; } // 既に正しい→スキップ
-        const newInd = fastLookup(company);
-        if (!newInd || newInd === current) { skipped++; return r; }
+        const newInd = classify(company);
+        if (!newInd) { unknown++; return r; } // 分類不明→元の値を保持
+        if (newInd === current) { skipped++; return r; }
         updated++;
         changed = true;
         return [newInd];
       });
 
-      if (changed) {
-        sheet.getRange(3, industryCol, numRows, 1).setValues(newVals);
-      }
+      if (changed) sheet.getRange(3, startCol + 5, numRows, 1).setValues(newVals);
     });
   });
 
-  const msg = '完了: ' + updated + '件を更新、' + skipped + '件はスキップ（分類不明 or 変更なし）';
+  const msg = '完了:\n・更新: ' + updated + '件\n・スキップ（既に正しい or 空行）: ' + skipped + '件\n・分類不明（マスタ未登録）: ' + unknown + '件';
   Logger.log(msg);
   SpreadsheetApp.getUi().alert(msg);
 }
