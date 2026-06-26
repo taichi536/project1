@@ -381,6 +381,8 @@ function reclassifyAllIndustries() {
 
   // Step 2: 全日付シートに適用
   let updated = 0, skipped = 0, unknown = 0;
+  const unknownList   = []; // 分類不明（会社名あり・分類できず）
+  const oldValList    = []; // 旧分類のまま残っている行（会社名あり・旧値・分類できず）
 
   ss.getSheets().forEach(sheet => {
     if (!datePattern.test(sheet.getName())) return;
@@ -397,11 +399,18 @@ function reclassifyAllIndustries() {
         const company = String(companyVals[i][0] || '').trim();
         if (!company) { skipped++; return r; }
         const current = String(r[0] || '').trim();
-        // 注: GICS_INDUSTRIES.includes(current) でのスキップは削除
-        // → 現在値が有効なGICSでも、会社に対して間違った分類の可能性があるため必ず再分類する
         const newInd = classify(company);
-        if (!newInd) { unknown++; return r; } // 分類不明→元の値を保持
-        if (newInd === current) { skipped++; return r; } // 正しい分類と一致→スキップ
+        if (!newInd) {
+          unknown++;
+          // 会社名ありで分類不能 → ログに記録
+          const entry = company + (current ? ' (現在値: ' + current + ')' : ' (現在値: 空白)');
+          if (!unknownList.includes(entry)) unknownList.push(entry);
+          if (current && !GICS_INDUSTRIES.includes(current)) {
+            if (!oldValList.includes(entry)) oldValList.push(entry);
+          }
+          return r;
+        }
+        if (newInd === current) { skipped++; return r; }
         updated++;
         changed = true;
         return [newInd];
@@ -411,7 +420,11 @@ function reclassifyAllIndustries() {
     });
   });
 
-  const msg = '完了:\n・更新: ' + updated + '件\n・スキップ（既に正しい or 空行）: ' + skipped + '件\n・分類不明（マスタ未登録）: ' + unknown + '件';
+  let msg = '完了:\n・更新: ' + updated + '件\n・スキップ（既に正しい or 空行）: ' + skipped + '件\n・分類不明（マスタ未登録）: ' + unknown + '件';
+  if (unknownList.length > 0) {
+    msg += '\n\n【分類不明の会社名】（業界マスタに手動登録してください）:\n' + unknownList.slice(0, 30).join('\n');
+    if (unknownList.length > 30) msg += '\n...他' + (unknownList.length - 30) + '社';
+  }
   Logger.log(msg);
   SpreadsheetApp.getUi().alert(msg);
 }
