@@ -27,6 +27,7 @@ let _reapplyBizreachTimer = null;
 let _batchApiKey = null;
 let _batchCriteria = null;
 let _batchIsRunning = false; // chrome.storage失敗時もisFreshStartを誤判定しないためのフラグ
+let _batchScoutHistory = null; // スカウト履歴キャッシュ（CDKスクロールごとの再取得を防ぐ）
 
 
 // -------------------------------------------------------
@@ -1146,8 +1147,11 @@ async function triggerAutoAdd() {
   }
 
   const isRDS = getPlatform() === 'rds';
-  // RDSはパネルを信頼するためストレージ不要。他媒体のみ取得
-  const scoutHistory = isRDS ? {} : await getScoutHistory();
+  // スカウト履歴：初回のみ取得してキャッシュ（CDKスクロール再帰時はchrome.storage不要）
+  if (!_batchScoutHistory) {
+    _batchScoutHistory = isRDS ? {} : await getScoutHistory();
+  }
+  const scoutHistory = _batchScoutHistory;
 
   // ─── 仮想スクロール用：セッション内の処理済みIDセット ───
   // 再帰呼び出し時に前バッチの候補者を再処理しないための dedup
@@ -2815,6 +2819,7 @@ async function saveAutoAddProgress(data) {
     _batchIsRunning = false;
     _batchApiKey = null;
     _batchCriteria = null;
+    _batchScoutHistory = null;
     try { sessionStorage.removeItem('snowWeBatchCounters'); } catch (_) {}
   } else if (data.added != null) {
     // バッチ進行中：chrome.storage失敗時の復元用にsessionStorageへバックアップ

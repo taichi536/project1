@@ -90,6 +90,12 @@ async function checkForUpdate() {
     const remote = await res.json();
     const current = chrome.runtime.getManifest().version;
     if (remote.version && remote.version !== current) {
+      // バッチ実行中は強制リロードを延期（コンテンツスクリプトが破棄されてバッチが止まるのを防ぐ）
+      const stored = await chrome.storage.local.get(['autoAddProgress']);
+      if (stored.autoAddProgress?.running) {
+        console.log(`[Snow-we] バッチ実行中のため更新を延期: ${current} → ${remote.version}`);
+        return;
+      }
       console.log(`[Snow-we] 新バージョン検出: ${current} → ${remote.version} 自動リロード中...`);
       chrome.runtime.reload();
     }
