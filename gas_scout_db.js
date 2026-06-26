@@ -775,8 +775,21 @@ function gicsAutoClassify(companyName) {
   if (/旭化成|住友化学|三菱化学|東レ|toray|化学/.test(n))                   return '化学';
 
   // 官公庁・教育機関
-  if (/省|庁|役所|官公庁|市役所|区役所|町役場/.test(n))                    return '官公庁';
-  if (/大学|高校|専門学校|学校法人/.test(n))                               return '教育機関';
+  if (/省|庁|役所|官公庁|市役所|区役所|町役場|裁判所|警察署|消防署|検察庁|税務署|法務局|国会|議会/.test(n)) return '官公庁';
+  if (/大学|高校|中学校|小学校|専門学校|学校法人|教育委員会|幼稚園|保育園/.test(n)) return '教育機関';
+
+  // 重工業（固有名詞）
+  if (/川崎車両|川崎車輛/.test(n)) return '重工業';
+
+  // 汎用キーワード（最後のフォールバック）
+  if (/(コンサルティング|コンサルタント|consulting)/.test(n)) return 'コンサルティングサービス';
+  if (/(人材|採用サービス|ヘッドハンティング)/.test(n)) return '人事・雇用サービス';
+  if (/(フィンテック|fintech|決済サービス|ペイメント)/.test(n)) return '金融サービス';
+  if (/(ゲーム会社|ゲーム開発|gaming)/.test(n)) return '娯楽';
+  if (/(物流会社|運送会社|配送サービス)/.test(n)) return '航空貨物・物流サービス';
+  if (/(医療法人|クリニック|診療所|病院)/.test(n)) return 'ヘルスケアプロバイダー';
+  if (/(介護|福祉|ケアサービス)/.test(n)) return 'ヘルスケアプロバイダー';
+  if (/(スタートアップ|ベンチャー企業)/.test(n)) return 'その他';
 
   return '';
 }
@@ -972,13 +985,22 @@ function reclassifyMaster() {
           muteHttpExceptions: true,
         });
         if (res.getResponseCode() === 200) {
-          const lines = (JSON.parse(res.getContentText()).content?.[0]?.text || '').trim().split('\n');
+          const text = (JSON.parse(res.getContentText()).content?.[0]?.text || '').trim();
+          // 番号マッチング: "1. 産業名" 形式をパース（空行・プリアンブルに強い）
+          const lineMap = {};
+          text.split('\n').forEach(line => {
+            const m = line.match(/^(\d+)[.\s、。）)]+(.+)/);
+            if (m) lineMap[parseInt(m[1])] = m[2].trim();
+          });
           batch.forEach((item, j) => {
-            const ind = GICS_INDUSTRIES.find(x => (lines[j]||'').includes(x)) || '';
+            const rawContent = lineMap[j + 1] || '';
+            const ind = GICS_INDUSTRIES.find(x => rawContent.includes(x)) || '';
             if (ind) {
               indSheet.getRange(item.sheetRow, 2).setValue(ind);
               indSheet.getRange(item.sheetRow, 3).setValue('Claude再分類');
               apiUpdated++;
+            } else {
+              Logger.log('未分類: ' + item.name + ' → ' + rawContent);
             }
           });
         }
