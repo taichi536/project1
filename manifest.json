@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Snow-we スカウト パーソナライズ生成",
-  "version": "1.18.93",
+  "version": "1.18.94",
   "description": "候補者プロフィールからパーソナライズ文を1〜2文で自動生成します",
   "permissions": [
     "activeTab",
     "scripting",
     "storage",
+    "unlimitedStorage",
     "clipboardWrite",
     "alarms"
   ],

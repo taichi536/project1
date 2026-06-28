@@ -1257,6 +1257,7 @@ async function renderHistory() {
     const platformLabel = { bizreach: 'BR', rds: 'RDS', dodax: 'DX', ambi: 'AMBI', green: 'Green', mynavi: 'MY' }[platform] || platform;
     const ageStr = v.age ? ` · ${v.age}` : '';
     const univStr = v.univ ? ` · ${v.univ}` : '';
+    const recruiterStr = v.recruiter ? ` · ${v.recruiter}` : '';
     const posStr = v.position ? `<div class="history-item-pos">${escapeHtml(v.position)}</div>` : '';
     const replyHtml = v.replied
       ? `<span class="reply-tag">💬 返信あり</span>`
@@ -1267,7 +1268,7 @@ async function renderHistory() {
       <div class="history-item-body">
         <div class="history-item-company">${escapeHtml(company)}</div>
         ${posStr}
-        <div class="history-item-meta">${dateStr}${ageStr}${univStr}</div>
+        <div class="history-item-meta">${dateStr}${ageStr}${univStr}${recruiterStr}</div>
       </div>
       ${replyHtml}
       <span class="history-item-days ${rescoutable ? 'rescoutable' : 'recent'}">${daysAgo}日前${rescoutable ? ' ↩' : ''}</span>
@@ -1499,6 +1500,51 @@ $('manual-save-btn').addEventListener('click', async () => {
   $('manual-position').value = '';
   await renderHistory();
   showHistoryMsg('手動追加しました', '#085041');
+});
+
+// チーム履歴同期
+$('history-sync-btn').addEventListener('click', async () => {
+  showHistoryMsg('GASから同期中...', '#4338CA');
+  let r2 = {};
+  try { r2 = await chrome.storage.local.get(['gasSettings']); } catch (_) {}
+  const gas = r2.gasSettings || {};
+  if (!gas.url && !gas.dbUrl) {
+    showHistoryMsg('GAS URLが設定されていません（設定タブを確認）', '#b91c1c'); return;
+  }
+  try {
+    const res = await fetch(gas.dbUrl || gas.url, {
+      method: 'POST',
+      body: JSON.stringify({ secret: gas.secret || 'snowwe2024', action: 'getTeamHistory', days: 180 }),
+    });
+    const json = await res.json();
+    if (!json.ok) throw new Error('GAS error');
+    const records = json.records || [];
+    const history = await loadHistory();
+    let added = 0;
+    const mediaNorm = { 'ビズリーチ': 'bizreach', 'RDS': 'rds', 'doda X': 'dodax', 'AMBI': 'ambi', 'Green': 'green', 'マイナビ': 'mynavi' };
+    for (const rec of records) {
+      const dateKey = rec.date ? new Date(rec.date).toISOString().slice(0, 10) : 'unknown';
+      const candidateId = `team_${dateKey}_${(rec.company || '').replace(/\s/g, '_')}_${rec.recruiter || ''}`;
+      if (history[candidateId]) continue;
+      history[candidateId] = {
+        date: rec.date || Date.now(),
+        platform: mediaNorm[rec.platform] || rec.platform || 'unknown',
+        name: '',
+        company: rec.company || '',
+        age: rec.age || '',
+        univ: rec.univ || '',
+        position: rec.position || '',
+        industry: '',
+        recruiter: rec.recruiter || '',
+      };
+      added++;
+    }
+    await saveHistory(history);
+    await renderHistory();
+    showHistoryMsg(`同期完了：${added}件追加（計${records.length}件取得）`, '#085041');
+  } catch (e) {
+    showHistoryMsg('同期失敗: ' + e.message, '#b91c1c');
+  }
 });
 
 // 履歴クリア

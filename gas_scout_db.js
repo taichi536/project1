@@ -193,6 +193,29 @@ function doPost(e) {
       return json({ ok: true });
     }
 
+    // ── チーム履歴取得（スカウト管理DBから全員分） ──
+    if (data.action === 'getTeamHistory') {
+      const dbSheet = ss.getSheetByName(SHEET_DB);
+      if (!dbSheet) return json({ ok: true, records: [] });
+      const rows = dbSheet.getDataRange().getValues();
+      if (rows.length <= 1) return json({ ok: true, records: [] });
+      const since = Date.now() - (data.days || 180) * 24 * 60 * 60 * 1000;
+      const records = rows.slice(1)
+        .filter(r => r[0] && new Date(r[0]).getTime() >= since)
+        .map(r => ({
+          date:      r[0] ? new Date(r[0]).getTime() : 0,
+          recruiter: String(r[1] || ''),
+          age:       String(r[2] || ''),
+          company:   String(r[3] || ''),
+          univ:      String(r[4] || ''),
+          position:  String(r[5] || ''),
+          platform:  String(r[6] || ''),
+          status:    String(r[7] || ''),
+        }))
+        .filter(r => r.company);
+      return json({ ok: true, records });
+    }
+
     // ── スカウト記録 ──
     recordScout(ss, data);
     return json({ ok: true });
