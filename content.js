@@ -1018,17 +1018,6 @@ async function autoScreenCandidates() {
   const initialCards = extractAllCandidateCards();
   if (initialCards.length === 0) return;
 
-  // AMBI: per_page=1000 でなければ自動リダイレクト（再ロード後に再実行される）
-  if (getPlatform() === 'ambi') {
-    const url = new URL(location.href);
-    if (url.searchParams.get('per_page') !== '1000') {
-      url.searchParams.set('per_page', '1000');
-      console.log('[Snow-we] AMBI autoScreen: per_page=1000 にリダイレクト');
-      location.href = url.toString();
-      return;
-    }
-  }
-
   injectStyles();
   showAutoStatus('📥 候補者を全件読み込み中...');
 
@@ -1243,18 +1232,8 @@ async function triggerAutoAdd() {
   const criteria = _batchCriteria;
   injectStyles();
 
-  // AMBI: per_page=1000 でなければリダイレクト → ページロード後に自動再開
-  if (getPlatform() === 'ambi') {
-    const url = new URL(location.href);
-    if (url.searchParams.get('per_page') !== '1000') {
-      url.searchParams.set('per_page', '1000');
-      showAutoStatus('📥 AMBI: 全件表示(1000件)に移動中... 自動的に再開します', 5000);
-      try { sessionStorage.setItem('snowWeAutoAdd', JSON.stringify({ resume: true })); } catch (_) {}
-      await sleep(800);
-      location.href = url.toString();
-      return;
-    }
-  }
+  // AMBI: per_pageリダイレクトは検討リストページに誤遷移するため削除
+  // 現在表示中の候補者のみを処理する
 
   showAutoStatus('📥 読み込み中...');
 
