@@ -1258,6 +1258,7 @@ async function renderHistory() {
     const ageStr = v.age ? ` · ${v.age}` : '';
     const univStr = v.univ ? ` · ${v.univ}` : '';
     const recruiterStr = v.recruiter ? ` · ${v.recruiter}` : '';
+    const unsentBadge = v.gasSent === false ? `<span style="font-size:9px; padding:1px 5px; border-radius:8px; background:#FEF3C7; color:#D97706; margin-left:4px; flex-shrink:0;">未送信</span>` : '';
     const posStr = v.position ? `<div class="history-item-pos">${escapeHtml(v.position)}</div>` : '';
     const replyHtml = v.replied
       ? `<span class="reply-tag">💬 返信あり</span>`
@@ -1266,7 +1267,7 @@ async function renderHistory() {
     return `<div class="history-item">
       <span class="history-item-platform">${platformLabel}</span>
       <div class="history-item-body">
-        <div class="history-item-company">${escapeHtml(company)}</div>
+        <div class="history-item-company" style="display:flex; align-items:center;">${escapeHtml(company)}${unsentBadge}</div>
         ${posStr}
         <div class="history-item-meta">${dateStr}${ageStr}${univStr}${recruiterStr}</div>
       </div>
@@ -1500,6 +1501,46 @@ $('manual-save-btn').addEventListener('click', async () => {
   $('manual-position').value = '';
   await renderHistory();
   showHistoryMsg('手動追加しました', '#085041');
+});
+
+// 未送信をGASに再送
+$('history-resend-btn').addEventListener('click', async () => {
+  const r = await chrome.storage.local.get(['gasSettings', 'screeningCriteria']);
+  const gas = r.gasSettings || {};
+  if (!gas.url || !gas.recruiter) {
+    showHistoryMsg('GAS URLまたは担当者名が未設定です（設定タブを確認）', '#b91c1c'); return;
+  }
+  const history = await loadHistory();
+  // gasSent === false のもののみ（undefined/true は送信済みとみなす）
+  const unsent = Object.entries(history).filter(([, v]) => v.gasSent === false && v.company && v.date);
+  if (unsent.length === 0) {
+    showHistoryMsg('未送信の記録はありません', '#888'); return;
+  }
+  showHistoryMsg(`${unsent.length}件を再送中...`, '#D97706');
+  let success = 0;
+  for (const [id, v] of unsent) {
+    const payload = {
+      secret: gas.secret || 'snowwe2024',
+      recruiter: gas.recruiter,
+      company: v.company || '',
+      age: (v.age || '').replace(/[歳才]/, ''),
+      univ: v.univ || '',
+      media: v.platform || '',
+      position: v.position || '',
+      ts: v.date,
+    };
+    try {
+      const res = await fetch(gas.url, { method: 'POST', body: JSON.stringify(payload) });
+      const json = await res.json();
+      if (json.ok) { history[id].gasSent = true; success++; }
+    } catch (_) {}
+    if (gas.dbUrl) {
+      try { await fetch(gas.dbUrl, { method: 'POST', body: JSON.stringify(payload) }); } catch (_) {}
+    }
+  }
+  await saveHistory(history);
+  await renderHistory();
+  showHistoryMsg(`${success}/${unsent.length}件をGASに送信しました`, success > 0 ? '#085041' : '#b91c1c');
 });
 
 // チーム履歴同期

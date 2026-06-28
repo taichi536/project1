@@ -449,6 +449,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     univ: info.univ || '',
     position: positionName,
     industry,
+    gasSent: false,
   };
   try {
     await chrome.storage.local.set({ [SCOUT_KEY]: history });
@@ -473,16 +474,19 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
       position: positionName || r2.currentPosition || '',
       ts: now,
     };
+    let sent = false;
     const sendGas = async (url) => {
       try {
         const r = await chrome.runtime.sendMessage({ type: 'gasPost', url, payload });
         if (!r?.ok) throw new Error('GAS returned ok:false');
         console.log('[Snow-we] GAS送信成功:', url.substring(0, 60));
+        sent = true;
       } catch (e) {
         console.warn('[Snow-we] GAS送信失敗、リトライ:', e.message);
         await new Promise(resolve => setTimeout(resolve, 1500));
         try {
-          await chrome.runtime.sendMessage({ type: 'gasPost', url, payload });
+          const r2 = await chrome.runtime.sendMessage({ type: 'gasPost', url, payload });
+          if (r2?.ok) sent = true;
           console.log('[Snow-we] GAS送信リトライ成功');
         } catch (e2) {
           console.warn('[Snow-we] GAS送信リトライも失敗:', e2.message);
@@ -491,6 +495,16 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     };
     await sendGas(gas.url);
     if (gas.dbUrl) await sendGas(gas.dbUrl);
+    // GAS送信成功時にフラグを更新
+    if (sent) {
+      try {
+        const h = await getScoutHistory();
+        if (h[candidateId]) {
+          h[candidateId].gasSent = true;
+          await chrome.storage.local.set({ [SCOUT_KEY]: h });
+        }
+      } catch (_) {}
+    }
   })();
 }
 

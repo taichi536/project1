@@ -512,8 +512,9 @@
     <button class="save-btn" id="history-manual-btn" style="flex:1; font-size:11px;">✏️ 手動追加</button>
     <input type="file" id="history-import-file" accept=".csv" style="display:none;">
   </div>
-  <div style="margin-bottom:10px;">
-    <button class="save-btn" id="history-sync-btn" style="width:100%; font-size:11px; background:#4338CA; color:#fff; border-color:#4338CA;">🔄 チーム履歴をGASから同期</button>
+  <div style="display:flex; gap:6px; margin-bottom:10px;">
+    <button class="save-btn" id="history-resend-btn" style="flex:1; font-size:11px; background:#D97706; color:#fff; border-color:#D97706;">📡 未送信をGASに再送</button>
+    <button class="save-btn" id="history-sync-btn" style="flex:1; font-size:11px; background:#4338CA; color:#fff; border-color:#4338CA;">🔄 チーム同期</button>
   </div>
   <div id="history-import-hint" style="font-size:10px; color:#888; margin-bottom:8px; display:none; line-height:1.5;">
     CSVの列: 送信日時, 会社名, 年齢, 大学, ポジション名, 業界, 媒体<br>
