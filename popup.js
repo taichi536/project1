@@ -306,10 +306,30 @@ async function runGenerate() {
     return;
   }
 
+  // 選択中のポジション情報を取得
+  const positionName = $('position-select').value || '';
+  let positionDescription = '';
+  if (positionName) {
+    try {
+      const r2 = await chrome.storage.local.get(['gasSettings']);
+      const gas2 = r2.gasSettings || {};
+      if (gas2.positionUrl) {
+        const posRes = await fetch(gas2.positionUrl, {
+          method: 'POST',
+          body: JSON.stringify({ secret: gas2.secret || 'snowwe2024', action: 'getPositionRequirements', position: positionName }),
+        });
+        if (posRes.ok) {
+          const posData = await posRes.json();
+          positionDescription = posData.requirements || '';
+        }
+      }
+    } catch (_) {}
+  }
+
   setStatus('generate', 'loading', `パーソナライズ文を生成中... (取得: ${profileData.length || 0}文字)`);
 
   try {
-    const result = await generatePersonalizedLine(apiKey, profileData.profileText);
+    const result = await generatePersonalizedLine(apiKey, profileData.profileText, positionName, positionDescription);
     $('result-text').textContent = result;
     $('result-section').style.display = 'block';
     setStatus('generate', 'success', '生成完了 — コピーしてテンプレ冒頭に貼り付けてください');
@@ -320,19 +340,30 @@ async function runGenerate() {
   $('generate-btn').disabled = false;
 }
 
-async function generatePersonalizedLine(apiKey, profileText) {
+async function generatePersonalizedLine(apiKey, profileText, positionName = '', positionDescription = '') {
   apiKey = sanitizeApiKey(apiKey);
+
+  const positionSection = positionName ? `
+【応募ポジション】
+名称: ${positionName}
+${positionDescription ? `募集要件:\n${positionDescription.substring(0, 800)}` : ''}
+` : '';
+
   const prompt = `あなたはハイクラスコンサル転職エージェントのアシスタントです。
 
-以下の候補者プロフィールを読んで、スカウトメールに挿入するパーソナライズ文を1文で作成してください。
-
+以下の候補者プロフィール${positionName ? 'と応募ポジション情報' : ''}を読んで、スカウトメールに挿入するパーソナライズ文を2文で作成してください。
+${positionSection}
 【挿入位置】
-直前：「この度、貴方様のご経歴を拝見し、アクセンチュアの「〇〇」のポジションに高い親和性を感じ、ご連絡いたしました。」
+直前：「この度、貴方様のご経歴を拝見し、アクセンチュアの「${positionName || '〇〇'}」のポジションに高い親和性を感じ、ご連絡いたしました。」
 直後：「当方の経験上、面接次第ではありますが、かなり高い確度で本ポジションにてオファーが出ると感じます。」
 
+【2文の構成】
+1文目: 候補者の職歴・実績・スキルの具体的な描写（何をどう積んできたか）
+2文目: そのスキル・経験が${positionName ? `「${positionName}」ポジション` : 'このポジション'}においてどう活きるか、またはアクセンチュアでのキャリアアップ観点
+
 【良い例】
-・「証券リテール営業10年で個人成果と支店マネジメントの両面を担われ、営業プレイヤーと育成担当の経験を積み重ねてこられた点が印象的でした。」
-・「金融機関での現場営業を土台に、提携銀行への販売推進では研修設計から同行サポートまで構造的に支援を組み立ててこられており、このポジションをはじめ幅広い可能性を感じております。」
+・「大手SIerでのERPシステム導入においてPMとして顧客折衝から要件定義・リリースまで一気通貫で担われてきた点が印象的でした。貴方様のような現場起点のPM経験は、当ポジションが求める業務変革支援のリード業務において特に高い評価を受けると感じます。」
+・「証券リテール営業10年で個人成果と支店マネジメントの両面を担われ、育成体制の構築まで手掛けてこられた経緯が拝見できました。こうした営業組織の構造的な強化経験は、クライアントの営業変革を支援するコンサルタントとして非常に活かしやすい素地だと感じます。」
 
 【厳禁】
 - 「〜でいらっしゃいます。」という断定で終わるのはNG
@@ -343,15 +374,12 @@ async function generatePersonalizedLine(apiKey, profileText) {
 - 「ぜひ〜」「お話しさせていただきたく」
 - 「〇〇様」「田中様」など名前から書き始めること
 
-【文末】
-必ず「〜、このポジションやその他にも多くの可能性があると感じます。」で終わること。
-
 【ルール】
-- 1文のみ。余計な前置き・説明・補足は一切不要
+- 2文のみ。余計な前置き・説明・補足は一切不要
 - 職歴・実績の描写から直接入る
 - 丁寧だが重くなりすぎないトーン
 - 「※」「---」で始まる注記・免責・説明文は絶対に出力しないこと
-- 出力は1文のみ。それ以外は何も書かないこと
+- 出力は2文のみ。それ以外は何も書かないこと
 
 【候補者プロフィール】
 ${profileText}`;
@@ -366,7 +394,7 @@ ${profileText}`;
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 200,
+      max_tokens: 400,
       messages: [{ role: 'user', content: prompt }]
     })
   });
