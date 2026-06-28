@@ -465,13 +465,14 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     if (!gas.url || !gas.recruiter) return;
     const ageNum = (info.age || '').replace(/[歳才]/, '');
     const payload = {
-      secret: gas.secret,
+      secret: gas.secret || 'snowwe2024',
       recruiter: gas.recruiter,
       company: info.company || '',
       age: ageNum,
       univ: info.univ || '',
       media: platform,
       position: positionName || r2.currentPosition || '',
+      industry,
       ts: now,
     };
     let sent = false;

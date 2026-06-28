@@ -230,8 +230,11 @@ function recordScout(ss, data) {
   const ts      = data.ts ? new Date(data.ts) : new Date();
   const media   = MEDIA_LABEL[data.media] || data.media || '';
   const ageVal  = parseInt(data.age) || '';
-  let industry = '';
-  try { industry = lookupIndustry(ss, data.company || ''); } catch (_) {}
+  // クライアント送信の業界を優先、なければマスタ検索
+  let industry = data.industry || '';
+  if (!industry) {
+    try { industry = lookupIndustry(ss, data.company || ''); } catch (_) {}
+  }
 
   // ── 1. 日付別シートに書く ──
   writeToDailySheet(ss, data, ts, media, ageVal, industry);
