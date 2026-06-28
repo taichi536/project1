@@ -760,7 +760,8 @@ async function runBatchScreening() {
   }
 
   const count = batchData.cards.length;
-  setStatus('screening', 'loading', `${count}人を判定中...`);
+  const chunks = Math.ceil(count / 80);
+  setStatus('screening', 'loading', chunks > 1 ? `${count}人を${chunks}回に分けて判定中...` : `${count}人を判定中...`);
 
   const r = await chrome.storage.local.get(['screeningCriteria']);
   const criteria = r.screeningCriteria || {};
@@ -814,59 +815,69 @@ function buildStandardCriteria(ageIncome) {
 async function runBatchScreeningAI(apiKey, cards, criteria) {
   apiKey = sanitizeApiKey(apiKey);
   const criteriaLines = buildCriteriaLines(criteria);
+  const standardCriteria = buildStandardCriteria(criteria.ageIncome);
+  const CHUNK = 80; // 80人ずつ処理（出力トークン上限対策）
 
-  const candidateList = cards.map((c, i) => {
-    const age = c.age ? `${c.age}歳` : '';
-    const income = c.incomeText ? `年収${c.incomeText}` : '';
-    const meta = [age, income].filter(Boolean).join(' / ');
-    return `候補者${i + 1}: ${c.summary}${meta ? ` [${meta}]` : ''}`;
-  }).join('\n');
+  const callChunk = async (chunk, offset) => {
+    const candidateList = chunk.map((c, i) => {
+      const age = c.age ? `${c.age}歳` : '';
+      const income = c.incomeText ? `年収${c.incomeText}` : '';
+      const meta = [age, income].filter(Boolean).join(' / ');
+      return `候補者${offset + i + 1}: ${c.summary}${meta ? ` [${meta}]` : ''}`;
+    }).join('\n');
 
-  const prompt = `あなたは転職エージェントの一次選定アシスタントです。
+    const prompt = `あなたは転職エージェントの一次選定アシスタントです。
 
 以下の【選定基準】に照らして、各候補者を判定してください。
 カード情報は概要のみです。年収・学歴など情報が読み取れない項目は「問題なし」として扱い、明確にNGと確認できる場合のみNGとしてください。迷う場合は必ずOKとしてください。
 
 【選定基準】
-${buildStandardCriteria(criteria.ageIncome)}
+${standardCriteria}
 ${criteriaLines ? '\n【追加条件】\n' + criteriaLines : ''}
 
 【候補者一覧】
 ${candidateList}
 
 以下のJSON形式のみで出力してください（説明不要）:
-{"results":[{"i":1,"o":"OK"},{"i":2,"o":"NG"}]}`;
+{"results":[{"i":${offset + 1},"o":"OK"},{"i":${offset + 2},"o":"NG"}]}`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
-      messages: [{ role: 'user', content: prompt }]
-    })
-  });
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1200,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `APIエラー (${response.status})`);
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `APIエラー (${response.status})`);
+    }
+    const data = await response.json();
+    const text = (data.content?.[0]?.text || '').trim();
+    const clean = text.replace(/```json|```/g, '').trim();
+    let parsed;
+    try { parsed = JSON.parse(clean); } catch {
+      const fallback = clean.match(/"o"\s*:\s*"([^"]+)"/g) || [];
+      return chunk.map((_, i) => ({ overall: fallback[i] ? fallback[i].match(/"([^"]+)"/)?.[1] || '要確認' : '要確認' }));
+    }
+    return (parsed.results || []).map(r => ({ overall: r.overall || r.o || '要確認' }));
+  };
+
+  const allResults = [];
+  for (let i = 0; i < cards.length; i += CHUNK) {
+    const chunk = cards.slice(i, i + CHUNK);
+    const chunkResults = await callChunk(chunk, i);
+    allResults.push(...chunkResults);
   }
-  const data = await response.json();
-  const text = (data.content?.[0]?.text || '').trim();
-  const clean = text.replace(/```json|```/g, '').trim();
-  let parsed;
-  try { parsed = JSON.parse(clean); } catch {
-    const fallback = clean.match(/"o"\s*:\s*"([^"]+)"/g) || [];
-    return fallback.map((_, i) => ({ overall: '要確認' }));
-  }
-  return (parsed.results || []).map(r => ({
-    overall: r.overall || r.o || '要確認'
-  }));
+  return allResults;
 }
 
 function buildCriteriaLines(criteria) {

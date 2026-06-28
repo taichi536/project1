@@ -1170,11 +1170,14 @@ ${candidateList}
 // Claude APIを呼び出す（content.js内から直接）
 async function callBatchScreeningAPI(apiKey, cards, criteria) {
   const criteriaLines = buildCriteriaText(criteria, getPlatform());
-  const candidateList = cards.map((c, i) =>
-    `候補者${i + 1}: ${c.summary}`
-  ).join('\n');
+  const CHUNK = 80;
 
-  const prompt = `あなたは転職エージェントの一次選定アシスタントです。
+  const callChunk = async (chunk, offset) => {
+    const candidateList = chunk.map((c, i) =>
+      `候補者${offset + i + 1}: ${c.summary}`
+    ).join('\n');
+
+    const prompt = `あなたは転職エージェントの一次選定アシスタントです。
 
 以下の【選定基準】に照らして、各候補者を判定してください。
 カード情報は概要のみのため、読み取れない項目は「情報なし」として扱ってください。
@@ -1185,21 +1188,32 @@ ${criteriaLines}
 【候補者一覧】
 ${candidateList}
 
-以下のJSON形式のみで出力してください（説明不要・reasonは10文字以内）:
-{"results":[{"i":1,"o":"OK"},{"i":2,"o":"NG"}]}`;
+以下のJSON形式のみで出力してください（説明不要）:
+{"results":[{"i":${offset + 1},"o":"OK"},{"i":${offset + 2},"o":"NG"}]}`;
 
-  const data = await claudeFetch(apiKey, {
-    model: 'claude-sonnet-4-6',
-    max_tokens: 2000,
-    messages: [{ role: 'user', content: prompt }]
-  });
-  const text = (data.content?.[0]?.text || '').trim();
-  const clean = text.replace(/```json|```/g, '').trim();
-  const parsed = JSON.parse(clean);
-  // 短縮キー(i/o)と通常キー(index/overall)の両方に対応
-  return (parsed.results || []).map(r => ({
-    overall: r.overall || r.o || '要確認'
-  }));
+    const data = await claudeFetch(apiKey, {
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1200,
+      messages: [{ role: 'user', content: prompt }]
+    });
+    const text = (data.content?.[0]?.text || '').trim();
+    const clean = text.replace(/```json|```/g, '').trim();
+    try {
+      const parsed = JSON.parse(clean);
+      return (parsed.results || []).map(r => ({ overall: r.overall || r.o || '要確認' }));
+    } catch {
+      return chunk.map(() => ({ overall: '要確認' }));
+    }
+  };
+
+  const allResults = [];
+  for (let i = 0; i < cards.length; i += CHUNK) {
+    if (i > 0) showAutoStatus(`🔍 判定中... (${i}/${cards.length}人完了)`);
+    const chunk = cards.slice(i, i + CHUNK);
+    const chunkResults = await callChunk(chunk, i);
+    allResults.push(...chunkResults);
+  }
+  return allResults;
 }
 
 // -------------------------------------------------------
