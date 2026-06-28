@@ -2747,8 +2747,8 @@ async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
   try {
     const { gasSettings, screeningCriteria } = await chrome.storage.local.get(['gasSettings', 'screeningCriteria']);
     const gasUrl = gasSettings?.dbUrl || gasSettings?.url;
-    const secret = gasSettings?.secret;
-    if (gasUrl && secret) {
+    const secret = gasSettings?.secret || 'snowwe2024';
+    if (gasUrl) {
       chrome.runtime.sendMessage({
         type: 'gasPost',
         url: gasUrl,
@@ -2814,6 +2814,9 @@ function showFeedbackPopup(badgeEl) {
     });
     row.appendChild(btn);
   });
+
+  // ポップアップ内クリックは閉じない
+  popup.addEventListener('click', e => e.stopPropagation());
 
   // ポップアップ外クリックで閉じる
   setTimeout(() => {
