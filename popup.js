@@ -477,14 +477,23 @@ async function suggestPosition(apiKey, profileText) {
     return await suggestPositionSingleStep(apiKey, profileText, positionListText);
   }
 
-  // GAS設定済み：2ステップ処理
-  // ── Step 1: Haikuで全ポジションから上位10件に絞り込み ──
+  // GAS設定済み：ポジション数が30件以下なら全件をSonnetへ直接渡す
+  if (positions.length <= 30) {
+    setStatus('suggest', 'loading', `${positions.length}件のポジションを分析中...`);
+    const detailList = positions
+      .map(p => p.description ? `${p.name}: ${p.description}` : p.name)
+      .join('\n');
+    return await suggestPositionSingleStep(apiKey, profileText, detailList);
+  }
+
+  // 31件以上の場合：2ステップ処理
+  // ── Step 1: Haikuで全ポジションから上位15件に絞り込み ──
   setStatus('suggest', 'loading', `Step1: ${positions.length}件から候補を絞り込み中...`);
   const nameWithSnippetList = positions.map(p =>
-    p.description ? `${p.name}（${p.description.substring(0, 100)}）` : p.name
+    p.description ? `${p.name}（${p.description.substring(0, 120)}）` : p.name
   ).join('\n');
   const step1Prompt = `あなたはアクセンチュア転職支援の専門エージェントです。
-以下の候補者プロフィールと募集ポジション一覧を照合し、最も合致しそうなポジション名を上位10件選んでください。
+以下の候補者プロフィールと募集ポジション一覧を照合し、最も合致しそうなポジション名を上位15件選んでください。
 ポジション名の後の括弧内は募集要件の冒頭です。候補者の職歴・スキルと照合して判断してください。
 
 【募集ポジション一覧（名前＋要件概要）】
@@ -493,7 +502,7 @@ ${nameWithSnippetList}
 【候補者プロフィール】
 ${profileText}
 
-JSON配列のみで出力してください（説明不要）:
+【重要】出力はJSON配列のみ。ポジション名は一覧に記載された文字列を一字一句そのままコピーすること:
 ["ポジション名1","ポジション名2",...]`;
 
   const step1Res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -506,7 +515,7 @@ JSON配列のみで出力してください（説明不要）:
     },
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 400,
+      max_tokens: 500,
       messages: [{ role: 'user', content: step1Prompt }]
     })
   });
@@ -517,17 +526,25 @@ JSON配列のみで出力してください（説明不要）:
   const step1Data = await step1Res.json();
   const step1Text = (step1Data.content?.[0]?.text || '').trim();
   const arrMatch = step1Text.match(/\[[\s\S]*\]/);
-  let top10Names = [];
+  let top15Names = [];
   if (arrMatch) {
-    try { top10Names = JSON.parse(arrMatch[0]); } catch (_) {}
+    try { top15Names = JSON.parse(arrMatch[0]); } catch (_) {}
   }
-  const top10 = top10Names.length > 0
-    ? top10Names.map(name => positions.find(p => p.name === name)).filter(Boolean)
-    : positions.slice(0, 10);
 
-  // ── Step 2: Sonnetで上位10件を詳細ランキング ──
-  setStatus('suggest', 'loading', `Step2: 上位${top10.length}件を詳細分析中...`);
-  const detailList = top10
+  // 完全一致→部分一致の順でポジションを照合
+  const matched = top15Names.map(name => {
+    const exact = positions.find(p => p.name === name);
+    if (exact) return exact;
+    const partial = positions.find(p => p.name.includes(name) || name.includes(p.name));
+    return partial || null;
+  }).filter(Boolean);
+
+  // マッチできなかった場合はStep1をスキップして全件渡す
+  const top15 = matched.length >= 3 ? matched : positions;
+
+  // ── Step 2: Sonnetで詳細ランキング ──
+  setStatus('suggest', 'loading', `Step2: ${top15.length}件を詳細分析中...`);
+  const detailList = top15
     .map(p => p.description ? `${p.name}: ${p.description}` : p.name)
     .join('\n');
   return await suggestPositionSingleStep(apiKey, profileText, detailList);
