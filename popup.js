@@ -447,6 +447,37 @@ async function fetchPositionsFromGas(positionUrl, secret) {
   return data.positions || [];
 }
 
+async function extractCandidateAttributes(apiKey, profileText) {
+  const prompt = `以下の候補者プロフィールから転職提案に必要な属性を抽出してください。
+
+【候補者プロフィール】
+${profileText}
+
+JSON形式のみで出力（コードブロック不要）:
+{"current_role":"現在の役職","current_industry":"現職業界（例:SIer・コンサル・メーカー等）","company_size":"企業規模（大手・中堅・ベンチャー等）","experience_years":経験年数の整数,"key_skills":["スキル1","スキル2"],"estimated_grade":"推定グレード（例:Manager相当・Consultant相当）","transfer_axis":"転職軸（記載があれば。なければ職歴から推測）","strengths":"アクセンチュアで活かせる最大の強み1文"}`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 400,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const text = (data.content?.[0]?.text || '').trim();
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try { return JSON.parse(match[0]); } catch (_) { return null; }
+}
+
 async function suggestPosition(apiKey, profileText) {
   apiKey = sanitizeApiKey(apiKey);
 
@@ -469,12 +500,16 @@ async function suggestPosition(apiKey, profileText) {
     }
   }
 
+  // Step 0: 候補者プロフィールを構造化抽出
+  setStatus('suggest', 'loading', '候補者プロフィールを分析中...');
+  const candidateAttrs = await extractCandidateAttributes(apiKey, profileText);
+
   if (!usingGas) {
     // GAS未設定：従来通り1回のSonnet呼び出し（ポジション名のみ）
     const positionListText = Array.from(document.querySelectorAll('#position-select option'))
       .map(o => o.value).filter(Boolean).join('\n');
     setStatus('suggest', 'loading', 'ポジションを分析中...');
-    return await suggestPositionSingleStep(apiKey, profileText, positionListText);
+    return await suggestPositionSingleStep(apiKey, profileText, positionListText, candidateAttrs);
   }
 
   // GAS設定済み：ポジション数が30件以下なら全件をSonnetへ直接渡す
@@ -483,7 +518,7 @@ async function suggestPosition(apiKey, profileText) {
     const detailList = positions
       .map(p => p.description ? `${p.name}: ${p.description}` : p.name)
       .join('\n');
-    return await suggestPositionSingleStep(apiKey, profileText, detailList);
+    return await suggestPositionSingleStep(apiKey, profileText, detailList, candidateAttrs);
   }
 
   // 31件以上の場合：2ステップ処理
@@ -547,17 +582,27 @@ ${profileText}
   const detailList = top15
     .map(p => p.description ? `${p.name}: ${p.description}` : p.name)
     .join('\n');
-  return await suggestPositionSingleStep(apiKey, profileText, detailList);
+  return await suggestPositionSingleStep(apiKey, profileText, detailList, candidateAttrs);
 }
 
-async function suggestPositionSingleStep(apiKey, profileText, positionListText) {
+async function suggestPositionSingleStep(apiKey, profileText, positionListText, candidateAttrs = null) {
+  const attrSection = candidateAttrs ? `
+【候補者属性（構造化）】
+- 現職: ${candidateAttrs.current_role || '不明'}（${candidateAttrs.current_industry || '不明'} / ${candidateAttrs.company_size || '不明'}）
+- 経験年数: ${candidateAttrs.experience_years || '不明'}年
+- 主要スキル: ${(candidateAttrs.key_skills || []).join('、') || '不明'}
+- 推定グレード: ${candidateAttrs.estimated_grade || '不明'}
+- 転職軸: ${candidateAttrs.transfer_axis || '不明'}
+- 強み: ${candidateAttrs.strengths || '不明'}
+` : '';
+
   const prompt = `あなたはアクセンチュア日本法人への転職支援を専門とするハイクラス転職エージェントです。
 候補者にスカウトを送る際、どのポジションで打てば「刺さるか」を判断してください。
-
+${attrSection}
 【判断の視点】
-1. 候補者の職歴・実績から見て、アクセンチュアのどのポジションで即戦力として活かせるか
-2. 候補者の希望職種・転職軸（プロフィールに記載あれば）と合致しているか
-3. 上記2つが重なるポジションを最優先。希望職種の記載がない場合は職歴から転職軸を推測する
+1. 候補者の推定グレード・経験年数に見合ったポジションか
+2. 候補者の主要スキルと募集要件が具体的に合致しているか
+3. 候補者の転職軸・強みが活かせるポジションか（転職軸が不明な場合は職歴から推測）
 4. 「名前：募集要件」の形式の場合は必ず募集要件の内容を精読し、候補者のスキル・経験と照合すること
 
 【重要ルール】
