@@ -480,12 +480,15 @@ async function suggestPosition(apiKey, profileText) {
   // GAS設定済み：2ステップ処理
   // ── Step 1: Haikuで全ポジションから上位10件に絞り込み ──
   setStatus('suggest', 'loading', `Step1: ${positions.length}件から候補を絞り込み中...`);
-  const nameOnlyList = positions.map(p => p.name).join('\n');
+  const nameWithSnippetList = positions.map(p =>
+    p.description ? `${p.name}（${p.description.substring(0, 100)}）` : p.name
+  ).join('\n');
   const step1Prompt = `あなたはアクセンチュア転職支援の専門エージェントです。
 以下の候補者プロフィールと募集ポジション一覧を照合し、最も合致しそうなポジション名を上位10件選んでください。
+ポジション名の後の括弧内は募集要件の冒頭です。候補者の職歴・スキルと照合して判断してください。
 
-【募集ポジション一覧】
-${nameOnlyList}
+【募集ポジション一覧（名前＋要件概要）】
+${nameWithSnippetList}
 
 【候補者プロフィール】
 ${profileText}
@@ -538,11 +541,13 @@ async function suggestPositionSingleStep(apiKey, profileText, positionListText) 
 1. 候補者の職歴・実績から見て、アクセンチュアのどのポジションで即戦力として活かせるか
 2. 候補者の希望職種・転職軸（プロフィールに記載あれば）と合致しているか
 3. 上記2つが重なるポジションを最優先。希望職種の記載がない場合は職歴から転職軸を推測する
+4. 「名前：募集要件」の形式の場合は必ず募集要件の内容を精読し、候補者のスキル・経験と照合すること
 
 【重要ルール】
-- 必ず【募集ポジション一覧】に記載されたポジション名をそのまま使用すること
+- 必ず【募集ポジション一覧】に記載されたポジション名をそのまま使用すること（コロン以前の部分のみ）
 - 一覧にないポジション名は絶対に使用しないこと
 - スコアは「このポジションで打ったら候補者に刺さる確度」として1〜100で評価すること
+- 候補者の経験と募集要件が実質的に合致しているポジションのみ推薦すること
 
 【募集ポジション一覧】
 ${positionListText}
@@ -564,7 +569,7 @@ ${profileText}
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 800,
+      max_tokens: 1500,
       messages: [{ role: 'user', content: prompt }]
     })
   });

@@ -175,7 +175,7 @@ function doPost(e) {
       if (!posSheet) return json({ ok: false });
       const positions = posSheet.getDataRange().getValues().slice(1)
         .filter(r => r[0])
-        .map(r => ({ name: String(r[0]), description: String(r[1] || '').substring(0, 500) }));
+        .map(r => ({ name: String(r[0]), description: String(r[1] || '').substring(0, 1500) }));
       return json({ ok: true, positions });
     }
 
