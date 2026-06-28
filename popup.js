@@ -1256,6 +1256,8 @@ async function renderHistory() {
     const platform = v.platform || 'unknown';
     const platformLabel = { bizreach: 'BR', rds: 'RDS', dodax: 'DX', ambi: 'AMBI', green: 'Green', mynavi: 'MY' }[platform] || platform;
     const ageStr = v.age ? ` · ${v.age}` : '';
+    const univStr = v.univ ? ` · ${v.univ}` : '';
+    const posStr = v.position ? `<div class="history-item-pos">${escapeHtml(v.position)}</div>` : '';
     const replyHtml = v.replied
       ? `<span class="reply-tag">💬 返信あり</span>`
       : `<button class="reply-btn" data-id="${escapeHtml(id)}">返信あり</button>`;
@@ -1264,7 +1266,8 @@ async function renderHistory() {
       <span class="history-item-platform">${platformLabel}</span>
       <div class="history-item-body">
         <div class="history-item-company">${escapeHtml(company)}</div>
-        <div class="history-item-meta">${dateStr}${ageStr}</div>
+        ${posStr}
+        <div class="history-item-meta">${dateStr}${ageStr}${univStr}</div>
       </div>
       ${replyHtml}
       <span class="history-item-days ${rescoutable ? 'rescoutable' : 'recent'}">${daysAgo}日前${rescoutable ? ' ↩' : ''}</span>
@@ -1321,10 +1324,10 @@ $('history-export-btn').addEventListener('click', async () => {
 
   entries.sort((a, b) => (b[1].date || 0) - (a[1].date || 0));
 
-  const headers = ['送信日時', '会社名', '年齢', '媒体', '候補者ID'];
+  const headers = ['送信日時', '会社名', '年齢', '大学', 'ポジション名', '業界', '媒体', '返信', '候補者ID'];
   const rows = entries.map(([id, v]) => {
     const dateStr = v.date ? new Date(v.date).toLocaleString('ja-JP') : '';
-    return [dateStr, v.company || '', v.age || '', v.platform || '', id]
+    return [dateStr, v.company || '', v.age || '', v.univ || '', v.position || '', v.industry || '', v.platform || '', v.replied ? '返信あり' : '', id]
       .map(c => `"${String(c).replace(/"/g, '""')}"`).join(',');
   });
 
@@ -1366,22 +1369,36 @@ $('history-import-file').addEventListener('change', async (e) => {
     if (cols.length < 2) { skipped++; continue; }
 
     // Support two formats:
-    // Format A (Excel export): 送信日時, 会社名, 年齢, 媒体, ポジション名, 業界
-    // Format B (Extension export): 送信日時, 会社名, 年齢, 媒体, 候補者ID
+    // Format A (extension new): 送信日時, 会社名, 年齢, 大学, ポジション名, 業界, 媒体, 返信, 候補者ID
+    // Format B (extension old): 送信日時, 会社名, 年齢, 媒体, 候補者ID
+    // Format C (Excel export):  送信日時, 会社名, 年齢, 媒体, ポジション名, 業界
     const dateRaw = cols[0] || '';
     const company = cols[1] || '';
     const age = cols[2] || '';
-    const platform = cols[3] || '';
-    const idOrPos = cols[4] || '';
+    // detect new format by checking if col[3] looks like a university/blank (not a platform name)
+    const platformKeywords = ['bizreach', 'br', 'rds', 'dodax', 'doda', 'ambi', 'green', 'mynavi', 'my', 'bireach'];
+    const col3 = (cols[3] || '').toLowerCase();
+    const isNewFormat = cols.length >= 7 && !platformKeywords.includes(col3);
+    let univ = '', position = '', industry = '', platform = '', candidateIdCol = '';
+    if (isNewFormat) {
+      univ = cols[3] || '';
+      position = cols[4] || '';
+      industry = cols[5] || '';
+      platform = cols[6] || '';
+      candidateIdCol = cols[8] || '';
+    } else {
+      platform = cols[3] || '';
+      candidateIdCol = cols[4] || '';
+      position = cols[5] || '';
+      industry = cols[6] || '';
+    }
 
     const dateVal = parseJapaneseDate(dateRaw);
 
-    // Use candidate ID if it looks like a URL, otherwise generate one
     let candidateId;
-    if (idOrPos.startsWith('http') || idOrPos.includes('/')) {
-      candidateId = idOrPos.replace(/[?#].*$/, '');
+    if (candidateIdCol.startsWith('http') || candidateIdCol.includes('/') || candidateIdCol.startsWith('import_') || candidateIdCol.startsWith('manual_')) {
+      candidateId = candidateIdCol.replace(/[?#].*$/, '');
     } else {
-      // Generate stable key from date+company
       const dateKey = dateVal ? new Date(dateVal).toISOString().slice(0, 10) : 'unknown';
       candidateId = `import_${dateKey}_${company.replace(/\s/g, '_')}`;
     }
@@ -1392,6 +1409,9 @@ $('history-import-file').addEventListener('change', async (e) => {
       date: dateVal || Date.now(),
       company,
       age,
+      univ,
+      position,
+      industry,
       platform: normalizePlatform(platform),
       name: '',
     };
@@ -1445,6 +1465,41 @@ function normalizePlatform(s) {
   };
   return map[(s || '').toLowerCase()] || s || 'unknown';
 }
+
+// 手動追加
+$('history-manual-btn').addEventListener('click', () => {
+  const form = $('history-manual-form');
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+  if (form.style.display === 'block') {
+    const today = new Date().toISOString().slice(0, 10);
+    $('manual-date').value = today;
+    $('manual-company').focus();
+  }
+});
+$('manual-cancel-btn').addEventListener('click', () => {
+  $('history-manual-form').style.display = 'none';
+});
+$('manual-save-btn').addEventListener('click', async () => {
+  const company = $('manual-company').value.trim();
+  if (!company) { showHistoryMsg('会社名は必須です', '#b91c1c'); return; }
+  const age = $('manual-age').value.trim();
+  const univ = $('manual-univ').value.trim();
+  const position = $('manual-position').value.trim();
+  const platform = $('manual-platform').value;
+  const dateVal = $('manual-date').value ? new Date($('manual-date').value).getTime() : Date.now();
+  const dateKey = new Date(dateVal).toISOString().slice(0, 10);
+  const candidateId = `manual_${dateKey}_${company.replace(/\s/g, '_')}_${Date.now() % 10000}`;
+  const history = await loadHistory();
+  history[candidateId] = { date: dateVal, platform, name: '', company, age, univ, position, industry: '' };
+  await saveHistory(history);
+  $('history-manual-form').style.display = 'none';
+  $('manual-company').value = '';
+  $('manual-age').value = '';
+  $('manual-univ').value = '';
+  $('manual-position').value = '';
+  await renderHistory();
+  showHistoryMsg('手動追加しました', '#085041');
+});
 
 // 履歴クリア
 $('history-clear-btn').addEventListener('click', async () => {

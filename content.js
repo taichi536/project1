@@ -344,6 +344,82 @@ setupClickTracking();
 const SCOUT_KEY = 'scoutHistory';
 const RESCOUNT_DAYS = 7; // 1週間 = 7日
 
+// 会社名キーワードから業界を簡易判定（GASのgicsAutoClassifyを移植）
+function gicsAutoClassify(companyName) {
+  if (!companyName) return '';
+  const n = companyName.replace(/[株式会社　\s]/g, '').toLowerCase();
+  if (/accenture|アクセンチュア/.test(n))                                  return 'コンサルティングサービス';
+  if (/マッキンゼー|mckinsey|ボストンコンサル|bcg|roland berger|ローランドベルガー|bain|ベイン/.test(n)) return 'コンサルティングサービス';
+  if (/デロイト|deloitte|pwc|kpmg|ey |アーンスト/.test(n))                 return 'コンサルティングサービス';
+  if (/ベイカレント|baycurrent/.test(n))                                    return 'コンサルティングサービス';
+  if (/ntt(データ|data|コミュニケーションズ|communications)/.test(n))       return 'SIer';
+  if (/野村総研|nri/.test(n))                                               return 'SIer';
+  if (/伊藤忠テクノ|ctc/.test(n))                                           return 'SIer';
+  if (/scsk/.test(n))                                                        return 'SIer';
+  if (/富士通|fujitsu/.test(n))                                             return '情報技術サービス';
+  if (/日立|hitachi/.test(n))                                               return '情報技術サービス';
+  if (/nec|日本電気/.test(n))                                               return '情報技術サービス';
+  if (/ibm|日本ibm/.test(n))                                                return '情報技術サービス';
+  if (/salesforce|セールスフォース/.test(n))                                return 'SaaS';
+  if (/freee/.test(n))                                                       return 'SaaS';
+  if (/smarthr/.test(n))                                                     return 'SaaS';
+  if (/microsoft|マイクロソフト/.test(n))                                   return 'ソフトウェア';
+  if (/oracle|オラクル/.test(n))                                            return 'ソフトウェア';
+  if (/sap/.test(n))                                                         return 'ソフトウェア';
+  if (/google|グーグル|alphabet/.test(n))                                   return 'AI';
+  if (/amazon|アマゾン|aws/.test(n) && !/モバイル/.test(n))                return 'メガベンチャー';
+  if (/楽天|rakuten/.test(n) && !/モバイル|銀行/.test(n))                  return 'メガベンチャー';
+  if (/メルカリ|mercari/.test(n))                                           return 'メガベンチャー';
+  if (/サイバーエージェント|cyberagent/.test(n))                            return 'メガベンチャー';
+  if (/softbank|ソフトバンク/.test(n) && !/銀行/.test(n))                  return '各種電気通信サービス';
+  if (/kddi|au/.test(n))                                                     return '各種電気通信サービス';
+  if (/docomo|ドコモ/.test(n))                                              return '各種電気通信サービス';
+  if (/ntt(東日本|西日本)/.test(n) || n === 'ntt')                          return '各種電気通信サービス';
+  if (/信託銀行|三菱uf.+信託|三井住友信託|みずほ信託/.test(n))             return '信託銀行';
+  if (/三菱uf|mufg|三菱東京/.test(n))                                       return '銀行';
+  if (/みずほ|mizuho/.test(n) && !/証券/.test(n))                          return '銀行';
+  if (/三井住友|smbc/.test(n) && !/証券|日興/.test(n))                     return '銀行';
+  if (/りそな|resona/.test(n))                                              return '銀行';
+  if (/(銀行|bank)/.test(n) && !/信託/.test(n))                            return '銀行';
+  if (/野村証券|大和証券|みずほ証券|三菱uf.+証券|smbc日興|証券/.test(n))   return '資本市場';
+  if (/日本生命|第一生命|住友生命|明治安田|生命保険/.test(n))              return '生命保険・健康保険';
+  if (/東京海上|損保ジャパン|三井住友海上|あいおい|損保|火災/.test(n))     return '動産保険・損害保険';
+  if (/オリックス|orix/.test(n))                                            return '金融サービス';
+  if (/三井不動産|三菱地所|住友不動産|野村不動産/.test(n))                 return 'デベロッパー';
+  if (/積水ハウス|大和ハウス|旭化成ホームズ|住宅/.test(n))                 return '住宅建設';
+  if (/(不動産)/.test(n))                                                   return '不動産';
+  if (/toyota|トヨタ/.test(n))                                             return '自動車';
+  if (/honda|ホンダ|本田技/.test(n))                                       return '自動車';
+  if (/nissan|日産/.test(n))                                                return '自動車';
+  if (/デンソー|denso|アイシン|aisin/.test(n))                             return '自動車用部品';
+  if (/川崎重工|三菱重工|ihi/.test(n))                                     return '重工業';
+  if (/キーエンス|keyence/.test(n))                                         return '電子装置・機器・部品';
+  if (/ソニー|sony/.test(n))                                                return '民生用電子機器';
+  if (/パナソニック|panasonic/.test(n))                                     return '民生用電子機器';
+  if (/東京エレク|tel/.test(n))                                             return '半導体・半導体製造装置';
+  if (/(半導体|semiconductor)/.test(n))                                      return '半導体・半導体製造装置';
+  if (/武田薬品|takeda|アステラス|第一三共|大塚製薬|中外製薬|エーザイ/.test(n)) return '医薬品';
+  if (/医薬品|製薬|pharma/.test(n))                                         return '医薬品';
+  if (/リクルート|recruit/.test(n) && !/不動産|住宅/.test(n))              return '人事・雇用サービス';
+  if (/パーソル|persol|マンパワー/.test(n))                                 return '人事・雇用サービス';
+  if (/電通|dentsu|博報堂|hakuhodo/.test(n))                                return 'メディア';
+  if (/三菱商事|三井物産|住友商事|伊藤忠|丸紅|双日|豊田通商|商事|物産/.test(n)) return '商社';
+  if (/鹿島|清水建設|大成建設|竹中工務|大林組|建設/.test(n))               return '建設・土木';
+  if (/ヤマト|yamato|佐川|sagawa|日本郵便/.test(n))                         return '航空貨物・物流サービス';
+  if (/jal|ana|日本航空|全日空|航空/.test(n))                               return '旅客航空輸送';
+  if (/jr.*(東日本|西日本|東海|九州|北海道)|鉄道|railway/.test(n))         return '陸上運輸';
+  if (/eneos|出光|idemitsu|コスモ石油/.test(n))                             return '石油・ガス・消耗燃料';
+  if (/東電|東京電力|関西電力|中部電力|九州電力|電力|北陸電力|東北電力|北海道電力|四国電力/.test(n)) return '電力';
+  if (/(大阪ガス|東京ガス|東邦ガス|西部ガス|都市ガス)/.test(n))            return 'ガス';
+  if (/旭化成|住友化学|三菱化学|東レ|化学/.test(n))                         return '化学';
+  if (/(コンサルティング|コンサルタント|consulting)/.test(n)) return 'コンサルティングサービス';
+  if (/(人材|採用サービス|ヘッドハンティング)/.test(n)) return '人事・雇用サービス';
+  if (/(フィンテック|fintech|決済サービス|ペイメント)/.test(n)) return '金融サービス';
+  if (/(物流会社|運送会社|配送サービス)/.test(n)) return '航空貨物・物流サービス';
+  if (/(病院|クリニック|医療法人|診療所)/.test(n)) return 'ヘルスケアプロバイダー';
+  return '';
+}
+
 async function getScoutHistory() {
   try {
     const r = await chrome.storage.local.get([SCOUT_KEY]);
@@ -359,6 +435,10 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
   if (!candidateId) return;
   const now = Date.now();
   const platform = getPlatform();
+  const positionName = templateName || templateRaw || fallbackPosition || '';
+  const industry = gicsAutoClassify(info.company || '');
+
+  // ① ローカル記録（メイン・必ず保存）
   const history = await getScoutHistory();
   history[candidateId] = {
     date: now,
@@ -366,6 +446,9 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     name: info.name || '',
     company: info.company || '',
     age: info.age || '',
+    univ: info.univ || '',
+    position: positionName,
+    industry,
   };
   try {
     await chrome.storage.local.set({ [SCOUT_KEY]: history });
@@ -373,11 +456,12 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     if (!e.message?.includes('Extension context invalidated')) console.warn('[Snow-we] recordScoutSent storage error:', e.message);
   }
 
-  // Googleスプレッドシートへ自動記録
-  let r2 = {};
-  try { r2 = await chrome.storage.local.get(['gasSettings', 'currentPosition']); } catch (_) {}
-  const gas = r2.gasSettings || {};
-  if (gas.url && gas.recruiter) {
+  // ② GASへの送信（サブ・失敗してもローカル記録には影響しない）
+  ;(async () => {
+    let r2 = {};
+    try { r2 = await chrome.storage.local.get(['gasSettings', 'currentPosition']); } catch (_) {}
+    const gas = r2.gasSettings || {};
+    if (!gas.url || !gas.recruiter) return;
     const ageNum = (info.age || '').replace(/[歳才]/, '');
     const payload = {
       secret: gas.secret,
@@ -386,19 +470,17 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
       age: ageNum,
       univ: info.univ || '',
       media: platform,
-      position: templateName || templateRaw || fallbackPosition || r2.currentPosition || '',
+      position: positionName || r2.currentPosition || '',
       ts: now,
     };
-
-    // バックグラウンド経由でGASへ送信（content.jsから直接fetchするとCORS/401になるため）
     const sendGas = async (url) => {
       try {
         const r = await chrome.runtime.sendMessage({ type: 'gasPost', url, payload });
         if (!r?.ok) throw new Error('GAS returned ok:false');
         console.log('[Snow-we] GAS送信成功:', url.substring(0, 60));
       } catch (e) {
-        console.warn('[Snow-we] GAS送信失敗、1秒後リトライ:', e.message);
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.warn('[Snow-we] GAS送信失敗、リトライ:', e.message);
+        await new Promise(resolve => setTimeout(resolve, 1500));
         try {
           await chrome.runtime.sendMessage({ type: 'gasPost', url, payload });
           console.log('[Snow-we] GAS送信リトライ成功');
@@ -409,7 +491,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     };
     await sendGas(gas.url);
     if (gas.dbUrl) await sendGas(gas.dbUrl);
-  }
+  })();
 }
 
 // 直近90日以内にスカウト済みかを返す

@@ -395,6 +395,7 @@
     }
     .history-item-body { flex: 1; min-width: 0; }
     .history-item-company { font-weight: 600; color: #2c2c2a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .history-item-pos { font-size: 10px; color: #6366F1; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .history-item-meta { font-size: 10px; color: #888780; margin-top: 1px; }
     .history-item-days { font-size: 10px; padding: 2px 6px; border-radius: 10px; flex-shrink: 0; margin-top: 1px; }
     .history-item-days.rescoutable { background: #FEF3C7; color: #D97706; }
@@ -506,13 +507,38 @@
   </div>
 
   <div style="display:flex; gap:6px; margin-bottom:10px;">
-    <button class="save-btn" id="history-export-btn" style="flex:1; font-size:11px;">📥 CSVエクスポート</button>
-    <button class="save-btn" id="history-import-btn" style="flex:1; font-size:11px;">📤 CSVインポート</button>
+    <button class="save-btn" id="history-export-btn" style="flex:1; font-size:11px;">📥 エクスポート</button>
+    <button class="save-btn" id="history-import-btn" style="flex:1; font-size:11px;">📤 インポート</button>
+    <button class="save-btn" id="history-manual-btn" style="flex:1; font-size:11px;">✏️ 手動追加</button>
     <input type="file" id="history-import-file" accept=".csv" style="display:none;">
   </div>
   <div id="history-import-hint" style="font-size:10px; color:#888; margin-bottom:8px; display:none; line-height:1.5;">
-    CSVの列: 送信日時, 会社名, 年齢, 媒体, ポジション名, 業界<br>
+    CSVの列: 送信日時, 会社名, 年齢, 大学, ポジション名, 業界, 媒体<br>
     ※1行目がヘッダーの場合は自動スキップします
+  </div>
+  <div id="history-manual-form" style="display:none; background:#f9f8f6; border:0.5px solid #d9d6cf; border-radius:6px; padding:10px; margin-bottom:8px;">
+    <div style="font-size:11px; font-weight:600; margin-bottom:6px; color:#3C3489;">手動でスカウト記録を追加</div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px; font-size:11px;">
+      <div><div class="label" style="font-size:10px; margin-bottom:2px;">会社名 *</div><input type="text" id="manual-company" placeholder="例: 株式会社〇〇" style="width:100%; box-sizing:border-box;"></div>
+      <div><div class="label" style="font-size:10px; margin-bottom:2px;">年齢</div><input type="text" id="manual-age" placeholder="例: 32歳" style="width:100%; box-sizing:border-box;"></div>
+      <div><div class="label" style="font-size:10px; margin-bottom:2px;">大学</div><input type="text" id="manual-univ" placeholder="例: 東京大学" style="width:100%; box-sizing:border-box;"></div>
+      <div><div class="label" style="font-size:10px; margin-bottom:2px;">ポジション</div><input type="text" id="manual-position" placeholder="例: AC) PMO" style="width:100%; box-sizing:border-box;"></div>
+      <div><div class="label" style="font-size:10px; margin-bottom:2px;">媒体</div>
+        <select id="manual-platform" style="width:100%; box-sizing:border-box; font-size:11px; padding:4px 6px;">
+          <option value="bizreach">Bizreach</option>
+          <option value="rds">RDS</option>
+          <option value="dodax">Doda X</option>
+          <option value="ambi">AMBI</option>
+          <option value="green">Green</option>
+          <option value="mynavi">Mynavi</option>
+        </select>
+      </div>
+      <div><div class="label" style="font-size:10px; margin-bottom:2px;">送信日</div><input type="date" id="manual-date" style="width:100%; box-sizing:border-box; font-size:11px;"></div>
+    </div>
+    <div style="display:flex; gap:6px; margin-top:8px;">
+      <button class="save-btn" id="manual-save-btn" style="flex:1; font-size:11px; background:#6366F1; color:#fff; border-color:#6366F1;">保存</button>
+      <button class="debug-btn" id="manual-cancel-btn" style="flex:1; font-size:11px;">キャンセル</button>
+    </div>
   </div>
 
   <div style="font-size:10px; color:#888780; margin-bottom:5px;" id="history-count-label">読み込み中...</div>
