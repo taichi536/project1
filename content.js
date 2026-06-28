@@ -99,6 +99,11 @@ function injectStyles() {
     }
     .snow-we-fb-btn.ok { background: #059669 !important; }
     .snow-we-fb-btn.ng { background: #DC2626 !important; }
+    .snow-we-fb-reason {
+      color: #c7d2fe !important; font-size: 10px !important; font-family: -apple-system, sans-serif !important;
+      padding: 2px 2px 4px !important; border-bottom: 1px solid #3730a3 !important; margin-bottom: 2px !important;
+      line-height: 1.4 !important; max-width: 200px !important; word-break: break-all !important;
+    }
     @keyframes snow-we-pulse {
       0%,100% { opacity: 1; } 50% { opacity: .6; }
     }
@@ -2678,13 +2683,15 @@ function showFeedbackPopup(badgeEl) {
   // 既存のポップアップを消す
   document.querySelectorAll('.snow-we-fb-popup').forEach(p => p.remove());
 
-  const aiVerdict     = badgeEl.dataset.verdict  || '';
+  const aiVerdict      = badgeEl.dataset.verdict || '';
   const profileSummary = badgeEl.dataset.profile || '';
-  const platform      = getPlatform();
+  const reason         = badgeEl.dataset.reason  || '';
+  const platform       = getPlatform();
 
   const popup = document.createElement('div');
   popup.className = 'snow-we-fb-popup';
-  popup.innerHTML = `<span>判定を訂正</span><div class="snow-we-fb-row"></div>`;
+  const reasonHtml = reason ? `<div class="snow-we-fb-reason">💭 ${reason}</div>` : '';
+  popup.innerHTML = `${reasonHtml}<span>判定を訂正</span><div class="snow-we-fb-row"></div>`;
   const row = popup.querySelector('.snow-we-fb-row');
 
   const options = aiVerdict === 'OK'
@@ -2735,6 +2742,7 @@ function setBatchBadge(el, cls, text, tooltip, profileSummary, aiVerdict) {
   if ((cls === 'ok' || cls === 'ng' || cls === 'warn') && profileSummary) {
     badge.dataset.verdict = aiVerdict || cls.toUpperCase();
     badge.dataset.profile = profileSummary;
+    badge.dataset.reason  = tooltip || '';
     badge._fbHandler = (e) => { e.stopPropagation(); showFeedbackPopup(badge); };
     badge.addEventListener('click', badge._fbHandler);
     badge.title = (tooltip ? tooltip + '\n' : '') + '（クリックで判定を訂正）';

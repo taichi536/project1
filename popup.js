@@ -1256,6 +1256,9 @@ async function renderHistory() {
     const platform = v.platform || 'unknown';
     const platformLabel = { bizreach: 'BR', rds: 'RDS', dodax: 'DX', ambi: 'AMBI', green: 'Green', mynavi: 'MY' }[platform] || platform;
     const ageStr = v.age ? ` · ${v.age}` : '';
+    const replyHtml = v.replied
+      ? `<span class="reply-tag">💬 返信あり</span>`
+      : `<button class="reply-btn" data-id="${escapeHtml(id)}">返信あり</button>`;
 
     return `<div class="history-item">
       <span class="history-item-platform">${platformLabel}</span>
@@ -1263,9 +1266,44 @@ async function renderHistory() {
         <div class="history-item-company">${escapeHtml(company)}</div>
         <div class="history-item-meta">${dateStr}${ageStr}</div>
       </div>
+      ${replyHtml}
       <span class="history-item-days ${rescoutable ? 'rescoutable' : 'recent'}">${daysAgo}日前${rescoutable ? ' ↩' : ''}</span>
     </div>`;
   }).join('');
+
+  // 返信ありボタンのイベント
+  list.querySelectorAll('.reply-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      const h = await loadHistory();
+      if (!h[id]) return;
+      h[id].replied = true;
+      h[id].repliedDate = Date.now();
+      await saveHistory(h);
+
+      // GASにも送信（設定済みの場合）
+      try {
+        const r = await chrome.storage.local.get(['gasSettings', 'screeningCriteria']);
+        const gas = r.gasSettings || {};
+        if (gas.dbUrl || gas.url) {
+          await fetch(gas.dbUrl || gas.url, {
+            method: 'POST',
+            body: JSON.stringify({
+              secret: gas.secret || 'snowwe2024',
+              action: 'recordReply',
+              recruiter: r.screeningCriteria?.recruiterName || '',
+              company: h[id].company || '',
+              platform: h[id].platform || '',
+              sentDate: h[id].date || 0,
+              repliedDate: h[id].repliedDate,
+            }),
+          });
+        }
+      } catch (_) {}
+
+      await renderHistory();
+    });
+  });
 }
 
 function escapeHtml(s) {

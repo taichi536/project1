@@ -179,6 +179,20 @@ function doPost(e) {
       return json({ ok: true, positions });
     }
 
+    // ── 返信記録 ──
+    if (data.action === 'recordReply') {
+      const fbSheet = ss.getSheetByName(SHEET_FEEDBACK) || ss.insertSheet(SHEET_FEEDBACK);
+      fbSheet.appendRow([
+        new Date(data.repliedDate || Date.now()),
+        data.recruiter || '',
+        data.company   || '',
+        data.platform  || '',
+        new Date(data.sentDate || 0),
+        '返信あり',
+      ]);
+      return json({ ok: true });
+    }
+
     // ── スカウト記録 ──
     recordScout(ss, data);
     return json({ ok: true });
