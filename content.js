@@ -1455,8 +1455,8 @@ async function triggerAutoAdd() {
   const nextPage = findNextPageButton();
   if (nextPage) {
     showAutoStatus(`🤖 次ページへ移動中... (累計✅${addedCount}人追加)`);
-    // 進捗を保存（フルページロード時・SPA再開用）
-    await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: false });
+    // running:true で保存 → 次ページのロード時に isFreshStart=false になる
+    await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
     try {
       sessionStorage.setItem('snowWeAutoAdd', JSON.stringify({ resume: true, added: addedCount, processed: totalProcessed }));
     } catch (_) {}
@@ -3259,19 +3259,32 @@ function buildCriteriaText(criteria, platform) {
 window.addEventListener('load', () => {
   setTimeout(async () => {
     injectStyles();
-    // chrome.storage.localの古いrunningフラグを常にリセット
-    await saveAutoAddProgress({ running: false });
-    // sessionStorageの再開フラグのみ信頼する
     try {
       const raw = sessionStorage.getItem('snowWeAutoAdd');
-      if (!raw) return;
+      if (!raw) {
+        // 再開フラグなし → running フラグをリセットして終了
+        await saveAutoAddProgress({ running: false });
+        return;
+      }
       const resume = JSON.parse(raw);
       sessionStorage.removeItem('snowWeAutoAdd'); // 即座に削除して二重起動防止
       if (resume.resume) {
+        // 再開時は進捗を running:true で復元してから triggerAutoAdd を呼ぶ
+        // ← これをしないと isFreshStart=true になり最初からやり直しになる
+        await saveAutoAddProgress({
+          added:     resume.added     || 0,
+          processed: resume.processed || 0,
+          running:   true,
+          ts:        Date.now(),
+        });
         await sleep(1500);
         triggerAutoAdd();
+      } else {
+        await saveAutoAddProgress({ running: false });
       }
-    } catch (_) {}
+    } catch (_) {
+      await saveAutoAddProgress({ running: false });
+    }
   }, 1000);
 });
 
