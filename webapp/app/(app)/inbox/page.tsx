@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { RefreshCw, Mail, CheckCircle, Clock, Sparkles, X, Send, ChevronDown } from 'lucide-react';
+import { RefreshCw, Mail, CheckCircle, Clock, Sparkles, X, Send, ChevronDown, Search } from 'lucide-react';
 
 type Thread = {
   id: number;
@@ -46,6 +46,8 @@ export default function InboxPage() {
   const [replyBody, setReplyBody] = useState('');
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState('');
+  const [search, setSearch] = useState('');
+  const [users, setUsers] = useState<{ id: number; name: string; email: string }[]>([]);
 
   const load = async () => {
     setLoading(true);
@@ -60,7 +62,10 @@ export default function InboxPage() {
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users ?? []));
+  }, []);
 
   const openThread = async (t: Thread) => {
     setSelected(t);
@@ -83,6 +88,17 @@ export default function InboxPage() {
     });
     setThreads(prev => prev.map(t => t.thread_id === threadId ? { ...t, is_done: done ? 1 : 0, needs_reply: done ? 0 : t.needs_reply } : t));
     if (selected?.thread_id === threadId) setSelected(prev => prev ? { ...prev, is_done: done ? 1 : 0 } : prev);
+  };
+
+  const assignTo = async (threadId: string, userId: number | null) => {
+    await fetch(`/api/threads/${threadId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assigned_to: userId }),
+    });
+    const assigneeName = users.find(u => u.id === userId)?.name ?? null;
+    setThreads(prev => prev.map(t => t.thread_id === threadId ? { ...t, assignee_name: assigneeName } : t));
+    if (selected?.thread_id === threadId) setSelected(prev => prev ? { ...prev, assignee_name: assigneeName } : prev);
   };
 
   const getAI = async (type: string) => {
@@ -133,9 +149,14 @@ export default function InboxPage() {
   };
 
   const filtered = threads.filter(t => {
-    if (filter === 'needs_reply') return t.needs_reply && !t.is_done;
-    if (filter === 'done') return t.is_done;
-    return !t.is_done;
+    if (filter === 'needs_reply' && !(t.needs_reply && !t.is_done)) return false;
+    if (filter === 'done' && !t.is_done) return false;
+    if (filter === 'all' && t.is_done) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return t.subject?.toLowerCase().includes(q) || t.from_email?.toLowerCase().includes(q) || t.snippet?.toLowerCase().includes(q);
+    }
+    return true;
   });
 
   const needsReplyCount = threads.filter(t => t.needs_reply && !t.is_done).length;
@@ -150,6 +171,16 @@ export default function InboxPage() {
             <button onClick={load} disabled={loading} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
               <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
             </button>
+          </div>
+          <div className="relative mb-2">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="検索..."
+              className="w-full pl-7 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            />
           </div>
           <div className="flex gap-1">
             {(['all', 'needs_reply', 'done'] as const).map(f => (
@@ -186,6 +217,9 @@ export default function InboxPage() {
                   </div>
                   <div className="text-sm text-gray-700 truncate">{t.subject}</div>
                   <div className="text-xs text-gray-400 truncate mt-0.5">{t.snippet}</div>
+                  {t.assignee_name && (
+                    <div className="text-xs text-indigo-500 mt-0.5">@{t.assignee_name}</div>
+                  )}
                 </div>
                 <div className="text-xs text-gray-400 shrink-0">{t.message_count}件</div>
               </div>
@@ -213,6 +247,13 @@ export default function InboxPage() {
                   <p className="text-sm text-gray-400 mt-0.5">{selected.from_email}</p>
                 </div>
                 <div className="flex items-center gap-2 ml-4 shrink-0">
+                  <select
+                    value={users.find(u => u.name === selected.assignee_name)?.id ?? ''}
+                    onChange={e => assignTo(selected.thread_id, e.target.value ? Number(e.target.value) : null)}
+                    className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-300 max-w-[120px]">
+                    <option value="">担当者なし</option>
+                    {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
                   <button onClick={() => markDone(selected.thread_id, !selected.is_done)}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                       selected.is_done ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-green-50 text-green-600 hover:bg-green-100'
