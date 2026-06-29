@@ -2929,7 +2929,7 @@ JSON1行のみで出力（rを先に書いてからoを確定し、最後にcで
 ※cは判定の確信度（0〜100の整数）。基準に明確に合致/不合致なら80以上、判断が難しければ60未満。`;
 
   const data = await claudeFetch(apiKey, {
-    model: 'claude-sonnet-4-6',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 250,
     messages: [{ role: 'user', content: prompt }]
   });
