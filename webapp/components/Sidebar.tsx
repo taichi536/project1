@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, CheckSquare, BarChart2, LogOut, Folder, Inbox } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, BarChart2, LogOut, Folder, Inbox, Settings } from 'lucide-react';
 import { signOut, useSession } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 
@@ -11,6 +11,7 @@ const nav = [
   { href: '/projects', label: '案件管理', icon: Folder },
   { href: '/tasks', label: 'タスク管理', icon: CheckSquare },
   { href: '/analytics', label: '分析', icon: BarChart2 },
+  { href: '/settings', label: '設定', icon: Settings },
 ];
 
 export default function Sidebar() {
