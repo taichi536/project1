@@ -20,6 +20,7 @@ export async function GET() {
       // "名前 <email>" 形式からメールアドレスを抽出して比較
       const lastFromEmail = lastFrom.match(/<(.+?)>/)?.[1] ?? lastFrom;
       const needsReply = lastFromEmail && !lastFromEmail.toLowerCase().includes(myEmail.toLowerCase()) ? 1 : 0;
+      if (threads.indexOf(t) < 3) console.log('[inbox debug]', { lastFrom, lastFromEmail, myEmail, needsReply });
 
       db.prepare(`
         INSERT INTO thread_cache (user_id, thread_id, subject, snippet, from_email, last_message_at, message_count, needs_reply, synced_at)
