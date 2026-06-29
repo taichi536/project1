@@ -1,4 +1,5 @@
 import { google } from 'googleapis';
+import iconv from 'iconv-lite';
 
 export function getGmailClient(accessToken: string) {
   const auth = new google.auth.OAuth2();
@@ -30,37 +31,51 @@ function getHeader(headers: { name?: string | null; value?: string | null }[], n
   return headers.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value ?? '';
 }
 
-function decodeBody(part: { mimeType?: string; body?: { data?: string }; parts?: unknown[] }): string {
+function decodeBody(part: { mimeType?: string; body?: { data?: string }; parts?: unknown[]; headers?: { name?: string | null; value?: string | null }[] }): string {
   if (part.body?.data) {
     const buf = Buffer.from(part.body.data, 'base64');
-    // UTF-8で読めるか試みる、失敗したらlatin1で読む（文字化け回避）
+
+    // Content-Typeからcharsetを取得
+    const contentType = getHeader(part.headers ?? [], 'Content-Type');
+    const charsetMatch = contentType.match(/charset=["']?([^"';\s]+)/i);
+    const charset = charsetMatch?.[1]?.toLowerCase() ?? 'utf-8';
+
+    // 日本語エンコーディング対応
+    if (charset.includes('iso-2022-jp') || charset.includes('shift_jis') || charset.includes('shift-jis') || charset.includes('sjis')) {
+      return iconv.decode(buf, charset);
+    }
+
+    // UTF-8試行
     const text = buf.toString('utf-8');
-    // 文字化けチェック：置換文字(U+FFFD)が多い場合はlatin1にフォールバック
     const replacements = (text.match(/�/g) ?? []).length;
-    if (replacements > 5) {
-      return buf.toString('latin1');
+    if (replacements > 3) {
+      // UTF-8で化けた場合はISO-2022-JPを試みる
+      try { return iconv.decode(buf, 'iso-2022-jp'); } catch { return text; }
     }
     return text;
   }
+
   if (part.parts) {
     // text/plainを優先
     for (const p of part.parts as typeof part[]) {
       if (p.mimeType === 'text/plain') {
         const text = decodeBody(p);
-        if (text) return text;
+        if (text.trim()) return text;
       }
     }
-    // text/htmlも試みる
+    // multipart/alternativeなど再帰
+    for (const p of part.parts as typeof part[]) {
+      if ((p.mimeType ?? '').startsWith('multipart/')) {
+        const text = decodeBody(p);
+        if (text.trim()) return text;
+      }
+    }
+    // text/htmlをフォールバック
     for (const p of part.parts as typeof part[]) {
       if (p.mimeType === 'text/html') {
         const text = decodeBody(p);
-        if (text) return text.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+        if (text.trim()) return text.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
       }
-    }
-    // ネストされたパートを再帰
-    for (const p of part.parts as typeof part[]) {
-      const text = decodeBody(p);
-      if (text) return text;
     }
   }
   return '';
@@ -70,8 +85,7 @@ function decodeBody(part: { mimeType?: string; body?: { data?: string }; parts?:
 export async function fetchThreadList(accessToken: string, maxResults = 200): Promise<GmailThread[]> {
   const gmail = getGmailClient(accessToken);
 
-  // ページネーションで全件取得
-  const threads: { id?: string | null; historyId?: string | null }[] = [];
+  const threads: { id?: string | null }[] = [];
   let pageToken: string | undefined = undefined;
   const perPage = 100;
 
@@ -88,7 +102,7 @@ export async function fetchThreadList(accessToken: string, maxResults = 200): Pr
     pageToken = listRes.data.nextPageToken;
   }
 
-  // metadata形式で並列取得（本文なし）
+  // metadata形式で並列取得
   const results = await Promise.all(
     threads.filter(t => t.id).map(async t => {
       try {
@@ -145,7 +159,7 @@ export async function fetchThreadDetail(accessToken: string, threadId: string): 
         to: getHeader(headers, 'To'),
         subject: getHeader(headers, 'Subject'),
         date: getHeader(headers, 'Date'),
-        body: m.payload ? decodeBody(m.payload as Parameters<typeof decodeBody>[0]) : '',
+        body: m.payload ? decodeBody({ ...m.payload, headers } as Parameters<typeof decodeBody>[0]) : '',
       };
     });
 
@@ -166,7 +180,40 @@ export async function fetchThreadDetail(accessToken: string, threadId: string): 
   }
 }
 
-// 後方互換（既存コードが使っている場合）
+// メール送信
+export async function sendEmail(accessToken: string, params: {
+  to: string;
+  subject: string;
+  body: string;
+  threadId?: string;
+  inReplyTo?: string;
+  references?: string;
+}): Promise<void> {
+  const gmail = getGmailClient(accessToken);
+
+  const headers = [
+    `To: ${params.to}`,
+    `Subject: =?UTF-8?B?${Buffer.from(params.subject).toString('base64')}?=`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+  ];
+  if (params.inReplyTo) headers.push(`In-Reply-To: ${params.inReplyTo}`);
+  if (params.references) headers.push(`References: ${params.references}`);
+
+  const raw = Buffer.from(
+    headers.join('\r\n') + '\r\n\r\n' + params.body
+  ).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: {
+      raw,
+      ...(params.threadId ? { threadId: params.threadId } : {}),
+    },
+  });
+}
+
 export async function fetchThreads(accessToken: string, maxResults = 20): Promise<GmailThread[]> {
   return fetchThreadList(accessToken, maxResults);
 }
