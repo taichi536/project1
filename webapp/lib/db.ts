@@ -83,6 +83,14 @@ function initSchema(db: Database.Database) {
       created_at TEXT DEFAULT (datetime('now', 'localtime'))
     );
 
+    CREATE TABLE IF NOT EXISTS templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now', 'localtime'))
+    );
+
     CREATE TABLE IF NOT EXISTS gmail_threads (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,

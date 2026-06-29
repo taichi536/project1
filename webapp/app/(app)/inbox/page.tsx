@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { RefreshCw, Mail, CheckCircle, Clock, Sparkles, X, Send, ChevronDown, Search } from 'lucide-react';
+import { RefreshCw, Mail, CheckCircle, Clock, Sparkles, X, Send, ChevronDown, Search, FileText, Trash2, Plus } from 'lucide-react';
 
 type Thread = {
   id: number;
@@ -60,6 +60,11 @@ export default function InboxPage() {
   const [sendResult, setSendResult] = useState('');
   const [search, setSearch] = useState('');
   const [users, setUsers] = useState<{ id: number; name: string; email: string }[]>([]);
+  const [templates, setTemplates] = useState<{ id: number; title: string; body: string }[]>([]);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [showNewTemplate, setShowNewTemplate] = useState(false);
+  const [newTemplateTitle, setNewTemplateTitle] = useState('');
+  const [newTemplateBody, setNewTemplateBody] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -74,9 +79,12 @@ export default function InboxPage() {
     setLoading(false);
   };
 
+  const loadTemplates = () => fetch('/api/templates').then(r => r.json()).then(d => setTemplates(d.templates ?? []));
+
   useEffect(() => {
     load();
     fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users ?? []));
+    loadTemplates();
   }, []);
 
   const openThread = async (t: Thread) => {
@@ -100,6 +108,30 @@ export default function InboxPage() {
     });
     setThreads(prev => prev.map(t => t.thread_id === threadId ? { ...t, is_done: done ? 1 : 0, needs_reply: done ? 0 : t.needs_reply } : t));
     if (selected?.thread_id === threadId) setSelected(prev => prev ? { ...prev, is_done: done ? 1 : 0 } : prev);
+  };
+
+  const saveTemplate = async () => {
+    if (!newTemplateTitle.trim() || !newTemplateBody.trim()) return;
+    await fetch('/api/templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: newTemplateTitle, body: newTemplateBody }),
+    });
+    setNewTemplateTitle('');
+    setNewTemplateBody('');
+    setShowNewTemplate(false);
+    loadTemplates();
+  };
+
+  const deleteTemplate = async (id: number) => {
+    await fetch(`/api/templates/${id}`, { method: 'DELETE' });
+    loadTemplates();
+  };
+
+  const insertTemplate = (body: string) => {
+    setReplyBody(body);
+    setShowReply(true);
+    setShowTemplates(false);
   };
 
   const assignTo = async (threadId: string, userId: number | null) => {
@@ -326,8 +358,52 @@ export default function InboxPage() {
             {/* 返信コンポーザー */}
             {showReply && (
               <div className="bg-white border-b border-gray-200 px-6 py-4 shrink-0">
-                <div className="text-xs text-gray-500 mb-2">
-                  返信先: {detail?.messages[detail.messages.length - 1]?.from ?? selected.from_email}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs text-gray-500">
+                    返信先: {detail?.messages[detail.messages.length - 1]?.from ?? selected.from_email}
+                  </div>
+                  <div className="relative">
+                    <button onClick={() => { setShowTemplates(!showTemplates); setShowNewTemplate(false); }}
+                      className="flex items-center gap-1.5 px-2.5 py-1 text-xs border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50">
+                      <FileText size={11} />
+                      テンプレート
+                    </button>
+                    {showTemplates && (
+                      <div className="absolute right-0 top-8 w-72 bg-white border border-gray-200 rounded-xl shadow-lg z-10 overflow-hidden">
+                        <div className="p-3 border-b border-gray-100 flex items-center justify-between">
+                          <span className="text-xs font-medium text-gray-600">テンプレート一覧</span>
+                          <button onClick={() => setShowNewTemplate(!showNewTemplate)}
+                            className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-700">
+                            <Plus size={11} />新規作成
+                          </button>
+                        </div>
+                        {showNewTemplate && (
+                          <div className="p-3 border-b border-gray-100 bg-gray-50">
+                            <input value={newTemplateTitle} onChange={e => setNewTemplateTitle(e.target.value)}
+                              placeholder="テンプレート名" className="w-full text-xs border border-gray-200 rounded px-2 py-1 mb-2 focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                            <textarea value={newTemplateBody} onChange={e => setNewTemplateBody(e.target.value)}
+                              placeholder="本文" rows={3} className="w-full text-xs border border-gray-200 rounded px-2 py-1 mb-2 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                            <button onClick={saveTemplate} className="w-full py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700">保存</button>
+                          </div>
+                        )}
+                        <div className="max-h-48 overflow-y-auto">
+                          {templates.length === 0 ? (
+                            <div className="text-xs text-gray-400 text-center py-4">テンプレートがありません</div>
+                          ) : templates.map(t => (
+                            <div key={t.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 group">
+                              <button onClick={() => insertTemplate(t.body)} className="flex-1 text-left">
+                                <div className="text-xs font-medium text-gray-700">{t.title}</div>
+                                <div className="text-xs text-gray-400 truncate">{t.body.slice(0, 40)}</div>
+                              </button>
+                              <button onClick={() => deleteTemplate(t.id)} className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400">
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <textarea
                   value={replyBody}
@@ -337,7 +413,7 @@ export default function InboxPage() {
                   placeholder="返信文を入力してください..."
                 />
                 <div className="flex justify-end gap-2 mt-2">
-                  <button onClick={() => { setShowReply(false); setReplyBody(''); }}
+                  <button onClick={() => { setShowReply(false); setReplyBody(''); setShowTemplates(false); }}
                     className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
                     キャンセル
                   </button>
