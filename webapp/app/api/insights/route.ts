@@ -1,59 +1,43 @@
 import { NextResponse } from 'next/server';
+import { auth } from '@/lib/auth';
 import { getDb } from '@/lib/db';
-import Anthropic from '@anthropic-ai/sdk';
-
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 export async function GET() {
+  const session = await auth();
+  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
   const db = getDb();
+  const userId = session.user.id;
 
-  const statusCounts = db.prepare(
-    `SELECT status, COUNT(*) as count FROM communications GROUP BY status`
-  ).all() as { status: string; count: number }[];
-
-  const replyRate = db.prepare(`
-    SELECT COUNT(*) as total,
-    SUM(CASE WHEN replied_at IS NOT NULL THEN 1 ELSE 0 END) as replied
-    FROM communications WHERE direction = 'outbound'
-  `).get() as { total: number; replied: number };
-
-  const overdue = db.prepare(`
-    SELECT COUNT(*) as count FROM communications
-    WHERE status IN ('pending','in_progress') AND direction='outbound'
-    AND sent_at < datetime('now','-3 days','localtime')
-  `).get() as { count: number };
-
-  const total = statusCounts.reduce((s, r) => s + r.count, 0);
+  const total = (db.prepare(`SELECT COUNT(*) as count FROM thread_cache WHERE user_id = ?`).get(userId) as { count: number }).count;
 
   if (total === 0) {
     return NextResponse.json({
-      insight: 'まずデータを登録しましょう。CSVインポートか手動入力でコミュニケーション記録を追加すると、AIが状況を分析して次のアクションを提案します。',
+      insight: 'まずGmailを連携してメールを取り込みましょう。インポートするとAIが状況を分析して次のアクションを提案します。',
       level: 'info',
     });
   }
 
-  const summary = {
-    total,
-    statusCounts,
-    replyRate,
-    overdueCount: overdue.count,
-  };
+  const today = new Date().toISOString().slice(0, 10);
 
-  const message = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 200,
-    messages: [{
-      role: 'user',
-      content: `以下の業務データを分析して、今すぐ取るべきアクションを1〜2文で日本語で提案してください。
-データ: ${JSON.stringify(summary)}
-・数値に基づいた具体的な提案をしてください
-・「〜してください」など指示口調で
-・50〜80文字程度で簡潔に`,
-    }],
-  });
+  const needsReply = (db.prepare(`SELECT COUNT(*) as count FROM thread_cache WHERE user_id = ? AND needs_reply = 1 AND is_done = 0`).get(userId) as { count: number }).count;
+  const overdueCount = (db.prepare(`SELECT COUNT(*) as count FROM thread_cache WHERE user_id = ? AND is_done = 0 AND next_action_due IS NOT NULL AND next_action_due < ?`).get(userId, today) as { count: number }).count;
+  const doneCount = (db.prepare(`SELECT COUNT(*) as count FROM thread_cache WHERE user_id = ? AND is_done = 1`).get(userId) as { count: number }).count;
 
-  const text = message.content[0].type === 'text' ? message.content[0].text : '';
-  const level = overdue.count > 0 ? 'warning' : replyRate.total > 0 && replyRate.replied / replyRate.total < 0.3 ? 'warning' : 'info';
+  let insight = '';
+  let level: 'info' | 'warning' = 'info';
 
-  return NextResponse.json({ insight: text, level });
+  if (overdueCount > 0) {
+    insight = `期限切れのアクションが${overdueCount}件あります。優先して対応してください。`;
+    level = 'warning';
+  } else if (needsReply > 0) {
+    insight = `返信が必要なメールが${needsReply}件あります。早めに対応しましょう。`;
+    level = 'warning';
+  } else {
+    const rate = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+    insight = `対応完了率は${rate}%です。未対応メールを確認して処理を進めましょう。`;
+    level = 'info';
+  }
+
+  return NextResponse.json({ insight, level });
 }

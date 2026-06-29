@@ -6,6 +6,11 @@ import { fetchThreadList } from '@/lib/gmail';
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  if (process.env.NODE_ENV !== 'development') {
+    return NextResponse.json({ error: 'Not available in production' }, { status: 403 });
+  }
+
   if (!session.accessToken) return NextResponse.json({ error: 'Gmail未連携' }, { status: 403 });
 
   const myEmail = session.user.email ?? '';

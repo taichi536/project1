@@ -34,5 +34,21 @@ export async function GET() {
     ORDER BY tc.last_message_at DESC LIMIT 8
   `).all(userId);
 
-  return NextResponse.json({ needsReply, undone, done, total, recent });
+  const today = new Date().toISOString().slice(0, 10);
+
+  // 今日のアクション: next_action_due <= today AND is_done = 0
+  const todayActions = db.prepare(`
+    SELECT thread_id, subject, next_action, next_action_due, from_email
+    FROM thread_cache
+    WHERE user_id = ? AND is_done = 0 AND next_action_due IS NOT NULL AND next_action_due <= ?
+    ORDER BY next_action_due ASC LIMIT 5
+  `).all(userId, today);
+
+  // 期限超過アクション数
+  const overdueActions = (db.prepare(`
+    SELECT COUNT(*) as count FROM thread_cache
+    WHERE user_id = ? AND is_done = 0 AND next_action_due IS NOT NULL AND next_action_due < ?
+  `).get(userId, today) as { count: number }).count;
+
+  return NextResponse.json({ needsReply, undone, done, total, recent, todayActions, overdueActions });
 }
