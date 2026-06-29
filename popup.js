@@ -176,6 +176,33 @@ $('settings-save-btn').addEventListener('click', async () => {
   setTimeout(() => { saved.style.display = 'none'; }, 2000);
 });
 
+// 夜間自動実行 テスト実行
+$('auto-run-test-btn').addEventListener('click', async () => {
+  const urls = $('auto-run-urls').value.split('\n').map(u => u.trim()).filter(Boolean);
+  const maxPages = parseInt($('auto-run-max-pages').value) || 2;
+  const statusEl = $('auto-run-test-status');
+
+  if (urls.length === 0) {
+    statusEl.style.display = 'block';
+    statusEl.textContent = '❌ URLを1件以上入力してください';
+    return;
+  }
+
+  // 設定を一時保存してstartAutoRunをトリガー
+  const autoRunConfig = {
+    enabled: true,
+    hour: parseInt($('auto-run-hour').value) || 2,
+    minute: parseInt($('auto-run-minute').value) || 0,
+    maxPagesPerUrl: maxPages,
+    urls,
+  };
+  await chrome.storage.local.set({ autoRunConfig });
+  chrome.runtime.sendMessage({ type: 'startAutoRunNow', autoRunConfig }).catch(() => {});
+
+  statusEl.style.display = 'block';
+  statusEl.textContent = `▶ テスト実行開始: ${urls.length}件のURLを順番に処理します。ブラウザのタブが自動で開きます。`;
+});
+
 // GAS接続テスト
 $('gas-test-btn').addEventListener('click', async () => {
   const url = $('gas-url').value.trim();

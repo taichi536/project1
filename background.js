@@ -210,6 +210,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
+  // 今すぐテスト実行
+  if (msg.type === 'startAutoRunNow') {
+    const cfg = msg.autoRunConfig;
+    const urls = (cfg.urls || []).filter(u => u?.trim());
+    if (!urls.length) { sendResponse({ ok: false }); return true; }
+    const maxPages = cfg.maxPagesPerUrl || 2;
+    chrome.storage.local.set({
+      autoRunState: { isRunning: true, urls, urlIndex: 0, maxPages, startedAt: Date.now() },
+    }, () => { openNextAutoRunUrl(); });
+    sendResponse({ ok: true });
+    return true;
+  }
+
   // GASへのPOST中継
   if (msg.type === 'gasPost') {
     const { url, payload } = msg;
