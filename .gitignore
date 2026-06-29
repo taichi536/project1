@@ -1,2 +1,8 @@
 # ポジション情報（社内データ）
 positions.csv
+
+# Root-level stray files (dependencies belong in webapp/)
+node_modules/
+package.json
+package-lock.json
+.claude/
