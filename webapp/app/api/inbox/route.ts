@@ -16,15 +16,12 @@ export async function GET() {
     const myEmail = session.user.email ?? '';
 
     for (const t of threads) {
-      const lastFrom = t.lastFrom ?? '';
-      const lastFromEmail = (lastFrom.match(/<(.+?)>/)?.[1] ?? lastFrom).trim().toLowerCase();
-      const myEmailLower = myEmail.trim().toLowerCase();
-
+      const lastFromEmail = (t.lastFrom?.match(/<(.+?)>/)?.[1] ?? t.lastFrom ?? '').trim().toLowerCase();
       // 自動送信メール（noreply系）は返信不要と判定
       const isAutomatic = /noreply|no-reply|notification|notifications|automated|donotreply|do-not-reply|bounce|mailer-daemon/i.test(lastFromEmail);
 
-      // 未読 かつ 他人から かつ 自動送信でない → 要返信
-      const needsReply = (myEmailLower && lastFromEmail && lastFromEmail !== myEmailLower && !isAutomatic && t.hasUnread) ? 1 : 0;
+      // GmailのSENTラベルで判定：最後のメッセージが自分の送信でなく、自動送信でもなく、未読なら要返信
+      const needsReply = (!t.lastIsSent && !isAutomatic && t.hasUnread) ? 1 : 0;
 
       // is_done と assigned_to は上書きしない（ユーザーが手動で変更した値を保持）
       // GmailのDate headerをISO形式に変換してソート可能にする

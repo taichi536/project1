@@ -16,6 +16,7 @@ export type GmailThread = {
   date: string;
   messageCount: number;
   hasUnread: boolean;
+  lastIsSent: boolean;
   messages: GmailMessage[];
 };
 
@@ -120,9 +121,11 @@ export async function fetchThreadList(accessToken: string, maxResults = 200): Pr
         if (msgs.length === 0) return null;
 
         const firstHeaders = msgs[0].payload?.headers ?? [];
-        const lastHeaders = msgs[msgs.length - 1].payload?.headers ?? [];
-        // スレッド内にUNREADメッセージがあるか
+        const lastMsg = msgs[msgs.length - 1];
+        const lastHeaders = lastMsg.payload?.headers ?? [];
         const hasUnread = msgs.some(m => m.labelIds?.includes('UNREAD'));
+        // 最後のメッセージがSENT（自分が送信）かどうか → Gmailラベルで確実に判定
+        const lastIsSent = lastMsg.labelIds?.includes('SENT') ?? false;
 
         return {
           threadId: t.id!,
@@ -133,6 +136,7 @@ export async function fetchThreadList(accessToken: string, maxResults = 200): Pr
           messageCount: msgs.length,
           lastFrom: getHeader(lastHeaders, 'From'),
           hasUnread,
+          lastIsSent,
           messages: [],
         };
       } catch {
@@ -172,6 +176,7 @@ export async function fetchThreadDetail(accessToken: string, threadId: string): 
 
     const first = messages[0];
     const last = messages[messages.length - 1];
+    const lastRaw = msgs[msgs.length - 1];
     return {
       threadId,
       subject: first.subject || '(件名なし)',
@@ -181,6 +186,7 @@ export async function fetchThreadDetail(accessToken: string, threadId: string): 
       date: last.date,
       messageCount: msgs.length,
       hasUnread: msgs.some(m => m.labelIds?.includes('UNREAD')),
+      lastIsSent: lastRaw.labelIds?.includes('SENT') ?? false,
       messages,
     };
   } catch {
