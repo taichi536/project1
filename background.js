@@ -155,14 +155,17 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (tabId !== _autoRunTabId) return;
   chrome.storage.local.get(['autoRunState'], ({ autoRunState }) => {
     if (!autoRunState?.isRunning) return;
-    setTimeout(() => {
-      chrome.tabs.sendMessage(tabId, {
-        type: 'autoRun',
-        maxPages: autoRunState.maxPages,
-        urlIndex: autoRunState.urlIndex,
-        totalUrls: autoRunState.urls.length,
-      }).catch(() => {});
-    }, 2500);
+    // SPAや仮想スクロールはアクティブタブでないと描画されないため前面に出す
+    chrome.tabs.update(tabId, { active: true }, () => {
+      setTimeout(() => {
+        chrome.tabs.sendMessage(tabId, {
+          type: 'autoRun',
+          maxPages: autoRunState.maxPages,
+          urlIndex: autoRunState.urlIndex,
+          totalUrls: autoRunState.urls.length,
+        }).catch(() => {});
+      }, 2500);
+    });
   });
 });
 
