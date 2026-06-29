@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import iconv from 'iconv-lite';
+// TextDecoder covers ISO-2022-JP and Shift-JIS natively in Node.js 18+
 
 export function getGmailClient(accessToken: string) {
   const auth = new google.auth.OAuth2();
@@ -40,17 +40,20 @@ function decodeBody(part: { mimeType?: string; body?: { data?: string }; parts?:
     const charsetMatch = contentType.match(/charset=["']?([^"';\s]+)/i);
     const charset = charsetMatch?.[1]?.toLowerCase() ?? 'utf-8';
 
-    // 日本語エンコーディング対応
-    if (charset.includes('iso-2022-jp') || charset.includes('shift_jis') || charset.includes('shift-jis') || charset.includes('sjis')) {
-      return iconv.decode(buf, charset);
+    // 日本語エンコーディング対応（TextDecoderはNode.js 18+で標準対応）
+    if (charset && charset !== 'utf-8' && charset !== 'utf8') {
+      try {
+        return new TextDecoder(charset).decode(buf);
+      } catch {
+        // 未知のcharsetはUTF-8にフォールバック
+      }
     }
 
     // UTF-8試行
     const text = buf.toString('utf-8');
     const replacements = (text.match(/�/g) ?? []).length;
     if (replacements > 3) {
-      // UTF-8で化けた場合はISO-2022-JPを試みる
-      try { return iconv.decode(buf, 'iso-2022-jp'); } catch { return text; }
+      try { return new TextDecoder('iso-2022-jp').decode(buf); } catch { return text; }
     }
     return text;
   }
