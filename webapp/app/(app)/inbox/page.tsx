@@ -648,25 +648,91 @@ export default function InboxPage() {
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
               {detailLoading ? (
                 <div className="text-center text-gray-400 text-sm py-8">読み込み中...</div>
-              ) : detail?.messages.map((m, i) => (
-                <div key={m.id} className="bg-white rounded-xl border border-gray-200 p-4">
-                  <div className="flex items-center justify-between mb-3 pb-3 border-b border-gray-100">
-                    <div>
-                      <div className="text-sm font-medium">{m.from}</div>
-                      <div className="text-xs text-gray-400">To: {m.to}</div>
-                    </div>
-                    <div className="text-xs text-gray-400">{m.date}</div>
-                  </div>
-                  <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto">
-                    {m.body.slice(0, 3000) || '(本文なし)'}
-                  </div>
-                  {i === detail.messages.length - 1 && selected.needs_reply && !selected.is_done && (
-                    <div className="mt-3 pt-3 border-t border-gray-100">
-                      <span className="text-xs bg-red-50 text-red-500 px-2 py-1 rounded-full">返信が必要です</span>
-                    </div>
-                  )}
-                </div>
-              ))}
+              ) : (() => {
+                const msgs = detail?.messages ?? [];
+                const total = msgs.length;
+                const collapseMiddle = total >= 3 && !allMessagesExpanded;
+
+                return (
+                  <>
+                    {msgs.map((m, i) => {
+                      // Collapsed middle messages (not first, not last)
+                      const isMiddle = i > 0 && i < total - 1;
+                      const isCollapsed = collapseMiddle && isMiddle;
+
+                      if (isCollapsed) return null;
+
+                      const headerExpanded = expandedHeaders.has(m.id);
+                      const toggleHeader = () => {
+                        setExpandedHeaders(prev => {
+                          const next = new Set(prev);
+                          if (next.has(m.id)) next.delete(m.id);
+                          else next.add(m.id);
+                          return next;
+                        });
+                      };
+
+                      return (
+                        <div key={m.id} className="bg-white rounded-xl border border-gray-200 p-4">
+                          {/* Collapsible header */}
+                          <button
+                            onClick={toggleHeader}
+                            className="w-full flex items-center justify-between mb-3 pb-3 border-b border-gray-100 text-left group"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium truncate">{m.from}</div>
+                              {!headerExpanded && (
+                                <div className="text-xs text-gray-400 truncate">{m.date}</div>
+                              )}
+                              {headerExpanded && (
+                                <div className="mt-1 space-y-0.5">
+                                  <div className="text-xs text-gray-500"><span className="text-gray-400 w-5 inline-block">To:</span> {m.to}</div>
+                                  {m.cc && <div className="text-xs text-gray-500"><span className="text-gray-400 w-5 inline-block">CC:</span> {m.cc}</div>}
+                                  <div className="text-xs text-gray-400">{m.date}</div>
+                                </div>
+                              )}
+                            </div>
+                            <div className="ml-2 text-gray-300 group-hover:text-gray-500 shrink-0">
+                              {headerExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                            </div>
+                          </button>
+                          <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto">
+                            {m.body.slice(0, 3000) || '(本文なし)'}
+                          </div>
+                          {/* Attachments */}
+                          {m.attachments && m.attachments.length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap gap-2">
+                              {m.attachments.map((att, ai) => (
+                                <span key={ai} className="flex items-center gap-1.5 text-xs bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full">
+                                  <Paperclip size={11} className="text-gray-400" />
+                                  {att.filename}
+                                  {att.size > 0 && (
+                                    <span className="text-gray-400">({att.size < 1024 ? `${att.size}B` : att.size < 1048576 ? `${Math.round(att.size / 1024)}KB` : `${(att.size / 1048576).toFixed(1)}MB`})</span>
+                                  )}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {i === total - 1 && selected?.needs_reply && !selected.is_done && (
+                            <div className="mt-3 pt-3 border-t border-gray-100">
+                              <span className="text-xs bg-red-50 text-red-500 px-2 py-1 rounded-full">返信が必要です</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {/* Show collapsed messages button */}
+                    {collapseMiddle && total >= 3 && (
+                      <button
+                        onClick={() => setAllMessagesExpanded(true)}
+                        className="w-full py-2 text-xs text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-100 transition-colors"
+                      >
+                        {total - 2}件のメッセージを表示
+                      </button>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </>
         )}

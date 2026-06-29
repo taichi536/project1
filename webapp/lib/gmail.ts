@@ -185,13 +185,34 @@ export async function fetchThreadDetail(accessToken: string, threadId: string): 
 
     const messages: GmailMessage[] = msgs.map(m => {
       const headers = m.payload?.headers ?? [];
+      const cc = getHeader(headers, 'Cc') || getHeader(headers, 'CC') || undefined;
+
+      // Extract attachments from all parts recursively
+      const attachments: { filename: string; mimeType: string; size: number }[] = [];
+      const collectAttachments = (parts: { filename?: string | null; mimeType?: string | null; body?: { size?: number | null }; parts?: unknown[] }[] | undefined) => {
+        if (!parts) return;
+        for (const part of parts) {
+          if (part.filename && part.filename !== '') {
+            attachments.push({
+              filename: part.filename,
+              mimeType: part.mimeType ?? '',
+              size: part.body?.size ?? 0,
+            });
+          }
+          if (part.parts) collectAttachments(part.parts as typeof parts);
+        }
+      };
+      if (m.payload?.parts) collectAttachments(m.payload.parts as Parameters<typeof collectAttachments>[0]);
+
       return {
         id: m.id ?? '',
         from: getHeader(headers, 'From'),
         to: getHeader(headers, 'To'),
+        ...(cc ? { cc } : {}),
         subject: getHeader(headers, 'Subject'),
         date: getHeader(headers, 'Date'),
         body: m.payload ? decodeBody({ ...m.payload, headers } as Parameters<typeof decodeBody>[0]) : '',
+        ...(attachments.length > 0 ? { attachments } : {}),
       };
     });
 
