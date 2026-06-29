@@ -17,8 +17,9 @@ export async function GET() {
 
     for (const t of threads) {
       const lastFrom = t.lastFrom ?? '';
-      // 最後のメールが自分以外から来ている かつ 対応済みでない場合に要返信
-      const needsReply = lastFrom && !lastFrom.toLowerCase().includes(myEmail.toLowerCase()) ? 1 : 0;
+      // "名前 <email>" 形式からメールアドレスを抽出して比較
+      const lastFromEmail = lastFrom.match(/<(.+?)>/)?.[1] ?? lastFrom;
+      const needsReply = lastFromEmail && !lastFromEmail.toLowerCase().includes(myEmail.toLowerCase()) ? 1 : 0;
 
       db.prepare(`
         INSERT INTO thread_cache (user_id, thread_id, subject, snippet, from_email, last_message_at, message_count, needs_reply, synced_at)
