@@ -1,4 +1,4 @@
-// content.js v1.18.83
+// content.js v1.18.103
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -1101,6 +1101,22 @@ function showAutoStatus(message, autoDismissMs) {
   }
 }
 
+function showPreviousResultsBanner(progress) {
+  const existing = document.getElementById('snow-we-results-banner');
+  if (existing) existing.remove();
+  const v = progress.verdicts || {};
+  const ok = v.ok || 0;
+  const ng = v.ng || 0;
+  const pending = v.pending || 0;
+  const total = progress.processed || 0;
+  if (total === 0) return;
+  const banner = document.createElement('div');
+  banner.id = 'snow-we-results-banner';
+  banner.style.cssText = `position:fixed;top:0;left:0;right:0;z-index:2147483647;background:rgba(30,30,30,0.92);color:#fff;padding:8px 16px;font-size:12px;font-family:-apple-system,sans-serif;display:flex;align-items:center;gap:16px;box-shadow:0 2px 8px rgba(0,0,0,0.3);`;
+  banner.innerHTML = `<span style="font-weight:600;">📊 前ページまでの選定結果 (${total}人判定)</span><span>✅ OK: <b>${ok}人</b></span><span>❌ NG: <b>${ng}人</b></span><span>⚠️ 要確認: <b>${pending}人</b></span><button onclick="this.parentElement.remove()" style="margin-left:auto;background:none;border:none;color:#aaa;cursor:pointer;font-size:16px;">×</button>`;
+  document.body.appendChild(banner);
+}
+
 // Claude API fetch with retry on 529 (overloaded)
 async function claudeFetch(apiKey, body, maxRetries = 4) {
   let delay = 3000;
@@ -1273,19 +1289,23 @@ async function triggerAutoAdd() {
   }
 
   // カウンターの初期値：chrome.storage失敗時はsessionStorageのバックアップから復元
-  let addedCount, totalProcessed;
+  let addedCount, totalProcessed, okCount, ngCount, pendingCount;
   if (isFreshStart) {
-    addedCount = 0; totalProcessed = 0;
+    addedCount = 0; totalProcessed = 0; okCount = 0; ngCount = 0; pendingCount = 0;
     try { sessionStorage.removeItem('snowWeBatchCounters'); } catch (_) {}
     _batchIsRunning = true; // バッチ開始をマーク
   } else if (progress.added != null) {
     addedCount = progress.added; totalProcessed = progress.processed || 0;
+    okCount = progress.verdicts?.ok || 0; ngCount = progress.verdicts?.ng || 0; pendingCount = progress.verdicts?.pending || 0;
+    // 前ページの結果バナーを表示
+    if (totalProcessed > 0) showPreviousResultsBanner(progress);
   } else {
     // chrome.storage失敗 → sessionStorageのバックアップから復元
     try {
       const ss = JSON.parse(sessionStorage.getItem('snowWeBatchCounters') || '{}');
       addedCount = ss.added || 0; totalProcessed = ss.processed || 0;
-    } catch (_) { addedCount = 0; totalProcessed = 0; }
+      okCount = ss.ok || 0; ngCount = ss.ng || 0; pendingCount = ss.pending || 0;
+    } catch (_) { addedCount = 0; totalProcessed = 0; okCount = 0; ngCount = 0; pendingCount = 0; }
   }
 
   const isRDS = getPlatform() === 'rds';
@@ -1370,7 +1390,7 @@ async function triggerAutoAdd() {
       if (daysAgo !== null && daysAgo < RESCOUNT_DAYS) {
         setBatchBadge(el, 'warn', `⏸ 送信済（${daysAgo}日前）`);
         totalProcessed++;
-        await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+        await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now(), verdicts: { ok: okCount, ng: ngCount, pending: pendingCount } });
         continue;
       }
     }
@@ -1379,7 +1399,7 @@ async function triggerAutoAdd() {
     if (checkIncomeNG(profileText)) {
       setBatchBadge(el, 'ng', '❌ 見送り', '年収基準未満', profileText.substring(0, 200), 'NG');
       totalProcessed++;
-      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now(), verdicts: { ok: okCount, ng: ngCount, pending: pendingCount } });
       continue;
     }
 
@@ -1387,7 +1407,7 @@ async function triggerAutoAdd() {
     if (checkShortTenureNG(profileText)) {
       setBatchBadge(el, 'ng', '❌ 見送り(短期在籍)', '短期在籍あり', profileText.substring(0, 200), 'NG');
       totalProcessed++;
-      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now(), verdicts: { ok: okCount, ng: ngCount, pending: pendingCount } });
       continue;
     }
 
@@ -1399,7 +1419,7 @@ async function triggerAutoAdd() {
     if (intentResult === 'ng') {
       setBatchBadge(el, 'ng', '❌ 見送り(転職意向なし)', '転職に興味がない', profileText.substring(0, 200), 'NG');
       totalProcessed++;
-      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now(), verdicts: { ok: okCount, ng: ngCount, pending: pendingCount } });
       continue;
     }
     // ─── AI判定（1人ずつ）───
@@ -1415,7 +1435,7 @@ async function triggerAutoAdd() {
       console.error('[Snow-we] judgeSingleCandidate error:', err);
       setBatchBadge(el, 'warn', `⚠️ 判定失敗: ${(err.message || '').slice(0, 30)}`);
       totalProcessed++;
-      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now(), verdicts: { ok: okCount, ng: ngCount, pending: pendingCount } });
       await sleep(500);
       continue;
     }
@@ -1433,6 +1453,9 @@ async function triggerAutoAdd() {
       ? `[低確信度] ${judgeReason}`
       : judgeReason;
     setBatchBadge(el, badgeCls, badgeText, tooltipText, profileText.substring(0, 200), overall);
+    if (overall === 'OK') okCount++;
+    else if (overall === 'NG') ngCount++;
+    else pendingCount++;
 
     const shouldAdd = getPlatform() === 'bizreach' ? overall === 'OK' : (overall === 'OK' || overall === '要確認');
     if (shouldAdd) {
@@ -1452,7 +1475,7 @@ async function triggerAutoAdd() {
 
     totalProcessed++;
     pending.push(el); // 処理済みとして記録
-    await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+    await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now(), verdicts: { ok: okCount, ng: ngCount, pending: pendingCount } });
     await sleep(500);
   }
 
@@ -1529,7 +1552,7 @@ async function triggerAutoAdd() {
     if (scrolled) {
       await sleep(800); // Angular CDKのレンダリング完了を待つ
       showAutoStatus(`🤖 次の候補者を処理中... (累計✅${addedCount}人追加)`);
-      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now(), verdicts: { ok: okCount, ng: ngCount, pending: pendingCount } });
       await triggerAutoAdd();
       return;
     }
@@ -1571,7 +1594,7 @@ async function triggerAutoAdd() {
   if (nextPage) {
     showAutoStatus(`🤖 次ページへ移動中... (累計✅${addedCount}人追加)`);
     // running:true で保存 → 次ページのロード時に isFreshStart=false になる
-    await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
+    await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now(), verdicts: { ok: okCount, ng: ngCount, pending: pendingCount } });
     try {
       sessionStorage.setItem('snowWeAutoAdd', JSON.stringify({
         resume: true, added: addedCount, processed: totalProcessed,
@@ -3149,7 +3172,7 @@ async function saveAutoAddProgress(data) {
     try { sessionStorage.removeItem('snowWeBatchCounters'); } catch (_) {}
   } else if (data.added != null) {
     // バッチ進行中：chrome.storage失敗時の復元用にsessionStorageへバックアップ
-    try { sessionStorage.setItem('snowWeBatchCounters', JSON.stringify({ added: data.added, processed: data.processed || 0 })); } catch (_) {}
+    try { sessionStorage.setItem('snowWeBatchCounters', JSON.stringify({ added: data.added, processed: data.processed || 0, ok: data.verdicts?.ok || 0, ng: data.verdicts?.ng || 0, pending: data.verdicts?.pending || 0 })); } catch (_) {}
   }
   try {
     await chrome.storage.local.set({ autoAddProgress: data });
