@@ -124,7 +124,7 @@ export default function InboxPage() {
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)) return;
     if (!selected) return;
     if (e.key === 'd') markDone(selected.thread_id, !selected.is_done);
-    if (e.key === 'r') { openReplyPanel('reply'); }
+    if (e.key === 'r') { setShowReply(true); setReplyMode('reply'); }
     if (e.key === 'Escape') setSelected(null);
   }, [selected]);
 
@@ -711,19 +711,40 @@ export default function InboxPage() {
                     )}
                   </div>
                 </div>
+                {/* To field */}
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-xs text-gray-500 w-12 shrink-0">To:</span>
+                  <input type="text" value={replyTo} onChange={e => setReplyTo(e.target.value)}
+                    className="flex-1 border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                    placeholder="宛先メールアドレス" />
+                </div>
+                {/* CC field */}
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-xs text-gray-500 w-12 shrink-0">CC:</span>
+                  <input type="text" value={replyCc} onChange={e => setReplyCc(e.target.value)}
+                    className="flex-1 border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                    placeholder="CCメールアドレス（カンマ区切り）" />
+                </div>
+                {/* Subject field */}
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs text-gray-500 w-12 shrink-0">件名:</span>
+                  <input type="text" value={replySubject} onChange={e => setReplySubject(e.target.value)}
+                    className="flex-1 border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                    placeholder="件名" />
+                </div>
                 <textarea
                   value={replyBody}
                   onChange={e => setReplyBody(e.target.value)}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300"
                   rows={6}
-                  placeholder="返信文を入力してください..."
+                  placeholder="本文を入力してください..."
                 />
                 <div className="flex justify-end gap-2 mt-2">
-                  <button onClick={() => { setShowReply(false); setReplyBody(''); setShowTemplates(false); }}
+                  <button onClick={() => { setShowReply(false); setReplyBody(''); setReplyTo(''); setReplySubject(''); setReplyCc(''); setShowTemplates(false); }}
                     className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
                     キャンセル
                   </button>
-                  <button onClick={sendReply} disabled={sending || !replyBody.trim()}
+                  <button onClick={sendReply} disabled={sending || !replyBody.trim() || !replyTo.trim()}
                     className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">
                     <Send size={13} />
                     {sending ? '送信中...' : '送信'}
@@ -825,6 +846,66 @@ export default function InboxPage() {
           </>
         )}
       </div>
+
+      {/* 新規作成モーダル */}
+      {showCompose && (
+        <div className="fixed inset-0 bg-black/30 flex items-end justify-end z-50 p-6">
+          <div className="bg-white rounded-xl shadow-2xl w-[480px] flex flex-col max-h-[80vh]">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+              <span className="font-medium text-sm text-gray-700">新規メール</span>
+              <button onClick={() => { setShowCompose(false); setComposeResult(''); }} className="text-gray-400 hover:text-gray-600">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="px-4 py-3 space-y-2 flex-1 overflow-y-auto">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 w-12 shrink-0">To:</span>
+                <input type="text" value={composeTo} onChange={e => setComposeTo(e.target.value)}
+                  className="flex-1 border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                  placeholder="宛先メールアドレス" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 w-12 shrink-0">CC:</span>
+                <input type="text" value={composeCc} onChange={e => setComposeCc(e.target.value)}
+                  className="flex-1 border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                  placeholder="CCメールアドレス" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 w-12 shrink-0">BCC:</span>
+                <input type="text" value={composeBcc} onChange={e => setComposeBcc(e.target.value)}
+                  className="flex-1 border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                  placeholder="BCCメールアドレス" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 w-12 shrink-0">件名:</span>
+                <input type="text" value={composeSubject} onChange={e => setComposeSubject(e.target.value)}
+                  className="flex-1 border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                  placeholder="件名" />
+              </div>
+              <textarea value={composeBody} onChange={e => setComposeBody(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                rows={10}
+                placeholder="本文を入力してください..." />
+              {composeResult && (
+                <div className={`text-xs px-3 py-2 rounded-lg ${composeResult.includes('エラー') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
+                  {composeResult}
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-gray-100">
+              <button onClick={() => { setShowCompose(false); setComposeResult(''); }}
+                className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
+                キャンセル
+              </button>
+              <button onClick={sendCompose} disabled={composeSending || !composeTo.trim() || !composeBody.trim()}
+                className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                <Send size={13} />
+                {composeSending ? '送信中...' : '送信'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
