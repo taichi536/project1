@@ -119,53 +119,90 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'snowWeAutoRun') startAutoRun();
 });
 
-// ── 夜間自動実行 ──────────────────────────────────────────────────
-let _autoRunTabId = null;
+// ── 夜間自動実行（並列スロット対応） ──────────────────────────────────────────
+// slotId → {slotId, tabId, windowId, urlQueue, urlIndex, maxPages}
+let _autoRunSlots = [];
+
+function _doStartAutoRun(autoRunConfig) {
+  const urls = (autoRunConfig.urls || []).filter(u => u?.trim());
+  if (!urls.length) return;
+  const maxPages = autoRunConfig.maxPagesPerUrl || 2;
+  const concurrency = Math.min(autoRunConfig.concurrency || 1, 3);
+
+  _autoRunSlots = [];
+
+  // URLをconcurrency個のグループにラウンドロビン分配
+  const groups = Array.from({ length: concurrency }, () => []);
+  urls.forEach((url, i) => groups[i % concurrency].push(url));
+  const activeGroups = groups.filter(g => g.length > 0);
+
+  console.log(`[Snow-we] 夜間自動実行: ${urls.length}URL × ${activeGroups.length}並列`);
+  chrome.storage.local.set({ autoRunState: { isRunning: true, startedAt: Date.now() } });
+
+  activeGroups.forEach((groupUrls, slotIdx) => {
+    const slot = { slotId: slotIdx, tabId: null, windowId: null, urlQueue: groupUrls, urlIndex: 0, maxPages };
+    _autoRunSlots.push(slot);
+
+    if (slotIdx === 0) {
+      // スロット0: 既存ウィンドウで開く
+      _openNextUrlInSlot(slot);
+    } else {
+      // スロット1+: 新しいウィンドウ（別ウィンドウなら各々アクティブタブを持てる）
+      chrome.windows.create({ focused: false }, (win) => {
+        slot.windowId = win.id;
+        // windowsは空白タブ付きで開くので、そこに最初のURLを開く
+        const blankTabId = win.tabs?.[0]?.id;
+        chrome.tabs.create({ url: slot.urlQueue[0], windowId: win.id }, (tab) => {
+          slot.tabId = tab.id;
+          if (blankTabId) chrome.tabs.remove(blankTabId, () => {});
+          console.log(`[Snow-we] スロット${slotIdx}: ウィンドウ作成 (${slot.urlQueue.length}URL)`);
+        });
+      });
+    }
+  });
+}
 
 function startAutoRun() {
   chrome.storage.local.get(['autoRunConfig'], ({ autoRunConfig }) => {
     if (!autoRunConfig?.enabled) return;
-    const urls = (autoRunConfig.urls || []).filter(u => u?.trim());
-    if (!urls.length) return;
-    const maxPages = autoRunConfig.maxPagesPerUrl || 2;
-    chrome.storage.local.set({ autoRunState: { isRunning: true, urls, urlIndex: 0, maxPages, startedAt: Date.now() } });
-    openNextAutoRunUrl();
+    _doStartAutoRun(autoRunConfig);
   });
 }
 
-function openNextAutoRunUrl() {
-  chrome.storage.local.get(['autoRunState'], ({ autoRunState }) => {
-    if (!autoRunState?.isRunning) return;
-    const { urls, urlIndex, maxPages } = autoRunState;
-    if (urlIndex >= urls.length) {
-      console.log('[Snow-we] 夜間自動実行完了 - 全URL処理済み');
+function _openNextUrlInSlot(slot) {
+  if (slot.urlIndex >= slot.urlQueue.length) {
+    console.log(`[Snow-we] スロット${slot.slotId}: 全URL完了`);
+    if (slot.windowId) { chrome.windows.remove(slot.windowId, () => {}); slot.windowId = null; }
+    _autoRunSlots = _autoRunSlots.filter(s => s.slotId !== slot.slotId);
+    if (_autoRunSlots.length === 0) {
+      console.log('[Snow-we] 夜間自動実行完了 - 全スロット処理済み');
       chrome.storage.local.set({ autoRunState: { isRunning: false, completedAt: Date.now() } });
-      return;
     }
-    const url = urls[urlIndex];
-    chrome.tabs.create({ url, active: false }, (tab) => {
-      _autoRunTabId = tab.id;
-      console.log(`[Snow-we] 夜間自動実行: ${urlIndex + 1}/${urls.length} タブ開始`);
-    });
+    return;
+  }
+  const url = slot.urlQueue[slot.urlIndex];
+  const opts = slot.windowId ? { url, windowId: slot.windowId } : { url };
+  chrome.tabs.create(opts, (tab) => {
+    slot.tabId = tab.id;
+    console.log(`[Snow-we] スロット${slot.slotId}: ${slot.urlIndex + 1}/${slot.urlQueue.length} 開始`);
   });
 }
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status !== 'complete') return;
-  if (tabId !== _autoRunTabId) return;
-  chrome.storage.local.get(['autoRunState'], ({ autoRunState }) => {
-    if (!autoRunState?.isRunning) return;
-    // SPAや仮想スクロールはアクティブタブでないと描画されないため前面に出す
-    chrome.tabs.update(tabId, { active: true }, () => {
-      setTimeout(() => {
-        chrome.tabs.sendMessage(tabId, {
-          type: 'autoRun',
-          maxPages: autoRunState.maxPages,
-          urlIndex: autoRunState.urlIndex,
-          totalUrls: autoRunState.urls.length,
-        }).catch(() => {});
-      }, 2500);
-    });
+  const slot = _autoRunSlots.find(s => s.tabId === tabId);
+  if (!slot) return;
+  // SPAや仮想スクロールはアクティブタブでないと描画されないため前面に出す
+  chrome.tabs.update(tabId, { active: true }, () => {
+    setTimeout(() => {
+      chrome.tabs.sendMessage(tabId, {
+        type: 'autoRun',
+        slotId: slot.slotId,
+        maxPages: slot.maxPages,
+        urlIndex: slot.urlIndex,
+        totalUrls: slot.urlQueue.length,
+      }).catch(() => {});
+    }, 2500);
   });
 });
 
@@ -194,14 +231,13 @@ function setAutoRunAlarm(autoRunConfig) {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // 自動実行: 1URL完了 → 次のURLへ
   if (msg.type === 'autoRunComplete') {
-    chrome.storage.local.get(['autoRunState'], ({ autoRunState }) => {
-      if (!autoRunState?.isRunning) return;
-      if (_autoRunTabId) { chrome.tabs.remove(_autoRunTabId, () => {}); _autoRunTabId = null; }
-      const nextIndex = (autoRunState.urlIndex || 0) + 1;
-      chrome.storage.local.set({ autoRunState: { ...autoRunState, urlIndex: nextIndex } }, () => {
-        setTimeout(openNextAutoRunUrl, 1500);
-      });
-    });
+    const slotId = msg.slotId ?? 0;
+    const slot = _autoRunSlots.find(s => s.slotId === slotId) || _autoRunSlots[0];
+    if (slot) {
+      if (slot.tabId) { chrome.tabs.remove(slot.tabId, () => {}); slot.tabId = null; }
+      slot.urlIndex++;
+      setTimeout(() => _openNextUrlInSlot(slot), 1500);
+    }
     sendResponse({ ok: true });
     return true;
   }
@@ -215,13 +251,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
   // 今すぐテスト実行
   if (msg.type === 'startAutoRunNow') {
-    const cfg = msg.autoRunConfig;
-    const urls = (cfg.urls || []).filter(u => u?.trim());
-    if (!urls.length) { sendResponse({ ok: false }); return true; }
-    const maxPages = cfg.maxPagesPerUrl || 2;
-    chrome.storage.local.set({
-      autoRunState: { isRunning: true, urls, urlIndex: 0, maxPages, startedAt: Date.now() },
-    }, () => { openNextAutoRunUrl(); });
+    _doStartAutoRun(msg.autoRunConfig);
     sendResponse({ ok: true });
     return true;
   }

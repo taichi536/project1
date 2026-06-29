@@ -112,6 +112,7 @@ async function loadSettings() {
   $('auto-run-hour').value = arc.hour ?? 2;
   $('auto-run-minute').value = arc.minute ?? 0;
   $('auto-run-max-pages').value = arc.maxPagesPerUrl ?? 2;
+  $('auto-run-concurrency').value = arc.concurrency ?? 1;
   $('auto-run-urls').value = (arc.urls || []).join('\n');
 
   if (c.companyTiers && c.companyTiers.length > 0) {
@@ -165,6 +166,7 @@ $('settings-save-btn').addEventListener('click', async () => {
     hour: parseInt($('auto-run-hour').value) || 2,
     minute: parseInt($('auto-run-minute').value) || 0,
     maxPagesPerUrl: parseInt($('auto-run-max-pages').value) || 2,
+    concurrency: Math.min(parseInt($('auto-run-concurrency').value) || 1, 3),
     urls: $('auto-run-urls').value.split('\n').map(u => u.trim()).filter(Boolean),
   };
 
