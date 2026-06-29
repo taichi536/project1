@@ -13,20 +13,29 @@ export async function GET() {
   try {
     const threads = await fetchThreadList(session.accessToken, 200);
     const db = getDb();
-    const myEmail = session.user.email ?? '';
+
+    // ルーティングルールを取得
+    const rules = db.prepare('SELECT * FROM routing_rules WHERE user_id = ?').all(session.user.id) as {
+      id: number; match_domain: string | null; match_keyword: string | null; assign_to: number | null;
+    }[];
 
     for (const t of threads) {
-      // Gmail自身の検索（in:inbox -from:me）で要返信を判定 → 最も正確
       const needsReply = t.needsReplyByGmail ? 1 : 0;
-
-      // is_done と assigned_to は上書きしない（ユーザーが手動で変更した値を保持）
-      // GmailのDate headerをISO形式に変換してソート可能にする
       const parsedDate = t.date ? new Date(t.date) : null;
       const isoDate = parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate.toISOString() : t.date;
 
+      // ルーティングルールで自動アサイン（新規スレッドのみ、既にアサイン済みは上書きしない）
+      const fromEmail = (t.lastFrom?.match(/<(.+?)>/)?.[1] ?? t.lastFrom ?? '').toLowerCase();
+      let autoAssign: number | null = null;
+      for (const rule of rules) {
+        const domainMatch = rule.match_domain && fromEmail.includes(rule.match_domain.toLowerCase());
+        const keywordMatch = rule.match_keyword && t.subject?.toLowerCase().includes(rule.match_keyword.toLowerCase());
+        if (domainMatch || keywordMatch) { autoAssign = rule.assign_to; break; }
+      }
+
       db.prepare(`
-        INSERT INTO thread_cache (user_id, thread_id, subject, snippet, from_email, last_message_at, message_count, needs_reply, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'))
+        INSERT INTO thread_cache (user_id, thread_id, subject, snippet, from_email, last_message_at, message_count, needs_reply, assigned_to, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'))
         ON CONFLICT(thread_id, user_id) DO UPDATE SET
           subject = excluded.subject,
           snippet = excluded.snippet,
@@ -34,28 +43,29 @@ export async function GET() {
           last_message_at = excluded.last_message_at,
           message_count = excluded.message_count,
           needs_reply = CASE WHEN thread_cache.is_done = 1 THEN 0 ELSE excluded.needs_reply END,
+          assigned_to = CASE WHEN thread_cache.assigned_to IS NULL AND excluded.assigned_to IS NOT NULL THEN excluded.assigned_to ELSE thread_cache.assigned_to END,
           synced_at = excluded.synced_at
       `).run(
         session.user.id, t.threadId, t.subject, t.snippet,
-        t.from, isoDate, t.messageCount, needsReply
+        t.from, isoDate, t.messageCount, needsReply, autoAssign
       );
     }
 
-    // Gmailから取得したスレッドのIDセット
     const fetchedIds = new Set(threads.map(t => t.threadId));
+    const now = new Date().toISOString();
 
     const cached = db.prepare(`
       SELECT tc.*, d.name as deal_name, u.name as assignee_name
       FROM thread_cache tc
       LEFT JOIN deals d ON d.id = tc.deal_id
       LEFT JOIN users u ON u.id = tc.assigned_to
-      WHERE tc.user_id = ? AND tc.thread_id IN (${[...fetchedIds].map(() => '?').join(',')})
+      WHERE tc.user_id = ?
+        AND tc.thread_id IN (${[...fetchedIds].map(() => '?').join(',')})
+        AND (tc.snooze_until IS NULL OR tc.snooze_until <= ?)
       ORDER BY tc.last_message_at DESC
-    `).all(session.user.id, ...[...fetchedIds]) as Array<Record<string, unknown>>;
+    `).all(session.user.id, ...[...fetchedIds], now) as Array<Record<string, unknown>>;
 
-    const filtered = cached;
-
-    return NextResponse.json({ threads: filtered });
+    return NextResponse.json({ threads: cached });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'unknown';
     return NextResponse.json({ error: `Gmail取得エラー: ${msg}` }, { status: 500 });

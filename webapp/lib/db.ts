@@ -56,8 +56,20 @@ function initSchema(db: Database.Database) {
       deal_id INTEGER REFERENCES deals(id) ON DELETE SET NULL,
       assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL,
       is_done INTEGER DEFAULT 0,
+      next_action TEXT,
+      next_action_due TEXT,
+      snooze_until TEXT,
       synced_at TEXT DEFAULT (datetime('now', 'localtime')),
       UNIQUE(thread_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS routing_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      match_domain TEXT,
+      match_keyword TEXT,
+      assign_to INTEGER REFERENCES users(id),
+      created_at TEXT DEFAULT (datetime('now', 'localtime'))
     );
 
     CREATE TABLE IF NOT EXISTS tasks (

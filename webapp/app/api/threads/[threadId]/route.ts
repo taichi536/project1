@@ -44,6 +44,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ th
   if (body.is_done !== undefined) { fields.push('is_done = ?'); values.push(body.is_done ? 1 : 0); }
   if (body.assigned_to !== undefined) { fields.push('assigned_to = ?'); values.push(body.assigned_to); }
   if (body.deal_id !== undefined) { fields.push('deal_id = ?'); values.push(body.deal_id); }
+  if (body.next_action !== undefined) { fields.push('next_action = ?'); values.push(body.next_action || null); }
+  if (body.next_action_due !== undefined) { fields.push('next_action_due = ?'); values.push(body.next_action_due || null); }
+  if (body.snooze_until !== undefined) { fields.push('snooze_until = ?'); values.push(body.snooze_until || null); }
 
   if (fields.length > 0) {
     values.push(threadId, session.user.id);

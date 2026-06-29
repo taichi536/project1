@@ -1,6 +1,6 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { RefreshCw, Mail, CheckCircle, Clock, Sparkles, X, Send, ChevronDown, Search, FileText, Trash2, Plus } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import { RefreshCw, Mail, CheckCircle, Clock, Sparkles, X, Send, ChevronDown, Search, FileText, Trash2, Plus, BellOff, Zap } from 'lucide-react';
 
 type Thread = {
   id: number;
@@ -14,6 +14,9 @@ type Thread = {
   is_done: number;
   deal_name: string | null;
   assignee_name: string | null;
+  next_action: string | null;
+  next_action_due: string | null;
+  snooze_until: string | null;
 };
 
 type Message = {
@@ -65,6 +68,9 @@ export default function InboxPage() {
   const [showNewTemplate, setShowNewTemplate] = useState(false);
   const [newTemplateTitle, setNewTemplateTitle] = useState('');
   const [newTemplateBody, setNewTemplateBody] = useState('');
+  const [nextAction, setNextAction] = useState('');
+  const [nextActionDue, setNextActionDue] = useState('');
+  const [showNextAction, setShowNextAction] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -87,12 +93,29 @@ export default function InboxPage() {
     loadTemplates();
   }, []);
 
+  // キーボードショートカット
+  const handleKey = useCallback((e: KeyboardEvent) => {
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)) return;
+    if (!selected) return;
+    if (e.key === 'd') markDone(selected.thread_id, !selected.is_done);
+    if (e.key === 'r') { setShowReply(true); }
+    if (e.key === 'Escape') setSelected(null);
+  }, [selected]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [handleKey]);
+
   const openThread = async (t: Thread) => {
     setSelected(t);
     setAiResult('');
     setShowReply(false);
     setReplyBody('');
     setSendResult('');
+    setShowNextAction(false);
+    setNextAction(t.next_action ?? '');
+    setNextActionDue(t.next_action_due ?? '');
     setDetailLoading(true);
     const res = await fetch(`/api/threads/${t.thread_id}`);
     const data = await res.json();
@@ -108,6 +131,30 @@ export default function InboxPage() {
     });
     setThreads(prev => prev.map(t => t.thread_id === threadId ? { ...t, is_done: done ? 1 : 0, needs_reply: done ? 0 : t.needs_reply } : t));
     if (selected?.thread_id === threadId) setSelected(prev => prev ? { ...prev, is_done: done ? 1 : 0 } : prev);
+  };
+
+  const saveNextAction = async () => {
+    if (!selected) return;
+    await fetch(`/api/threads/${selected.thread_id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ next_action: nextAction, next_action_due: nextActionDue }),
+    });
+    setThreads(prev => prev.map(t => t.thread_id === selected.thread_id ? { ...t, next_action: nextAction || null, next_action_due: nextActionDue || null } : t));
+    setSelected(prev => prev ? { ...prev, next_action: nextAction || null, next_action_due: nextActionDue || null } : prev);
+    setShowNextAction(false);
+  };
+
+  const snooze = async (days: number) => {
+    if (!selected) return;
+    const until = new Date(Date.now() + days * 86400000).toISOString();
+    await fetch(`/api/threads/${selected.thread_id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ snooze_until: until }),
+    });
+    setThreads(prev => prev.filter(t => t.thread_id !== selected.thread_id));
+    setSelected(null);
   };
 
   const saveTemplate = async () => {
@@ -129,7 +176,14 @@ export default function InboxPage() {
   };
 
   const insertTemplate = (body: string) => {
-    setReplyBody(body);
+    // テンプレート変数を置換: {{名前}}, {{会社名}}, {{件名}}
+    const senderName = selected?.from_email?.replace(/<.*>/, '').trim() ?? '';
+    const companyDomain = selected?.from_email?.match(/@([^>]+)/)?.[1]?.split('.')[0] ?? '';
+    const replaced = body
+      .replace(/\{\{名前\}\}/g, senderName)
+      .replace(/\{\{会社名\}\}/g, companyDomain)
+      .replace(/\{\{件名\}\}/g, selected?.subject ?? '');
+    setReplyBody(replaced);
     setShowReply(true);
     setShowTemplates(false);
   };
@@ -257,13 +311,20 @@ export default function InboxPage() {
                     {t.needs_reply && !t.is_done && (
                       <span className="bg-red-100 text-red-600 text-xs px-1.5 py-0.5 rounded font-medium shrink-0">要返信</span>
                     )}
-                    <span className="text-sm font-medium truncate">{t.from_email?.replace(/<.*>/, '').trim() || t.from_email}</span>
+                    <span className={`text-sm truncate ${t.needs_reply && !t.is_done ? 'font-bold text-gray-900' : 'font-medium text-gray-700'}`}>
+                      {t.from_email?.replace(/<.*>/, '').trim() || t.from_email}
+                    </span>
                   </div>
-                  <div className="text-sm text-gray-700 truncate">{t.subject}</div>
+                  <div className={`text-sm truncate ${t.needs_reply && !t.is_done ? 'text-gray-800' : 'text-gray-500'}`}>{t.subject}</div>
                   <div className="text-xs text-gray-400 truncate mt-0.5">{t.snippet}</div>
-                  {t.assignee_name && (
-                    <div className="text-xs text-indigo-500 mt-0.5">@{t.assignee_name}</div>
-                  )}
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {t.assignee_name && <span className="text-xs text-indigo-500">@{t.assignee_name}</span>}
+                    {t.next_action && (
+                      <span className="text-xs text-orange-500 flex items-center gap-0.5">
+                        <Zap size={10} />{t.next_action}{t.next_action_due ? ` (${t.next_action_due})` : ''}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex flex-col items-end gap-1 shrink-0">
                   <div className="text-xs text-gray-400">{formatDate(t.last_message_at)}</div>
@@ -313,6 +374,35 @@ export default function InboxPage() {
                   </button>
                 </div>
               </div>
+
+              {/* 次のアクション */}
+              <div className="flex items-center gap-2 mt-3">
+                <button onClick={() => setShowNextAction(!showNextAction)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-colors ${selected.next_action ? 'border-orange-200 bg-orange-50 text-orange-600' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                  <Zap size={11} />
+                  {selected.next_action ? `次のアクション: ${selected.next_action}` : '次のアクションを設定'}
+                </button>
+                <div className="relative ml-auto">
+                  <button className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 peer">
+                    <BellOff size={11} />スヌーズ
+                  </button>
+                  <div className="absolute right-0 top-8 bg-white border border-gray-200 rounded-lg shadow-lg z-10 w-36 hidden peer-focus:block hover:block">
+                    {[{label: '1日後', days: 1}, {label: '3日後', days: 3}, {label: '1週間後', days: 7}].map(s => (
+                      <button key={s.days} onClick={() => snooze(s.days)} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 text-gray-600">{s.label}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              {showNextAction && (
+                <div className="mt-2 p-3 bg-orange-50 rounded-lg border border-orange-100 flex gap-2">
+                  <input value={nextAction} onChange={e => setNextAction(e.target.value)}
+                    placeholder="次にすること（例：提案書を送る）"
+                    className="flex-1 text-sm border border-orange-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-orange-300 bg-white" />
+                  <input type="date" value={nextActionDue} onChange={e => setNextActionDue(e.target.value)}
+                    className="text-sm border border-orange-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-orange-300 bg-white" />
+                  <button onClick={saveNextAction} className="px-3 py-1 bg-orange-500 text-white text-xs rounded hover:bg-orange-600">保存</button>
+                </div>
+              )}
 
               {/* AIアクション */}
               <div className="flex gap-2 mt-3">

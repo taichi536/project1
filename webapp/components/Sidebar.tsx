@@ -3,10 +3,11 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { LayoutDashboard, CheckSquare, BarChart2, LogOut, Folder, Inbox } from 'lucide-react';
 import { signOut, useSession } from 'next-auth/react';
+import { useEffect, useState } from 'react';
 
 const nav = [
   { href: '/', label: 'ダッシュボード', icon: LayoutDashboard },
-  { href: '/inbox', label: '受信トレイ', icon: Inbox },
+  { href: '/inbox', label: '受信トレイ', icon: Inbox, badge: true },
   { href: '/projects', label: '案件管理', icon: Folder },
   { href: '/tasks', label: 'タスク管理', icon: CheckSquare },
   { href: '/analytics', label: '分析', icon: BarChart2 },
@@ -15,6 +16,11 @@ const nav = [
 export default function Sidebar() {
   const pathname = usePathname();
   const { data: session } = useSession();
+  const [needsReplyCount, setNeedsReplyCount] = useState(0);
+
+  useEffect(() => {
+    fetch('/api/stats').then(r => r.json()).then(d => { if (!d.error) setNeedsReplyCount(d.needsReply ?? 0); });
+  }, []);
 
   return (
     <aside className="w-56 bg-white border-r border-gray-200 flex flex-col py-6 px-4 shrink-0">
@@ -24,7 +30,7 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex flex-col gap-1 flex-1">
-        {nav.map(({ href, label, icon: Icon }) => {
+        {nav.map(({ href, label, icon: Icon, badge }) => {
           const active = pathname === href;
           return (
             <Link key={href} href={href}
@@ -32,7 +38,12 @@ export default function Sidebar() {
                 active ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100'
               }`}>
               <Icon size={16} />
-              {label}
+              <span className="flex-1">{label}</span>
+              {badge && needsReplyCount > 0 && (
+                <span className="bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-none">
+                  {needsReplyCount > 99 ? '99+' : needsReplyCount}
+                </span>
+              )}
             </Link>
           );
         })}
