@@ -122,6 +122,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // ── 夜間自動実行（並列スロット対応） ──────────────────────────────────────────
 // slotId → {slotId, tabId, windowId, urlQueue, urlIndex, maxPages}
 let _autoRunSlots = [];
+// onUpdated 重複発火防止：送信済みタブIDセット
+const _autoRunSentTabs = new Set();
 
 function _doStartAutoRun(autoRunConfig) {
   const urls = (autoRunConfig.urls || []).filter(u => u?.trim());
@@ -192,6 +194,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status !== 'complete') return;
   const slot = _autoRunSlots.find(s => s.tabId === tabId);
   if (!slot) return;
+  // Angular SPAはルーター初期化でstatus:'complete'が複数回発火する → 重複防止
+  if (_autoRunSentTabs.has(tabId)) return;
+  _autoRunSentTabs.add(tabId);
   // SPAや仮想スクロールはアクティブタブでないと描画されないため前面に出す
   chrome.tabs.update(tabId, { active: true }, () => {
     setTimeout(() => {
@@ -234,7 +239,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     const slotId = msg.slotId ?? 0;
     const slot = _autoRunSlots.find(s => s.slotId === slotId) || _autoRunSlots[0];
     if (slot) {
-      if (slot.tabId) { chrome.tabs.remove(slot.tabId, () => {}); slot.tabId = null; }
+      if (slot.tabId) {
+        _autoRunSentTabs.delete(slot.tabId);
+        chrome.tabs.remove(slot.tabId, () => {});
+        slot.tabId = null;
+      }
       slot.urlIndex++;
       setTimeout(() => _openNextUrlInSlot(slot), 1500);
     }
