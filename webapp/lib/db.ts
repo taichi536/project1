@@ -41,6 +41,15 @@ function initSchema(db: Database.Database) {
       created_at TEXT DEFAULT (datetime('now', 'localtime'))
     );
 
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT DEFAULT 'member' CHECK(role IN ('admin', 'member')),
+      created_at TEXT DEFAULT (datetime('now', 'localtime'))
+    );
+
     CREATE TABLE IF NOT EXISTS tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
