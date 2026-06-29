@@ -15,6 +15,7 @@ export type GmailThread = {
   snippet: string;
   date: string;
   messageCount: number;
+  hasUnread: boolean;
   messages: GmailMessage[];
 };
 
@@ -120,6 +121,8 @@ export async function fetchThreadList(accessToken: string, maxResults = 200): Pr
 
         const firstHeaders = msgs[0].payload?.headers ?? [];
         const lastHeaders = msgs[msgs.length - 1].payload?.headers ?? [];
+        // スレッド内にUNREADメッセージがあるか
+        const hasUnread = msgs.some(m => m.labelIds?.includes('UNREAD'));
 
         return {
           threadId: t.id!,
@@ -129,6 +132,7 @@ export async function fetchThreadList(accessToken: string, maxResults = 200): Pr
           date: getHeader(lastHeaders, 'Date'),
           messageCount: msgs.length,
           lastFrom: getHeader(lastHeaders, 'From'),
+          hasUnread,
           messages: [],
         };
       } catch {
@@ -176,6 +180,7 @@ export async function fetchThreadDetail(accessToken: string, threadId: string): 
       snippet: detail.data.snippet ?? '',
       date: last.date,
       messageCount: msgs.length,
+      hasUnread: msgs.some(m => m.labelIds?.includes('UNREAD')),
       messages,
     };
   } catch {

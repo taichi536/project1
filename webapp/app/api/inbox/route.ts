@@ -23,8 +23,8 @@ export async function GET() {
       // 自動送信メール（noreply系）は返信不要と判定
       const isAutomatic = /noreply|no-reply|notification|notifications|automated|donotreply|do-not-reply|bounce|mailer-daemon/i.test(lastFromEmail);
 
-      // 自分のメール or 自動送信 or myEmailが未設定 → 返信不要
-      const needsReply = (myEmailLower && lastFromEmail && lastFromEmail !== myEmailLower && !isAutomatic) ? 1 : 0;
+      // 未読 かつ 他人から かつ 自動送信でない → 要返信
+      const needsReply = (myEmailLower && lastFromEmail && lastFromEmail !== myEmailLower && !isAutomatic && t.hasUnread) ? 1 : 0;
 
       // is_done と assigned_to は上書きしない（ユーザーが手動で変更した値を保持）
       // GmailのDate headerをISO形式に変換してソート可能にする
