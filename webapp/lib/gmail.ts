@@ -17,6 +17,7 @@ export type GmailThread = {
   messageCount: number;
   hasUnread: boolean;
   lastIsSent: boolean;
+  needsReplyByGmail: boolean;
   messages: GmailMessage[];
 };
 
@@ -90,22 +91,38 @@ function decodeBody(part: { mimeType?: string; body?: { data?: string }; parts?:
 export async function fetchThreadList(accessToken: string, maxResults = 200): Promise<GmailThread[]> {
   const gmail = getGmailClient(accessToken);
 
-  const threads: { id?: string | null }[] = [];
-  let pageToken: string | undefined = undefined;
-  const perPage = 100;
+  // 全スレッドと「要返信スレッド」のIDセットを並列取得
+  // Gmail自身の検索 "is:inbox -from:me" で自分が最後に返信していないスレッドを取得
+  const [allThreads, needsReplyIds] = await Promise.all([
+    (async () => {
+      const threads: { id?: string | null }[] = [];
+      let pageToken: string | undefined = undefined;
+      while (threads.length < maxResults) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res: any = await gmail.users.threads.list({
+          userId: 'me',
+          maxResults: Math.min(100, maxResults - threads.length),
+          labelIds: ['INBOX'],
+          pageToken,
+        });
+        threads.push(...(res.data.threads ?? []));
+        if (!res.data.nextPageToken || threads.length >= maxResults) break;
+        pageToken = res.data.nextPageToken;
+      }
+      return threads;
+    })(),
+    (async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res: any = await gmail.users.threads.list({
+        userId: 'me',
+        maxResults: 500,
+        q: 'in:inbox -from:me',
+      });
+      return new Set<string>((res.data.threads ?? []).map((t: { id?: string }) => t.id ?? ''));
+    })(),
+  ]);
 
-  while (threads.length < maxResults) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const listRes: any = await gmail.users.threads.list({
-      userId: 'me',
-      maxResults: Math.min(perPage, maxResults - threads.length),
-      labelIds: ['INBOX'],
-      pageToken,
-    });
-    threads.push(...(listRes.data.threads ?? []));
-    if (!listRes.data.nextPageToken || threads.length >= maxResults) break;
-    pageToken = listRes.data.nextPageToken;
-  }
+  const threads = allThreads;
 
   // metadata形式で並列取得
   const results = await Promise.all(
@@ -124,8 +141,9 @@ export async function fetchThreadList(accessToken: string, maxResults = 200): Pr
         const lastMsg = msgs[msgs.length - 1];
         const lastHeaders = lastMsg.payload?.headers ?? [];
         const hasUnread = msgs.some(m => m.labelIds?.includes('UNREAD'));
-        // 最後のメッセージがSENT（自分が送信）かどうか → Gmailラベルで確実に判定
         const lastIsSent = lastMsg.labelIds?.includes('SENT') ?? false;
+        // Gmailの検索結果（-from:me）に含まれるかで要返信を判定
+        const needsReplyByGmail = needsReplyIds.has(t.id!);
 
         return {
           threadId: t.id!,
@@ -137,6 +155,7 @@ export async function fetchThreadList(accessToken: string, maxResults = 200): Pr
           lastFrom: getHeader(lastHeaders, 'From'),
           hasUnread,
           lastIsSent,
+          needsReplyByGmail,
           messages: [],
         };
       } catch {
@@ -187,6 +206,7 @@ export async function fetchThreadDetail(accessToken: string, threadId: string): 
       messageCount: msgs.length,
       hasUnread: msgs.some(m => m.labelIds?.includes('UNREAD')),
       lastIsSent: lastRaw.labelIds?.includes('SENT') ?? false,
+      needsReplyByGmail: !(lastRaw.labelIds?.includes('SENT') ?? false),
       messages,
     };
   } catch {

@@ -16,12 +16,8 @@ export async function GET() {
     const myEmail = session.user.email ?? '';
 
     for (const t of threads) {
-      const lastFromEmail = (t.lastFrom?.match(/<(.+?)>/)?.[1] ?? t.lastFrom ?? '').trim().toLowerCase();
-      // 自動送信メール（noreply系）は返信不要と判定
-      const isAutomatic = /noreply|no-reply|notification|notifications|automated|donotreply|do-not-reply|bounce|mailer-daemon/i.test(lastFromEmail);
-
-      // GmailのSENTラベルで判定：最後のメッセージが自分の送信でなく、自動送信でもなく、未読なら要返信
-      const needsReply = (!t.lastIsSent && !isAutomatic && t.hasUnread) ? 1 : 0;
+      // Gmail自身の検索（in:inbox -from:me）で要返信を判定 → 最も正確
+      const needsReply = t.needsReplyByGmail ? 1 : 0;
 
       // is_done と assigned_to は上書きしない（ユーザーが手動で変更した値を保持）
       // GmailのDate headerをISO形式に変換してソート可能にする
