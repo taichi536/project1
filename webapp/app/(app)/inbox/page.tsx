@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { RefreshCw, Mail, CheckCircle, Clock, Sparkles, X, Send, ChevronDown, ChevronUp, Search, FileText, Trash2, Plus, BellOff, Zap, Folder, Inbox, Paperclip } from 'lucide-react';
+import { RefreshCw, Mail, CheckCircle, Clock, Sparkles, X, Send, ChevronDown, ChevronUp, Search, FileText, Trash2, Plus, BellOff, Zap, Folder, Inbox, Paperclip, PenSquare, Forward } from 'lucide-react';
 
 type Thread = {
   id: number;
@@ -66,9 +66,22 @@ export default function InboxPage() {
   const [aiType, setAiType] = useState('');
   const [filter, setFilter] = useState<'all' | 'needs_reply' | 'done'>('all');
   const [showReply, setShowReply] = useState(false);
+  const [replyMode, setReplyMode] = useState<'reply' | 'forward'>('reply');
+  const [replyTo, setReplyTo] = useState('');
+  const [replySubject, setReplySubject] = useState('');
+  const [replyCc, setReplyCc] = useState('');
   const [replyBody, setReplyBody] = useState('');
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState('');
+  // Compose modal state
+  const [showCompose, setShowCompose] = useState(false);
+  const [composeTo, setComposeTo] = useState('');
+  const [composeCc, setComposeCc] = useState('');
+  const [composeBcc, setComposeBcc] = useState('');
+  const [composeSubject, setComposeSubject] = useState('');
+  const [composeBody, setComposeBody] = useState('');
+  const [composeSending, setComposeSending] = useState(false);
+  const [composeResult, setComposeResult] = useState('');
   const [search, setSearch] = useState('');
   const [users, setUsers] = useState<{ id: number; name: string; email: string }[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -111,7 +124,7 @@ export default function InboxPage() {
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)) return;
     if (!selected) return;
     if (e.key === 'd') markDone(selected.thread_id, !selected.is_done);
-    if (e.key === 'r') { setShowReply(true); }
+    if (e.key === 'r') { openReplyPanel('reply'); }
     if (e.key === 'Escape') setSelected(null);
   }, [selected]);
 
