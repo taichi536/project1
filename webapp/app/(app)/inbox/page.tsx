@@ -148,6 +148,27 @@ export default function InboxPage() {
     return () => clearInterval(interval);
   }, []);
 
+  const openReplyPanel = (mode: 'reply' | 'forward') => {
+    if (!selected) return;
+    setReplyMode(mode);
+    setShowReply(true);
+    setShowTemplates(false);
+    const lastMsg = detail?.messages[detail.messages.length - 1];
+    if (mode === 'reply') {
+      setReplyTo(lastMsg?.from ?? selected.from_email);
+      const subj = detail?.subject ?? selected.subject ?? '';
+      setReplySubject(subj.startsWith('Re:') ? subj : `Re: ${subj}`);
+      setReplyCc('');
+    } else {
+      setReplyTo('');
+      const subj = detail?.subject ?? selected.subject ?? '';
+      setReplySubject(subj.startsWith('Fwd:') ? subj : `Fwd: ${subj}`);
+      setReplyCc('');
+      const lastBody = lastMsg?.body ?? '';
+      setReplyBody(`\n\n---------- 転送メッセージ ----------\n${lastBody}`);
+    }
+  };
+
   const fetchDetail = async (threadId: string) => {
     const res = await fetch(`/api/threads/${threadId}`);
     const data = await res.json();
@@ -159,6 +180,9 @@ export default function InboxPage() {
     setAiResult('');
     setShowReply(false);
     setReplyBody('');
+    setReplyTo('');
+    setReplySubject('');
+    setReplyCc('');
     setSendResult('');
     setShowNextAction(false);
     setNextAction(t.next_action ?? '');
@@ -278,28 +302,36 @@ export default function InboxPage() {
     setAiLoading(false);
     if (type === 'reply') {
       setReplyBody(result);
-      setShowReply(true);
+      openReplyPanel('reply');
     }
   };
 
   const sendReply = async () => {
-    if (!selected || !replyBody.trim()) return;
+    if (!selected || !replyBody.trim() || !replyTo.trim()) return;
     setSending(true);
     setSendResult('');
     const lastMsg = detail?.messages[detail.messages.length - 1];
-    const to = lastMsg?.from ?? selected.from_email;
-    const subject = detail?.subject ? `Re: ${detail.subject}` : '';
 
-    const res = await fetch(`/api/threads/${selected.thread_id}/send`, {
+    const res = await fetch(`/api/threads/${selected.thread_id}/reply`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to, subject, body: replyBody }),
+      body: JSON.stringify({
+        to: replyTo,
+        cc: replyCc || undefined,
+        subject: replySubject,
+        body: replyBody,
+        inReplyTo: replyMode === 'reply' ? (lastMsg?.id ?? undefined) : undefined,
+        references: replyMode === 'reply' ? (lastMsg?.id ?? undefined) : undefined,
+      }),
     });
     const data = await res.json();
     if (res.ok) {
       setSendResult('送信しました');
       setShowReply(false);
       setReplyBody('');
+      setReplyTo('');
+      setReplySubject('');
+      setReplyCc('');
       setThreads(prev => prev.map(t => t.thread_id === selected.thread_id ? { ...t, is_done: 1, needs_reply: 0 } : t));
       setSelected(prev => prev ? { ...prev, is_done: 1, needs_reply: 0 } : prev);
       // Re-fetch thread to show sent message inline
@@ -310,18 +342,49 @@ export default function InboxPage() {
     setSending(false);
   };
 
+  const sendCompose = async () => {
+    if (!composeTo.trim() || !composeBody.trim()) return;
+    setComposeSending(true);
+    setComposeResult('');
+    const res = await fetch('/api/compose', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: composeTo,
+        cc: composeCc || undefined,
+        bcc: composeBcc || undefined,
+        subject: composeSubject,
+        body: composeBody,
+      }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setComposeResult('送信しました');
+      setTimeout(() => {
+        setShowCompose(false);
+        setComposeTo('');
+        setComposeCc('');
+        setComposeBcc('');
+        setComposeSubject('');
+        setComposeBody('');
+        setComposeResult('');
+      }, 1500);
+    } else {
+      setComposeResult(`エラー: ${data.error}`);
+    }
+    setComposeSending(false);
+  };
+
   const sendAiReply = async () => {
     if (!selected || !aiResult || aiType !== 'reply') return;
     setAiSending(true);
     const lastMsg = detail?.messages[detail.messages.length - 1];
     const to = lastMsg?.from ?? selected.from_email;
     const subject = detail?.subject ? `Re: ${detail.subject}` : '';
-    const messageId = lastMsg?.id ?? '';
-
     const res = await fetch(`/api/threads/${selected.thread_id}/reply`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to, subject, body: aiResult, messageId }),
+      body: JSON.stringify({ to, subject, body: aiResult, inReplyTo: lastMsg?.id, references: lastMsg?.id }),
     });
     const data = await res.json();
     if (res.ok) {
