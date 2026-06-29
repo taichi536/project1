@@ -419,9 +419,14 @@ export default function InboxPage() {
         <div className="p-4 border-b border-gray-200">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-bold text-lg">受信トレイ</h2>
-            <button onClick={load} disabled={loading} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
-              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setShowCompose(true)} className="p-1.5 rounded-lg hover:bg-gray-100 text-indigo-600" title="新規作成">
+                <PenSquare size={15} />
+              </button>
+              <button onClick={load} disabled={loading} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
+                <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+              </button>
+            </div>
           </div>
           <div className="relative mb-2">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -603,11 +608,18 @@ export default function InboxPage() {
                   <Clock size={12} />
                   {aiLoading && aiType === 'task' ? '生成中...' : 'タスク抽出'}
                 </button>
-                <button onClick={() => setShowReply(!showReply)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 ml-auto">
-                  <Send size={12} />
-                  返信する
-                </button>
+                <div className="flex items-center gap-1.5 ml-auto">
+                  <button onClick={() => openReplyPanel('forward')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 text-xs rounded-lg hover:bg-gray-50">
+                    <Forward size={12} />
+                    転送
+                  </button>
+                  <button onClick={() => openReplyPanel('reply')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700">
+                    <Send size={12} />
+                    返信する
+                  </button>
+                </div>
               </div>
 
               {/* AI結果 */}
@@ -649,12 +661,12 @@ export default function InboxPage() {
               )}
             </div>
 
-            {/* 返信コンポーザー */}
+            {/* 返信/転送コンポーザー */}
             {showReply && (
               <div className="bg-white border-b border-gray-200 px-6 py-4 shrink-0">
                 <div className="flex items-center justify-between mb-2">
-                  <div className="text-xs text-gray-500">
-                    返信先: {detail?.messages[detail.messages.length - 1]?.from ?? selected.from_email}
+                  <div className="text-xs font-medium text-gray-600">
+                    {replyMode === 'forward' ? '転送' : '返信'}
                   </div>
                   <div className="relative">
                     <button onClick={() => { setShowTemplates(!showTemplates); setShowNewTemplate(false); }}
