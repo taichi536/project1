@@ -16,8 +16,9 @@ export async function GET() {
     const myEmail = session.user.email ?? '';
 
     for (const t of threads) {
-      const lastFrom = (t as unknown as { lastFrom?: string }).lastFrom ?? '';
-      const needsReply = lastFrom && !lastFrom.includes(myEmail) ? 1 : 0;
+      const lastFrom = t.lastFrom ?? '';
+      // 最後のメールが自分以外から来ている かつ 対応済みでない場合に要返信
+      const needsReply = lastFrom && !lastFrom.toLowerCase().includes(myEmail.toLowerCase()) ? 1 : 0;
 
       db.prepare(`
         INSERT INTO thread_cache (user_id, thread_id, subject, snippet, from_email, last_message_at, message_count, needs_reply, synced_at)

@@ -10,6 +10,7 @@ export type GmailThread = {
   threadId: string;
   subject: string;
   from: string;
+  lastFrom: string;
   snippet: string;
   date: string;
   messageCount: number;
@@ -127,6 +128,7 @@ export async function fetchThreadDetail(accessToken: string, threadId: string): 
       threadId,
       subject: first.subject || '(件名なし)',
       from: first.from,
+      lastFrom: last.from,
       snippet: detail.data.snippet ?? '',
       date: last.date,
       messageCount: msgs.length,
