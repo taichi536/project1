@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { RefreshCw, Mail, CheckCircle, Clock, Sparkles, X, Send, ChevronDown, Search, FileText, Trash2, Plus, BellOff, Zap, Folder, Inbox } from 'lucide-react';
+import { RefreshCw, Mail, CheckCircle, Clock, Sparkles, X, Send, ChevronDown, ChevronUp, Search, FileText, Trash2, Plus, BellOff, Zap, Folder, Inbox, Paperclip } from 'lucide-react';
 
 type Thread = {
   id: number;
@@ -24,9 +24,11 @@ type Message = {
   id: string;
   from: string;
   to: string;
+  cc?: string;
   subject: string;
   date: string;
   body: string;
+  attachments?: { filename: string; mimeType: string; size: number }[];
 };
 
 type ThreadDetail = {
@@ -79,6 +81,8 @@ export default function InboxPage() {
   const [nextActionDue, setNextActionDue] = useState('');
   const [showNextAction, setShowNextAction] = useState(false);
   const [aiSending, setAiSending] = useState(false);
+  const [expandedHeaders, setExpandedHeaders] = useState<Set<string>>(new Set());
+  const [allMessagesExpanded, setAllMessagesExpanded] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -121,6 +125,22 @@ export default function InboxPage() {
     document.title = count > 0 ? `(${count}) 受信トレイ - WorkFlow AI` : '受信トレイ - WorkFlow AI';
   }, [threads]);
 
+  // 60秒ごとに自動更新
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetch('/api/inbox').then(r => r.json()).then(data => {
+        if (data.threads) setThreads(data.threads);
+      });
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const fetchDetail = async (threadId: string) => {
+    const res = await fetch(`/api/threads/${threadId}`);
+    const data = await res.json();
+    setDetail(data.thread ?? null);
+  };
+
   const openThread = async (t: Thread) => {
     setSelected(t);
     setAiResult('');
@@ -130,10 +150,16 @@ export default function InboxPage() {
     setShowNextAction(false);
     setNextAction(t.next_action ?? '');
     setNextActionDue(t.next_action_due ?? '');
+    setExpandedHeaders(new Set());
+    setAllMessagesExpanded(false);
     setDetailLoading(true);
-    const res = await fetch(`/api/threads/${t.thread_id}`);
-    const data = await res.json();
-    setDetail(data.thread ?? null);
+
+    // 既読にする（fire and forget）
+    fetch(`/api/threads/${t.thread_id}/read`, { method: 'POST' }).catch(() => {});
+    // ローカル状態を既読に更新
+    setThreads(prev => prev.map(th => th.thread_id === t.thread_id ? { ...th, needs_reply: th.needs_reply } : th));
+
+    await fetchDetail(t.thread_id);
     setDetailLoading(false);
   };
 
@@ -263,6 +289,8 @@ export default function InboxPage() {
       setReplyBody('');
       setThreads(prev => prev.map(t => t.thread_id === selected.thread_id ? { ...t, is_done: 1, needs_reply: 0 } : t));
       setSelected(prev => prev ? { ...prev, is_done: 1, needs_reply: 0 } : prev);
+      // Re-fetch thread to show sent message inline
+      await fetchDetail(selected.thread_id);
     } else {
       setSendResult(`エラー: ${data.error}`);
     }
@@ -287,6 +315,8 @@ export default function InboxPage() {
       setSendResult('送信しました');
       setThreads(prev => prev.map(t => t.thread_id === selected.thread_id ? { ...t, needs_reply: 0 } : t));
       setSelected(prev => prev ? { ...prev, needs_reply: 0 } : prev);
+      // Re-fetch thread to show sent message inline
+      await fetchDetail(selected.thread_id);
     } else {
       setSendResult(`エラー: ${data.error}`);
     }
