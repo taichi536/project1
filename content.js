@@ -1,4 +1,4 @@
-// content.js v1.18.103
+// content.js v1.18.104
 // 各媒体のプロフィールページからテキストを抽出する
 
 // 複数VMインスタンス競合防止：このインスタンス固有のIDをDOMに刻印し、
@@ -1718,6 +1718,107 @@ async function autoRunListPage(request) {
   }
 
   showAutoStatus(`🌙 自動実行完了: ${total}条件処理済み (${urlIndex+1}/${totalUrls})`, 6000);
+  _isAutoRunMode = false;
+  chrome.runtime.sendMessage({ type: 'autoRunComplete' }).catch(() => {});
+}
+
+async function autoRunBizreachListPage(request) {
+  const maxPages = request.maxPages || 2;
+  const urlIndex = request.urlIndex || 0;
+  const totalUrls = request.totalUrls || 1;
+
+  // 保存された検索条件タブを探す（新規検索・条件一覧・矢印を除く）
+  const findConditionTabs = () => {
+    // 方法1: role="tab" 属性（Angular Material 等）
+    let tabs = Array.from(document.querySelectorAll('[role="tab"]'))
+      .filter(el => {
+        const t = (el.textContent || '').trim();
+        return t && t !== '新規検索' && t !== '条件一覧' && t.length < 60;
+      });
+    if (tabs.length > 0) return tabs;
+
+    // 方法2: クラス名に Tab を含む要素（ナビ矢印・close ボタン除く）
+    tabs = Array.from(document.querySelectorAll('[class*="Tab"], [class*="tab"]'))
+      .filter(el => {
+        const t = (el.textContent || '').trim();
+        const rect = el.getBoundingClientRect();
+        return t && t !== '新規検索' && t !== '条件一覧' && t.length < 60
+          && rect.height > 20 && rect.height < 70 && rect.width > 30
+          && el.tagName !== 'BUTTON';
+      });
+    if (tabs.length > 0) return tabs;
+
+    return [];
+  };
+
+  // タブが出るまで待つ
+  let tabs = [];
+  for (let w = 0; w < 20; w++) {
+    await sleep(500);
+    tabs = findConditionTabs();
+    if (tabs.length > 0) break;
+  }
+
+  if (tabs.length === 0) {
+    // タブが見つからなければ通常の候補者一覧として処理
+    console.warn('[Snow-we] Bizreachタブ未検出 → 通常処理');
+    _isAutoRunMode = true;
+    await triggerAutoAdd();
+    _isAutoRunMode = false;
+    chrome.runtime.sendMessage({ type: 'autoRunComplete' }).catch(() => {});
+    return;
+  }
+
+  console.log(`[Snow-we] Bizreach自動実行: ${tabs.length}件の検索条件タブを処理`);
+
+  for (let i = 0; i < tabs.length; i++) {
+    const currentTabs = findConditionTabs();
+    if (i >= currentTabs.length) break;
+
+    const tab = currentTabs[i];
+    const tabLabel = (tab.textContent || '').replace(/[×✕\xd7×]/g, '').trim().substring(0, 20);
+    showAutoStatus(`🌙 自動実行 (${urlIndex+1}/${totalUrls}): 「${tabLabel}」${i+1}/${tabs.length}`);
+
+    // ×(close)ボタン以外の部分をクリック
+    const closeBtn = tab.querySelector('[aria-label*="削除"], [aria-label*="close"], [class*="close"], [class*="Close"], [class*="delete"]');
+    if (closeBtn) {
+      const tabRect = tab.getBoundingClientRect();
+      const closeBtnRect = closeBtn.getBoundingClientRect();
+      const clickX = tabRect.left + (tabRect.width - closeBtnRect.width) / 2;
+      const clickY = tabRect.top + tabRect.height / 2;
+      const el = document.elementFromPoint(clickX, clickY);
+      if (el && el !== closeBtn && !closeBtn.contains(el)) {
+        el.click();
+      } else {
+        tab.click();
+      }
+    } else {
+      tab.click();
+    }
+
+    // 候補者カードが出るまで待つ
+    await sleep(1500);
+    let found = false;
+    for (let w = 0; w < 20; w++) {
+      await sleep(500);
+      if (findCandidateCardsByPlatform().length > 0) { found = true; break; }
+    }
+
+    if (found) {
+      _batchApiKey = null; _batchCriteria = null; _batchIsRunning = false; _batchScoutHistory = null;
+      _isAutoRunMode = 'list-inner';
+      _autoRunPageCount = 0;
+      _autoRunMaxPages = maxPages;
+      await triggerAutoAdd();
+      _isAutoRunMode = false;
+    } else {
+      console.warn(`[Snow-we] 「${tabLabel}」: 候補者なし、スキップ`);
+    }
+
+    await sleep(1000);
+  }
+
+  showAutoStatus(`🌙 自動実行完了: ${tabs.length}条件処理済み (${urlIndex+1}/${totalUrls})`, 6000);
   _isAutoRunMode = false;
   chrome.runtime.sendMessage({ type: 'autoRunComplete' }).catch(() => {});
 }
@@ -4186,6 +4287,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // doda-X 検索条件リストページは専用処理
     if (location.href.includes('search_list')) {
       autoRunListPage(request).catch(e => console.error('[Snow-we] リスト自動実行エラー:', e?.message));
+    // BizReach 検索条件タブ一覧ページ（/resumes/{id}/list）
+    } else if (getPlatform() === 'bizreach' && /\/resumes\/\d+\/list/.test(location.pathname)) {
+      autoRunBizreachListPage(request).catch(e => console.error('[Snow-we] Bizreachリスト自動実行エラー:', e?.message));
     } else {
       triggerAutoAdd().catch(e => console.error('[Snow-we] 自動実行エラー:', e?.message));
     }
