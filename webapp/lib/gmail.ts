@@ -32,15 +32,32 @@ function getHeader(headers: { name?: string | null; value?: string | null }[], n
 
 function decodeBody(part: { mimeType?: string; body?: { data?: string }; parts?: unknown[] }): string {
   if (part.body?.data) {
-    return Buffer.from(part.body.data, 'base64').toString('utf-8');
+    const buf = Buffer.from(part.body.data, 'base64');
+    // UTF-8で読めるか試みる、失敗したらlatin1で読む（文字化け回避）
+    const text = buf.toString('utf-8');
+    // 文字化けチェック：置換文字(U+FFFD)が多い場合はlatin1にフォールバック
+    const replacements = (text.match(/�/g) ?? []).length;
+    if (replacements > 5) {
+      return buf.toString('latin1');
+    }
+    return text;
   }
   if (part.parts) {
+    // text/plainを優先
     for (const p of part.parts as typeof part[]) {
       if (p.mimeType === 'text/plain') {
         const text = decodeBody(p);
         if (text) return text;
       }
     }
+    // text/htmlも試みる
+    for (const p of part.parts as typeof part[]) {
+      if (p.mimeType === 'text/html') {
+        const text = decodeBody(p);
+        if (text) return text.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+      }
+    }
+    // ネストされたパートを再帰
     for (const p of part.parts as typeof part[]) {
       const text = decodeBody(p);
       if (text) return text;
@@ -50,16 +67,26 @@ function decodeBody(part: { mimeType?: string; body?: { data?: string }; parts?:
 }
 
 // 一覧取得：metadataのみ（高速）
-export async function fetchThreadList(accessToken: string, maxResults = 50): Promise<GmailThread[]> {
+export async function fetchThreadList(accessToken: string, maxResults = 200): Promise<GmailThread[]> {
   const gmail = getGmailClient(accessToken);
 
-  const listRes = await gmail.users.threads.list({
-    userId: 'me',
-    maxResults,
-    labelIds: ['INBOX'],
-  });
+  // ページネーションで全件取得
+  const threads: { id?: string | null; historyId?: string | null }[] = [];
+  let pageToken: string | undefined = undefined;
+  const perPage = 100;
 
-  const threads = listRes.data.threads ?? [];
+  while (threads.length < maxResults) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const listRes: any = await gmail.users.threads.list({
+      userId: 'me',
+      maxResults: Math.min(perPage, maxResults - threads.length),
+      labelIds: ['INBOX'],
+      pageToken,
+    });
+    threads.push(...(listRes.data.threads ?? []));
+    if (!listRes.data.nextPageToken || threads.length >= maxResults) break;
+    pageToken = listRes.data.nextPageToken;
+  }
 
   // metadata形式で並列取得（本文なし）
   const results = await Promise.all(
