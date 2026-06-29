@@ -2,26 +2,72 @@
 import { useState } from 'react';
 import { Sparkles, Copy, Check } from 'lucide-react';
 
-type GenType = 'scout' | 'reply' | 'followup';
+type GenType = 'outreach' | 'reply' | 'followup' | 'proposal' | 'report';
+
+const TYPES: { key: GenType; label: string; description: string }[] = [
+  { key: 'outreach', label: 'アウトリーチ', description: '初めて連絡する相手へのメール' },
+  { key: 'reply', label: '返信', description: '受け取ったメッセージへの返信' },
+  { key: 'followup', label: 'フォローアップ', description: '返信がない相手への再連絡' },
+  { key: 'proposal', label: '提案・営業', description: '商品・サービス・アイデアの提案' },
+  { key: 'report', label: '業務報告', description: '進捗・完了報告の文章作成' },
+];
+
+type FormState = Record<string, string>;
+
+const FORM_FIELDS: Record<GenType, { key: string; placeholder: string; multiline?: boolean; span2?: boolean }[]> = {
+  outreach: [
+    { key: 'name', placeholder: '相手の名前' },
+    { key: 'company', placeholder: '相手の会社・組織' },
+    { key: 'role', placeholder: '相手の役職・業務内容' },
+    { key: 'purpose', placeholder: '連絡の目的（例：打ち合わせ打診、情報提供）' },
+    { key: 'point', placeholder: '相手に合わせて触れたいポイント', span2: true },
+  ],
+  reply: [
+    { key: 'original', placeholder: '元のメッセージを貼り付け', multiline: true, span2: true },
+    { key: 'situation', placeholder: '状況・補足（例：対応中、確認が必要）', span2: true },
+  ],
+  followup: [
+    { key: 'name', placeholder: '相手の名前' },
+    { key: 'company', placeholder: '相手の会社・組織' },
+    { key: 'lastContact', placeholder: '前回の連絡内容（例：提案メールを送付）' },
+    { key: 'elapsed', placeholder: '経過期間（例：1週間、10日）' },
+  ],
+  proposal: [
+    { key: 'name', placeholder: '相手の名前' },
+    { key: 'company', placeholder: '相手の会社・組織' },
+    { key: 'problem', placeholder: '相手の課題・ニーズ' },
+    { key: 'value', placeholder: '提供できる価値・内容' },
+    { key: 'next', placeholder: '次のステップ（例：30分の打ち合わせをご提案）', span2: true },
+  ],
+  report: [
+    { key: 'to', placeholder: '報告先（例：上司、チーム）' },
+    { key: 'period', placeholder: '対象期間（例：今週、6月）' },
+    { key: 'done', placeholder: '完了事項', multiline: true, span2: true },
+    { key: 'inProgress', placeholder: '進行中の事項', multiline: true, span2: true },
+    { key: 'issues', placeholder: '課題・懸念点（任意）', span2: true },
+  ],
+};
 
 export default function GeneratePage() {
-  const [type, setType] = useState<GenType>('scout');
+  const [type, setType] = useState<GenType>('outreach');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState('');
   const [copied, setCopied] = useState(false);
+  const [form, setForm] = useState<FormState>({});
 
-  const [scoutForm, setScoutForm] = useState({ name: '', company: '', role: '', career: '', reason: '' });
-  const [replyForm, setReplyForm] = useState({ original: '', situation: '' });
-  const [followupForm, setFollowupForm] = useState({ name: '', company: '', role: '', lastContact: '' });
+  const handleTypeChange = (t: GenType) => {
+    setType(t);
+    setForm({});
+    setResult('');
+  };
 
   const generate = async () => {
     setLoading(true);
     setResult('');
-    const context = type === 'scout' ? scoutForm : type === 'reply' ? replyForm : followupForm;
     const res = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, context }),
+      body: JSON.stringify({ type, context: form }),
     });
     const data = await res.json();
     setResult(data.text);
@@ -34,47 +80,64 @@ export default function GeneratePage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const fields = FORM_FIELDS[type];
+
   return (
     <div className="max-w-2xl">
-      <h2 className="text-2xl font-bold mb-6">AI文面生成</h2>
+      <h2 className="text-2xl font-bold mb-2">AIビジネス文面生成</h2>
+      <p className="text-sm text-gray-400 mb-6">業種・業務を問わず、あらゆるビジネス文書をAIが生成します</p>
 
-      {/* タブ */}
-      <div className="flex gap-2 mb-6">
-        {(['scout', 'reply', 'followup'] as GenType[]).map(t => (
-          <button key={t} onClick={() => setType(t)} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${type === t ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-            {t === 'scout' ? 'スカウト文' : t === 'reply' ? '返信文' : 'フォローアップ'}
+      {/* 種別選択 */}
+      <div className="grid grid-cols-5 gap-2 mb-6">
+        {TYPES.map(({ key, label, description }) => (
+          <button
+            key={key}
+            onClick={() => handleTypeChange(key)}
+            className={`flex flex-col items-center p-3 rounded-xl text-sm border transition-colors ${
+              type === key
+                ? 'bg-indigo-600 text-white border-indigo-600'
+                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            <span className="font-medium">{label}</span>
+            <span className={`text-xs mt-1 text-center leading-tight ${type === key ? 'text-indigo-200' : 'text-gray-400'}`}>
+              {description}
+            </span>
           </button>
         ))}
       </div>
 
-      {/* フォーム */}
+      {/* 入力フォーム */}
       <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4">
-        {type === 'scout' && (
-          <div className="grid grid-cols-2 gap-3">
-            <input placeholder="候補者名" value={scoutForm.name} onChange={e => setScoutForm({ ...scoutForm, name: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            <input placeholder="現職会社" value={scoutForm.company} onChange={e => setScoutForm({ ...scoutForm, company: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            <input placeholder="現職ポジション" value={scoutForm.role} onChange={e => setScoutForm({ ...scoutForm, role: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            <input placeholder="注目したキャリアポイント" value={scoutForm.reason} onChange={e => setScoutForm({ ...scoutForm, reason: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            <textarea placeholder="職歴・スキルの概要" value={scoutForm.career} onChange={e => setScoutForm({ ...scoutForm, career: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm col-span-2" rows={3} />
-          </div>
-        )}
-        {type === 'reply' && (
-          <div className="flex flex-col gap-3">
-            <textarea placeholder="元のメッセージ" value={replyForm.original} onChange={e => setReplyForm({ ...replyForm, original: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" rows={4} />
-            <input placeholder="状況・補足（例：面談調整中）" value={replyForm.situation} onChange={e => setReplyForm({ ...replyForm, situation: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-          </div>
-        )}
-        {type === 'followup' && (
-          <div className="grid grid-cols-2 gap-3">
-            <input placeholder="相手の名前" value={followupForm.name} onChange={e => setFollowupForm({ ...followupForm, name: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            <input placeholder="会社名" value={followupForm.company} onChange={e => setFollowupForm({ ...followupForm, company: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            <input placeholder="ポジション" value={followupForm.role} onChange={e => setFollowupForm({ ...followupForm, role: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            <input placeholder="前回連絡日（例：2週間前）" value={followupForm.lastContact} onChange={e => setFollowupForm({ ...followupForm, lastContact: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-          </div>
-        )}
+        <div className="grid grid-cols-2 gap-3">
+          {fields.map(({ key, placeholder, multiline, span2 }) =>
+            multiline ? (
+              <textarea
+                key={key}
+                placeholder={placeholder}
+                value={form[key] ?? ''}
+                onChange={e => setForm({ ...form, [key]: e.target.value })}
+                className={`border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none ${span2 ? 'col-span-2' : ''}`}
+                rows={3}
+              />
+            ) : (
+              <input
+                key={key}
+                placeholder={placeholder}
+                value={form[key] ?? ''}
+                onChange={e => setForm({ ...form, [key]: e.target.value })}
+                className={`border border-gray-200 rounded-lg px-3 py-2 text-sm ${span2 ? 'col-span-2' : ''}`}
+              />
+            )
+          )}
+        </div>
       </div>
 
-      <button onClick={generate} disabled={loading} className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 mb-6">
+      <button
+        onClick={generate}
+        disabled={loading}
+        className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 mb-6"
+      >
         <Sparkles size={16} />
         {loading ? '生成中...' : 'AIで生成する'}
       </button>
@@ -88,7 +151,7 @@ export default function GeneratePage() {
               {copied ? 'コピー済み' : 'コピー'}
             </button>
           </div>
-          <pre className="text-sm whitespace-pre-wrap text-gray-700">{result}</pre>
+          <pre className="text-sm whitespace-pre-wrap text-gray-700 leading-relaxed">{result}</pre>
         </div>
       )}
     </div>

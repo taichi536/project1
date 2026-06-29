@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, MessageSquare, CheckSquare, BarChart2, Sparkles } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, CheckSquare, BarChart2, Sparkles, Upload } from 'lucide-react';
 
 const nav = [
   { href: '/', label: 'ダッシュボード', icon: LayoutDashboard },
@@ -9,6 +9,7 @@ const nav = [
   { href: '/tasks', label: 'タスク管理', icon: CheckSquare },
   { href: '/analytics', label: '分析', icon: BarChart2 },
   { href: '/generate', label: 'AI文面生成', icon: Sparkles },
+  { href: '/import', label: 'データ取込', icon: Upload },
 ];
 
 export default function Sidebar() {
