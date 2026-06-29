@@ -11,7 +11,7 @@ export async function GET() {
   }
 
   try {
-    const threads = await fetchThreadList(session.accessToken, 50);
+    const threads = await fetchThreadList(session.accessToken, 200);
     const db = getDb();
     const myEmail = session.user.email ?? '';
 
