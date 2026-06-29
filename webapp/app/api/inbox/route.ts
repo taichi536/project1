@@ -23,6 +23,10 @@ export async function GET() {
       const needsReply = (myEmailLower && lastFromEmail && lastFromEmail !== myEmailLower) ? 1 : 0;
 
       // is_done と assigned_to は上書きしない（ユーザーが手動で変更した値を保持）
+      // GmailのDate headerをISO形式に変換してソート可能にする
+      const parsedDate = t.date ? new Date(t.date) : null;
+      const isoDate = parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate.toISOString() : t.date;
+
       db.prepare(`
         INSERT INTO thread_cache (user_id, thread_id, subject, snippet, from_email, last_message_at, message_count, needs_reply, synced_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'))
@@ -36,7 +40,7 @@ export async function GET() {
           synced_at = excluded.synced_at
       `).run(
         session.user.id, t.threadId, t.subject, t.snippet,
-        t.from, t.date, t.messageCount, needsReply
+        t.from, isoDate, t.messageCount, needsReply
       );
     }
 
@@ -48,12 +52,11 @@ export async function GET() {
       FROM thread_cache tc
       LEFT JOIN deals d ON d.id = tc.deal_id
       LEFT JOIN users u ON u.id = tc.assigned_to
-      WHERE tc.user_id = ?
+      WHERE tc.user_id = ? AND tc.thread_id IN (${[...fetchedIds].map(() => '?').join(',')})
       ORDER BY tc.last_message_at DESC
-    `).all(session.user.id) as Array<Record<string, unknown>>;
+    `).all(session.user.id, ...[...fetchedIds]) as Array<Record<string, unknown>>;
 
-    // 今回取得できたスレッドのみ返す（古いキャッシュを除外）
-    const filtered = cached.filter(t => fetchedIds.has(t.thread_id as string));
+    const filtered = cached;
 
     return NextResponse.json({ threads: filtered });
   } catch (e: unknown) {
