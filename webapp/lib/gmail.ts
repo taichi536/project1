@@ -116,7 +116,7 @@ export async function fetchThreadList(accessToken: string, maxResults = 200): Pr
       const res: any = await gmail.users.threads.list({
         userId: 'me',
         maxResults: 500,
-        q: 'in:inbox -from:me',
+        q: 'in:inbox -from:me category:primary',
       });
       return new Set<string>((res.data.threads ?? []).map((t: { id?: string }) => t.id ?? ''));
     })(),
