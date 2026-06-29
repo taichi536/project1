@@ -117,5 +117,14 @@ function initSchema(db: Database.Database) {
       synced_at TEXT DEFAULT (datetime('now', 'localtime')),
       UNIQUE(thread_id, user_id)
     );
+
+    CREATE TABLE IF NOT EXISTS invitations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      invited_by INTEGER NOT NULL REFERENCES users(id),
+      email TEXT NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      accepted_at TEXT,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    );
   `);
 }

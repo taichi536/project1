@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { RefreshCw, Mail, CheckCircle, Clock, Sparkles, X, Send, ChevronDown, Search, FileText, Trash2, Plus, BellOff, Zap, Folder } from 'lucide-react';
+import { RefreshCw, Mail, CheckCircle, Clock, Sparkles, X, Send, ChevronDown, Search, FileText, Trash2, Plus, BellOff, Zap, Folder, Inbox } from 'lucide-react';
 
 type Thread = {
   id: number;
@@ -78,6 +78,7 @@ export default function InboxPage() {
   const [nextAction, setNextAction] = useState('');
   const [nextActionDue, setNextActionDue] = useState('');
   const [showNextAction, setShowNextAction] = useState(false);
+  const [aiSending, setAiSending] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -114,6 +115,11 @@ export default function InboxPage() {
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [handleKey]);
+
+  useEffect(() => {
+    const count = threads.filter(t => t.needs_reply && !t.is_done).length;
+    document.title = count > 0 ? `(${count}) 受信トレイ - WorkFlow AI` : '受信トレイ - WorkFlow AI';
+  }, [threads]);
 
   const openThread = async (t: Thread) => {
     setSelected(t);
@@ -261,6 +267,30 @@ export default function InboxPage() {
       setSendResult(`エラー: ${data.error}`);
     }
     setSending(false);
+  };
+
+  const sendAiReply = async () => {
+    if (!selected || !aiResult || aiType !== 'reply') return;
+    setAiSending(true);
+    const lastMsg = detail?.messages[detail.messages.length - 1];
+    const to = lastMsg?.from ?? selected.from_email;
+    const subject = detail?.subject ? `Re: ${detail.subject}` : '';
+    const messageId = lastMsg?.id ?? '';
+
+    const res = await fetch(`/api/threads/${selected.thread_id}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, subject, body: aiResult, messageId }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setSendResult('送信しました');
+      setThreads(prev => prev.map(t => t.thread_id === selected.thread_id ? { ...t, needs_reply: 0 } : t));
+      setSelected(prev => prev ? { ...prev, needs_reply: 0 } : prev);
+    } else {
+      setSendResult(`エラー: ${data.error}`);
+    }
+    setAiSending(false);
   };
 
   const filtered = threads.filter(t => {
