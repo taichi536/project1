@@ -1,43 +1,38 @@
 import { NextResponse } from 'next/server';
+import { auth } from '@/lib/auth';
 import { getDb } from '@/lib/db';
 
 export async function GET() {
+  const session = await auth();
+  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
   const db = getDb();
+  const userId = session.user.id;
 
-  const statusCounts = db.prepare(`
-    SELECT status, COUNT(*) as count FROM communications GROUP BY status
-  `).all() as { status: string; count: number }[];
+  const needsReply = (db.prepare(`
+    SELECT COUNT(*) as count FROM thread_cache WHERE user_id = ? AND needs_reply = 1 AND is_done = 0
+  `).get(userId) as { count: number }).count;
 
-  const typeCounts = db.prepare(`
-    SELECT type, COUNT(*) as count FROM communications GROUP BY type
-  `).all() as { type: string; count: number }[];
+  const undone = (db.prepare(`
+    SELECT COUNT(*) as count FROM thread_cache WHERE user_id = ? AND is_done = 0
+  `).get(userId) as { count: number }).count;
 
-  const replyRate = db.prepare(`
-    SELECT
-      COUNT(*) as total,
-      SUM(CASE WHEN replied_at IS NOT NULL THEN 1 ELSE 0 END) as replied
-    FROM communications WHERE direction = 'outbound'
-  `).get() as { total: number; replied: number };
+  const done = (db.prepare(`
+    SELECT COUNT(*) as count FROM thread_cache WHERE user_id = ? AND is_done = 1
+  `).get(userId) as { count: number }).count;
 
-  const overdueCount = db.prepare(`
-    SELECT COUNT(*) as count FROM communications
-    WHERE status IN ('pending', 'in_progress')
-    AND sent_at < datetime('now', '-3 days', 'localtime')
-    AND direction = 'outbound'
-  `).get() as { count: number };
+  const total = (db.prepare(`
+    SELECT COUNT(*) as count FROM thread_cache WHERE user_id = ?
+  `).get(userId) as { count: number }).count;
 
+  // 最近のスレッド（未対応のもの、最新5件）
   const recent = db.prepare(`
-    SELECT c.*, co.name as contact_name, co.company
-    FROM communications c
-    LEFT JOIN contacts co ON c.contact_id = co.id
-    ORDER BY c.created_at DESC LIMIT 5
-  `).all();
+    SELECT tc.*, u.name as assignee_name
+    FROM thread_cache tc
+    LEFT JOIN users u ON u.id = tc.assigned_to
+    WHERE tc.user_id = ? AND tc.is_done = 0
+    ORDER BY tc.last_message_at DESC LIMIT 8
+  `).all(userId);
 
-  return NextResponse.json({
-    statusCounts,
-    typeCounts,
-    replyRate,
-    overdueCount: overdueCount.count,
-    recent,
-  });
+  return NextResponse.json({ needsReply, undone, done, total, recent });
 }

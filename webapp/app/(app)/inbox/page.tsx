@@ -31,6 +31,18 @@ type ThreadDetail = {
   messages: Message[];
 };
 
+function formatDate(dateStr: string): string {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr.slice(0, 10);
+  const now = new Date();
+  const diff = now.getTime() - d.getTime();
+  const days = Math.floor(diff / 86400000);
+  if (days === 0) return d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+  if (days < 7) return `${days}日前`;
+  return d.toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' });
+}
+
 export default function InboxPage() {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [loading, setLoading] = useState(false);
@@ -221,7 +233,10 @@ export default function InboxPage() {
                     <div className="text-xs text-indigo-500 mt-0.5">@{t.assignee_name}</div>
                   )}
                 </div>
-                <div className="text-xs text-gray-400 shrink-0">{t.message_count}件</div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <div className="text-xs text-gray-400">{formatDate(t.last_message_at)}</div>
+                  <div className="text-xs text-gray-400">{t.message_count}件</div>
+                </div>
               </div>
             </div>
           ))}

@@ -17,8 +17,10 @@ export async function GET() {
 
     for (const t of threads) {
       const lastFrom = t.lastFrom ?? '';
-      const lastFromEmail = lastFrom.match(/<(.+?)>/)?.[1] ?? lastFrom;
-      const needsReply = lastFromEmail && !lastFromEmail.toLowerCase().includes(myEmail.toLowerCase()) ? 1 : 0;
+      const lastFromEmail = (lastFrom.match(/<(.+?)>/)?.[1] ?? lastFrom).trim().toLowerCase();
+      const myEmailLower = myEmail.trim().toLowerCase();
+      // 自分のメール or myEmailが未設定 → 返信不要
+      const needsReply = (myEmailLower && lastFromEmail && lastFromEmail !== myEmailLower) ? 1 : 0;
 
       // is_done と assigned_to は上書きしない（ユーザーが手動で変更した値を保持）
       db.prepare(`
