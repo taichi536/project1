@@ -8,7 +8,7 @@ export default auth((req) => {
   const { pathname } = req.nextUrl;
 
   // 認証不要ページ
-  if (pathname.startsWith('/api/auth') || pathname === '/landing') {
+  if (pathname.startsWith('/api/auth') || pathname === '/landing' || pathname === '/api/register') {
     return;
   }
 
