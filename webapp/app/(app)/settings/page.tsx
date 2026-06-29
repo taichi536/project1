@@ -1,6 +1,14 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Copy, Check } from 'lucide-react';
+
+type Invitation = {
+  id: number;
+  email: string;
+  token: string;
+  accepted_at: string | null;
+  created_at: string;
+};
 
 type RoutingRule = {
   id: number;
@@ -40,11 +48,47 @@ export default function SettingsPage() {
   const [tplError, setTplError] = useState('');
   const [tplLoading, setTplLoading] = useState(false);
 
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteError, setInviteError] = useState('');
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [lastInviteUrl, setLastInviteUrl] = useState('');
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
     fetch('/api/routing-rules').then(r => r.json()).then(d => { if (d.rules) setRules(d.rules); });
     fetch('/api/users').then(r => r.json()).then(d => { if (d.users) setUsers(d.users); });
     fetch('/api/templates').then(r => r.json()).then(d => { if (d.templates) setTemplates(d.templates); });
+    fetch('/api/invitations').then(r => r.json()).then(d => { if (d.invitations) setInvitations(d.invitations); });
   }, []);
+
+  async function sendInvite(e: React.FormEvent) {
+    e.preventDefault();
+    setInviteError('');
+    if (!inviteEmail.trim()) { setInviteError('メールアドレスを入力してください'); return; }
+    setInviteLoading(true);
+    const res = await fetch('/api/invitations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: inviteEmail }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setInviteError(data.error || 'エラーが発生しました');
+    } else {
+      setLastInviteUrl(data.inviteUrl);
+      setInviteEmail('');
+      const updated = await fetch('/api/invitations').then(r => r.json());
+      if (updated.invitations) setInvitations(updated.invitations);
+    }
+    setInviteLoading(false);
+  }
+
+  function copyInviteUrl() {
+    navigator.clipboard.writeText(lastInviteUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   async function addRule(e: React.FormEvent) {
     e.preventDefault();
@@ -106,6 +150,64 @@ export default function SettingsPage() {
   return (
     <div className="max-w-3xl mx-auto py-8 px-4 space-y-10">
       <h2 className="text-2xl font-bold text-gray-900">設定</h2>
+
+      {/* チームメンバー招待 */}
+      <section>
+        <h3 className="text-lg font-semibold text-gray-800 mb-4">チームメンバー招待</h3>
+
+        <div className="bg-white border border-gray-200 rounded-xl p-6 mb-4">
+          <form onSubmit={sendInvite} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">招待するメールアドレス</label>
+              <input
+                type="email"
+                value={inviteEmail}
+                onChange={e => setInviteEmail(e.target.value)}
+                placeholder="teammate@example.com"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              />
+            </div>
+            {inviteError && <p className="text-red-500 text-xs">{inviteError}</p>}
+            <button
+              type="submit"
+              disabled={inviteLoading}
+              className="bg-indigo-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+            >
+              {inviteLoading ? '送信中...' : '招待を送る'}
+            </button>
+          </form>
+
+          {lastInviteUrl && (
+            <div className="mt-4 p-3 bg-indigo-50 rounded-lg flex items-center gap-2">
+              <p className="text-xs text-indigo-700 flex-1 break-all">{lastInviteUrl}</p>
+              <button
+                onClick={copyInviteUrl}
+                className="text-indigo-600 hover:text-indigo-800 shrink-0"
+                title="コピー"
+              >
+                {copied ? <Check size={15} /> : <Copy size={15} />}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {invitations.length === 0 ? (
+          <p className="text-sm text-gray-400 px-1">招待がまだありません</p>
+        ) : (
+          <div className="space-y-2">
+            {invitations.map(inv => (
+              <div key={inv.id} className="bg-white border border-gray-200 rounded-xl px-4 py-3 flex items-center justify-between gap-4">
+                <span className="text-sm text-gray-700">{inv.email}</span>
+                {inv.accepted_at ? (
+                  <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded">承認済み</span>
+                ) : (
+                  <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">未承認</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* 自動振り分けルール */}
       <section>
