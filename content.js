@@ -1558,9 +1558,11 @@ async function triggerAutoAdd() {
   if (nextPage && _isAutoRunMode) {
     _autoRunPageCount++;
     if (_autoRunPageCount >= _autoRunMaxPages) {
-      showAutoStatus(`🌙 自動実行完了 ✅${addedCount}人追加 (${_autoRunMaxPages}ページ)`, 5000);
+      showAutoStatus(`🌙 自動実行: ${_autoRunMaxPages}ページ完了 ✅${addedCount}人追加`, 3000);
       await saveAutoAddProgress({ running: false });
-      chrome.runtime.sendMessage({ type: 'autoRunComplete' }).catch(() => {});
+      if (_isAutoRunMode !== 'list-inner') {
+        chrome.runtime.sendMessage({ type: 'autoRunComplete' }).catch(() => {});
+      }
       _isAutoRunMode = false;
       return;
     }
@@ -1620,12 +1622,81 @@ async function triggerAutoAdd() {
     // タイムアウト：URL変化もDOM変化もなし
     console.warn('[Snow-we] 次ページ遷移タイムアウト（URL・DOM変化なし）');
     await saveAutoAddProgress({ running: false });
-    if (_isAutoRunMode) { chrome.runtime.sendMessage({ type: 'autoRunComplete' }).catch(() => {}); _isAutoRunMode = false; }
+    if (_isAutoRunMode && _isAutoRunMode !== 'list-inner') { chrome.runtime.sendMessage({ type: 'autoRunComplete' }).catch(() => {}); }
+    _isAutoRunMode = false;
   } else {
     showAutoStatus(`🤖 完了！ ✅${addedCount}人を検討リストに追加 (全${totalProcessed}人中)`, 8000);
     await saveAutoAddProgress({ running: false });
-    if (_isAutoRunMode) { chrome.runtime.sendMessage({ type: 'autoRunComplete' }).catch(() => {}); _isAutoRunMode = false; }
+    if (_isAutoRunMode && _isAutoRunMode !== 'list-inner') { chrome.runtime.sendMessage({ type: 'autoRunComplete' }).catch(() => {}); }
+    _isAutoRunMode = false;
   }
+}
+
+// ── 検索条件リストページの自動実行（doda-X等） ──────────────────────
+// 「表示」ボタンを順番にクリックして各条件の候補者を処理する
+async function autoRunListPage(request) {
+  const maxPages = request.maxPages || 2;
+  const urlIndex = request.urlIndex || 0;
+  const totalUrls = request.totalUrls || 1;
+
+  const findShowButtons = () => Array.from(document.querySelectorAll('button, a'))
+    .filter(el => el.textContent.trim() === '表示');
+
+  // ボタンが表示されるまで待つ
+  let buttons = [];
+  for (let w = 0; w < 20; w++) {
+    await sleep(500);
+    buttons = findShowButtons();
+    if (buttons.length > 0) break;
+  }
+  if (buttons.length === 0) {
+    console.warn('[Snow-we] リスト自動実行: 表示ボタンが見つかりません');
+    _isAutoRunMode = false;
+    chrome.runtime.sendMessage({ type: 'autoRunComplete' }).catch(() => {});
+    return;
+  }
+
+  const total = buttons.length;
+  console.log(`[Snow-we] リスト自動実行: ${total}件の検索条件を処理`);
+
+  for (let i = 0; i < total; i++) {
+    const currentButtons = findShowButtons();
+    if (i >= currentButtons.length) break;
+
+    showAutoStatus(`🌙 自動実行 (${urlIndex+1}/${totalUrls}): 条件${i+1}/${total} 処理中...`);
+    currentButtons[i].click();
+
+    // 候補者カードが出るまで待つ
+    let found = false;
+    for (let w = 0; w < 20; w++) {
+      await sleep(500);
+      if (extractAllCandidateCards().length > 0) { found = true; break; }
+    }
+
+    if (found) {
+      _batchApiKey = null; _batchCriteria = null; _batchIsRunning = false; _batchScoutHistory = null;
+      _isAutoRunMode = 'list-inner';
+      _autoRunPageCount = 0;
+      _autoRunMaxPages = maxPages;
+      await triggerAutoAdd();
+      _isAutoRunMode = false;
+    } else {
+      console.warn(`[Snow-we] 条件${i+1}: 候補者なし、スキップ`);
+    }
+
+    // リストに戻る
+    history.back();
+    await sleep(2000);
+    for (let w = 0; w < 10; w++) {
+      await sleep(500);
+      if (findShowButtons().length > 0) break;
+    }
+    await sleep(500);
+  }
+
+  showAutoStatus(`🌙 自動実行完了: ${total}条件処理済み (${urlIndex+1}/${totalUrls})`, 6000);
+  _isAutoRunMode = false;
+  chrome.runtime.sendMessage({ type: 'autoRunComplete' }).catch(() => {});
 }
 
 // RDSのプロフィール/レジュメタブに切り替える
@@ -4089,7 +4160,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     _autoRunMaxPages = request.maxPages || 2;
     console.log(`[Snow-we] 夜間自動実行開始 (最大${_autoRunMaxPages}ページ, ${request.urlIndex + 1}/${request.totalUrls})`);
     showAutoStatus(`🌙 自動実行中... (${request.urlIndex + 1}/${request.totalUrls}件目)`);
-    triggerAutoAdd().catch(e => console.error('[Snow-we] 自動実行エラー:', e?.message));
+    // doda-X 検索条件リストページは専用処理
+    if (location.href.includes('search_list')) {
+      autoRunListPage(request).catch(e => console.error('[Snow-we] リスト自動実行エラー:', e?.message));
+    } else {
+      triggerAutoAdd().catch(e => console.error('[Snow-we] 自動実行エラー:', e?.message));
+    }
     sendResponse({ ok: true });
     return true;
   }
