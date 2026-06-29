@@ -48,7 +48,8 @@ function decodeBody(part: { mimeType?: string; body?: { data?: string }; parts?:
   return '';
 }
 
-export async function fetchThreads(accessToken: string, maxResults = 20): Promise<GmailThread[]> {
+// 一覧取得：metadataのみ（高速）
+export async function fetchThreadList(accessToken: string, maxResults = 50): Promise<GmailThread[]> {
   const gmail = getGmailClient(accessToken);
 
   const listRes = await gmail.users.threads.list({
@@ -59,40 +60,84 @@ export async function fetchThreads(accessToken: string, maxResults = 20): Promis
 
   const threads = listRes.data.threads ?? [];
 
-  const results: GmailThread[] = [];
-  for (const t of threads) {
-    if (!t.id) continue;
-    try {
-      const detail = await gmail.users.threads.get({ userId: 'me', id: t.id, format: 'full' });
-      const msgs = detail.data.messages ?? [];
-      if (msgs.length === 0) continue;
+  // metadata形式で並列取得（本文なし）
+  const results = await Promise.all(
+    threads.filter(t => t.id).map(async t => {
+      try {
+        const detail = await gmail.users.threads.get({
+          userId: 'me',
+          id: t.id!,
+          format: 'metadata',
+          metadataHeaders: ['From', 'To', 'Subject', 'Date'],
+        });
+        const msgs = detail.data.messages ?? [];
+        if (msgs.length === 0) return null;
 
-      const messages: GmailMessage[] = msgs.map(m => {
-        const headers = m.payload?.headers ?? [];
+        const firstHeaders = msgs[0].payload?.headers ?? [];
+        const lastHeaders = msgs[msgs.length - 1].payload?.headers ?? [];
+
         return {
-          id: m.id ?? '',
-          from: getHeader(headers, 'From'),
-          to: getHeader(headers, 'To'),
-          subject: getHeader(headers, 'Subject'),
-          date: getHeader(headers, 'Date'),
-          body: m.payload ? decodeBody(m.payload as Parameters<typeof decodeBody>[0]) : '',
+          threadId: t.id!,
+          subject: getHeader(firstHeaders, 'Subject') || '(件名なし)',
+          from: getHeader(firstHeaders, 'From'),
+          snippet: detail.data.snippet ?? '',
+          date: getHeader(lastHeaders, 'Date'),
+          messageCount: msgs.length,
+          lastFrom: getHeader(lastHeaders, 'From'),
+          messages: [],
         };
-      });
+      } catch {
+        return null;
+      }
+    })
+  );
 
-      const first = messages[0];
-      const last = messages[messages.length - 1];
-      results.push({
-        threadId: t.id,
-        subject: first.subject || '(件名なし)',
-        from: first.from,
-        snippet: detail.data.snippet ?? '',
-        date: last.date,
-        messageCount: msgs.length,
-        messages,
-      });
-    } catch {
-      // スキップ
-    }
+  return results.filter(Boolean) as GmailThread[];
+}
+
+// 1スレッドの本文取得（クリック時）
+export async function fetchThreadDetail(accessToken: string, threadId: string): Promise<GmailThread | null> {
+  const gmail = getGmailClient(accessToken);
+
+  try {
+    const detail = await gmail.users.threads.get({
+      userId: 'me',
+      id: threadId,
+      format: 'full',
+    });
+
+    const msgs = detail.data.messages ?? [];
+    if (msgs.length === 0) return null;
+
+    const messages: GmailMessage[] = msgs.map(m => {
+      const headers = m.payload?.headers ?? [];
+      return {
+        id: m.id ?? '',
+        from: getHeader(headers, 'From'),
+        to: getHeader(headers, 'To'),
+        subject: getHeader(headers, 'Subject'),
+        date: getHeader(headers, 'Date'),
+        body: m.payload ? decodeBody(m.payload as Parameters<typeof decodeBody>[0]) : '',
+      };
+    });
+
+    const first = messages[0];
+    const last = messages[messages.length - 1];
+    return {
+      threadId,
+      subject: first.subject || '(件名なし)',
+      from: first.from,
+      snippet: detail.data.snippet ?? '',
+      date: last.date,
+      messageCount: msgs.length,
+      messages,
+    };
+  } catch {
+    return null;
   }
-  return results;
+}
+
+// 後方互換（既存コードが使っている場合）
+export async function fetchThreads(accessToken: string, maxResults = 20): Promise<GmailThread[]> {
+  return fetchThreadList(accessToken, maxResults);
 }

@@ -1,30 +1,27 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import { fetchThreads } from '@/lib/gmail';
+import { fetchThreadList } from '@/lib/gmail';
 import { getDb } from '@/lib/db';
 
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   if (!session.accessToken) {
-    return NextResponse.json({ error: 'Gmail未連携', needsAuth: true }, { status: 403 });
+    return NextResponse.json({ error: 'GmailはGoogleアカウントでログインすると使えます。', needsAuth: true }, { status: 403 });
   }
 
   try {
-    const threads = await fetchThreads(session.accessToken, 50);
+    const threads = await fetchThreadList(session.accessToken, 50);
     const db = getDb();
+    const myEmail = session.user.email ?? '';
 
-    // キャッシュに保存 & needs_reply を判定
     for (const t of threads) {
-      const lastMsg = t.messages[t.messages.length - 1];
-      const myEmail = session.user.email ?? '';
-      const lastFrom = lastMsg?.from ?? '';
-      // 最後のメールが相手から来ている = 返信が必要
-      const needsReply = !lastFrom.includes(myEmail) ? 1 : 0;
+      const lastFrom = (t as unknown as { lastFrom?: string }).lastFrom ?? '';
+      const needsReply = lastFrom && !lastFrom.includes(myEmail) ? 1 : 0;
 
       db.prepare(`
-        INSERT INTO thread_cache (user_id, thread_id, subject, snippet, from_email, to_email, last_message_at, message_count, needs_reply, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'))
+        INSERT INTO thread_cache (user_id, thread_id, subject, snippet, from_email, last_message_at, message_count, needs_reply, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'))
         ON CONFLICT(thread_id, user_id) DO UPDATE SET
           subject = excluded.subject,
           snippet = excluded.snippet,
@@ -35,12 +32,10 @@ export async function GET() {
           synced_at = excluded.synced_at
       `).run(
         session.user.id, t.threadId, t.subject, t.snippet,
-        t.from, t.messages[0]?.to ?? '',
-        t.date, t.messageCount, needsReply
+        t.from, t.date, t.messageCount, needsReply
       );
     }
 
-    // DB からキャッシュ済みのメタ情報（deal, assigned_to, is_done）も合わせて返す
     const cached = db.prepare(`
       SELECT tc.*, d.name as deal_name, u.name as assignee_name
       FROM thread_cache tc

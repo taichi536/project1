@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import { fetchThreads } from '@/lib/gmail';
+import { fetchThreadDetail } from '@/lib/gmail';
 import { getDb } from '@/lib/db';
 import Anthropic from '@anthropic-ai/sdk';
 
 const client = new Anthropic();
 
+// スレッド本文取得
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ threadId: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -13,27 +14,22 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ thr
 
   const { threadId } = await params;
 
-  try {
-    const threads = await fetchThreads(session.accessToken, 50);
-    const thread = threads.find(t => t.threadId === threadId);
-    if (!thread) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  const thread = await fetchThreadDetail(session.accessToken, threadId);
+  if (!thread) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-    const db = getDb();
-    const meta = db.prepare(`
-      SELECT tc.*, d.name as deal_name, u.name as assignee_name
-      FROM thread_cache tc
-      LEFT JOIN deals d ON d.id = tc.deal_id
-      LEFT JOIN users u ON u.id = tc.assigned_to
-      WHERE tc.thread_id = ? AND tc.user_id = ?
-    `).get(threadId, session.user.id) as Record<string, unknown> | undefined;
+  const db = getDb();
+  const meta = db.prepare(`
+    SELECT tc.*, d.name as deal_name, u.name as assignee_name
+    FROM thread_cache tc
+    LEFT JOIN deals d ON d.id = tc.deal_id
+    LEFT JOIN users u ON u.id = tc.assigned_to
+    WHERE tc.thread_id = ? AND tc.user_id = ?
+  `).get(threadId, session.user.id);
 
-    return NextResponse.json({ thread, meta });
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : 'unknown';
-    return NextResponse.json({ error: msg }, { status: 500 });
-  }
+  return NextResponse.json({ thread, meta });
 }
 
+// 対応済み・担当者などの更新
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ threadId: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -57,6 +53,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ th
   return NextResponse.json({ success: true });
 }
 
+// AI分析（状況サマリー・返信文・タスク抽出）
 export async function POST(req: NextRequest, { params }: { params: Promise<{ threadId: string }> }) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -65,8 +62,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ thr
   const { threadId } = await params;
   const { type } = await req.json();
 
-  const threads = await fetchThreads(session.accessToken, 50);
-  const thread = threads.find(t => t.threadId === threadId);
+  const thread = await fetchThreadDetail(session.accessToken, threadId);
   if (!thread) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const emailText = thread.messages.map(m =>
