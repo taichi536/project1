@@ -1,15 +1,15 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, MessageSquare, CheckSquare, BarChart2, Sparkles, Upload, LogOut, Bell } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, CheckSquare, BarChart2, Sparkles, Upload, LogOut, Bell, Folder } from 'lucide-react';
 import { signOut, useSession } from 'next-auth/react';
 
 const nav = [
   { href: '/', label: 'ダッシュボード', icon: LayoutDashboard },
-  { href: '/communications', label: 'コミュニケーション', icon: MessageSquare },
+  { href: '/projects', label: '案件管理', icon: Folder },
   { href: '/tasks', label: 'タスク管理', icon: CheckSquare },
-  { href: '/analytics', label: '分析', icon: BarChart2 },
   { href: '/generate', label: 'AI文面生成', icon: Sparkles },
+  { href: '/analytics', label: '分析', icon: BarChart2 },
   { href: '/import', label: 'データ取込', icon: Upload },
 ];
 

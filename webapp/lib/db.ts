@@ -16,6 +16,39 @@ export function getDb(): Database.Database {
 
 function initSchema(db: Database.Database) {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      status TEXT DEFAULT 'active' CHECK(status IN ('active', 'closed')),
+      created_at TEXT DEFAULT (datetime('now', 'localtime'))
+    );
+
+    CREATE TABLE IF NOT EXISTS gmail_threads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL,
+      thread_id TEXT NOT NULL,
+      subject TEXT,
+      snippet TEXT,
+      from_email TEXT,
+      last_message_at TEXT,
+      message_count INTEGER DEFAULT 1,
+      has_unread INTEGER DEFAULT 0,
+      synced_at TEXT DEFAULT (datetime('now', 'localtime')),
+      UNIQUE(thread_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS user_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER UNIQUE NOT NULL,
+      google_access_token TEXT,
+      google_refresh_token TEXT,
+      google_token_expiry TEXT,
+      updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+    );
+
     CREATE TABLE IF NOT EXISTS contacts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
