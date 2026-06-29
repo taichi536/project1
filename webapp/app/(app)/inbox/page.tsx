@@ -345,7 +345,14 @@ export default function InboxPage() {
           {loading && threads.length === 0 && (
             <div className="text-center py-16 text-gray-400 text-sm">読み込み中...</div>
           )}
-          {!loading && filtered.length === 0 && (
+          {!loading && filtered.length === 0 && threads.length === 0 && (
+            <div className="text-center py-16 text-gray-400">
+              <Inbox size={36} className="mx-auto mb-3 text-gray-300" />
+              <p className="text-sm font-medium text-gray-500">受信トレイは空です</p>
+              <p className="text-xs mt-1">Gmailと同期済みです</p>
+            </div>
+          )}
+          {!loading && filtered.length === 0 && threads.length > 0 && (
             <div className="text-center py-16 text-gray-400 text-sm">メールがありません</div>
           )}
           {filtered.map(t => (
@@ -362,7 +369,7 @@ export default function InboxPage() {
                       {t.from_email?.replace(/<.*>/, '').trim() || t.from_email}
                     </span>
                   </div>
-                  <div className={`text-sm truncate ${t.needs_reply && !t.is_done ? 'text-gray-800' : 'text-gray-500'}`}>{t.subject}</div>
+                  <div className={`text-sm truncate ${t.needs_reply && !t.is_done ? 'font-semibold text-gray-800' : 'text-gray-500'}`}>{t.subject}</div>
                   <div className="text-xs text-gray-400 truncate mt-0.5">{t.snippet}</div>
                   <div className="flex items-center gap-2 mt-0.5">
                     {t.deal_name && (
@@ -502,6 +509,28 @@ export default function InboxPage() {
                 <div className="mt-3 p-3 bg-indigo-50 rounded-lg border border-indigo-100">
                   <div className="text-xs font-medium text-indigo-600 mb-1">
                     {aiType === 'summary' ? '状況サマリー' : 'タスク'}
+                  </div>
+                  <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{aiResult}</div>
+                </div>
+              )}
+              {aiResult && aiType === 'reply' && (
+                <div className="mt-3 p-3 bg-indigo-50 rounded-lg border border-indigo-100">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-xs font-medium text-indigo-600">AI返信案</div>
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => { navigator.clipboard.writeText(aiResult); }}
+                        className="flex items-center gap-1 px-2 py-1 text-xs border border-indigo-200 text-indigo-600 rounded hover:bg-indigo-100">
+                        コピー
+                      </button>
+                      <button
+                        onClick={sendAiReply}
+                        disabled={aiSending}
+                        className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
+                        <Send size={11} />
+                        {aiSending ? '送信中...' : '送信'}
+                      </button>
+                    </div>
                   </div>
                   <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{aiResult}</div>
                 </div>
