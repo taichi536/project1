@@ -17,7 +17,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     SELECT * FROM gmail_threads WHERE project_id = ? ORDER BY last_message_at DESC
   `).all(id);
 
-  return NextResponse.json({ project, threads });
+  // Fetch thread_cache threads linked via deals (deal_id = project id by convention)
+  const dealThreads = db.prepare(`
+    SELECT tc.id, tc.thread_id, tc.subject, tc.from_email, tc.last_message_at,
+           tc.needs_reply, tc.next_action, tc.next_action_due, tc.message_count, tc.snippet,
+           tc.is_done, tc.deal_id,
+           d.name as deal_name
+    FROM thread_cache tc
+    LEFT JOIN deals d ON d.id = tc.deal_id
+    WHERE tc.deal_id = ?
+    ORDER BY tc.last_message_at DESC
+  `).all(id);
+
+  return NextResponse.json({ project, threads, dealThreads });
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

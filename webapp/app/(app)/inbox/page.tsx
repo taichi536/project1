@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { RefreshCw, Mail, CheckCircle, Clock, Sparkles, X, Send, ChevronDown, Search, FileText, Trash2, Plus, BellOff, Zap } from 'lucide-react';
+import { RefreshCw, Mail, CheckCircle, Clock, Sparkles, X, Send, ChevronDown, Search, FileText, Trash2, Plus, BellOff, Zap, Folder } from 'lucide-react';
 
 type Thread = {
   id: number;
@@ -13,6 +13,7 @@ type Thread = {
   needs_reply: number;
   is_done: number;
   deal_name: string | null;
+  deal_id: number | null;
   assignee_name: string | null;
   next_action: string | null;
   next_action_due: string | null;
@@ -32,6 +33,11 @@ type ThreadDetail = {
   threadId: string;
   subject: string;
   messages: Message[];
+};
+
+type Deal = {
+  id: number;
+  name: string;
 };
 
 function formatDate(dateStr: string): string {
@@ -63,6 +69,7 @@ export default function InboxPage() {
   const [sendResult, setSendResult] = useState('');
   const [search, setSearch] = useState('');
   const [users, setUsers] = useState<{ id: number; name: string; email: string }[]>([]);
+  const [deals, setDeals] = useState<Deal[]>([]);
   const [templates, setTemplates] = useState<{ id: number; title: string; body: string }[]>([]);
   const [showTemplates, setShowTemplates] = useState(false);
   const [showNewTemplate, setShowNewTemplate] = useState(false);
@@ -90,6 +97,7 @@ export default function InboxPage() {
   useEffect(() => {
     load();
     fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users ?? []));
+    fetch('/api/projects').then(r => r.json()).then(d => setDeals(Array.isArray(d) ? d : []));
     loadTemplates();
   }, []);
 
@@ -176,7 +184,6 @@ export default function InboxPage() {
   };
 
   const insertTemplate = (body: string) => {
-    // テンプレート変数を置換: {{名前}}, {{会社名}}, {{件名}}
     const senderName = selected?.from_email?.replace(/<.*>/, '').trim() ?? '';
     const companyDomain = selected?.from_email?.match(/@([^>]+)/)?.[1]?.split('.')[0] ?? '';
     const replaced = body
@@ -199,6 +206,17 @@ export default function InboxPage() {
     if (selected?.thread_id === threadId) setSelected(prev => prev ? { ...prev, assignee_name: assigneeName } : prev);
   };
 
+  const linkDeal = async (threadId: string, dealId: number | null) => {
+    await fetch(`/api/threads/${threadId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deal_id: dealId }),
+    });
+    const dealName = deals.find(d => d.id === dealId)?.name ?? null;
+    setThreads(prev => prev.map(t => t.thread_id === threadId ? { ...t, deal_id: dealId, deal_name: dealName } : t));
+    if (selected?.thread_id === threadId) setSelected(prev => prev ? { ...prev, deal_id: dealId, deal_name: dealName } : prev);
+  };
+
   const getAI = async (type: string) => {
     if (!selected) return;
     setAiType(type);
@@ -213,7 +231,6 @@ export default function InboxPage() {
     const result = data.result ?? data.error;
     setAiResult(result);
     setAiLoading(false);
-    // 返信文の場合は自動でコンポーザーに入れる
     if (type === 'reply') {
       setReplyBody(result);
       setShowReply(true);
@@ -318,6 +335,11 @@ export default function InboxPage() {
                   <div className={`text-sm truncate ${t.needs_reply && !t.is_done ? 'text-gray-800' : 'text-gray-500'}`}>{t.subject}</div>
                   <div className="text-xs text-gray-400 truncate mt-0.5">{t.snippet}</div>
                   <div className="flex items-center gap-2 mt-0.5">
+                    {t.deal_name && (
+                      <span className="flex items-center gap-1 text-xs text-indigo-500">
+                        <Folder size={10} />{t.deal_name}
+                      </span>
+                    )}
                     {t.assignee_name && <span className="text-xs text-indigo-500">@{t.assignee_name}</span>}
                     {t.next_action && (
                       <span className="text-xs text-orange-500 flex items-center gap-0.5">
@@ -355,6 +377,14 @@ export default function InboxPage() {
                   <p className="text-sm text-gray-400 mt-0.5">{selected.from_email}</p>
                 </div>
                 <div className="flex items-center gap-2 ml-4 shrink-0">
+                  {/* 案件に紐付ける */}
+                  <select
+                    value={selected.deal_id ?? ''}
+                    onChange={e => linkDeal(selected.thread_id, e.target.value ? Number(e.target.value) : null)}
+                    className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-300 max-w-[140px]">
+                    <option value="">案件に紐付ける</option>
+                    {deals.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
                   <select
                     value={users.find(u => u.name === selected.assignee_name)?.id ?? ''}
                     onChange={e => assignTo(selected.thread_id, e.target.value ? Number(e.target.value) : null)}
@@ -374,6 +404,15 @@ export default function InboxPage() {
                   </button>
                 </div>
               </div>
+
+              {/* 案件表示 */}
+              {selected.deal_name && (
+                <div className="mt-2">
+                  <span className="flex items-center gap-1 text-xs text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full w-fit">
+                    <Folder size={10} />{selected.deal_name}
+                  </span>
+                </div>
+              )}
 
               {/* 次のアクション */}
               <div className="flex items-center gap-2 mt-3">

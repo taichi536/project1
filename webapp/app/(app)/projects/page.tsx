@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Plus, Folder, Mail, ChevronRight } from 'lucide-react';
+import { Plus, Folder, Mail, ChevronRight, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 
 type Project = {
@@ -10,6 +10,8 @@ type Project = {
   status: string;
   thread_count: number;
   unread_count: number;
+  deal_thread_count: number;
+  deal_needs_reply: number;
   created_at: string;
 };
 
@@ -82,30 +84,41 @@ export default function ProjectsPage() {
         </div>
       ) : (
         <div className="grid gap-3">
-          {projects.map(p => (
-            <Link key={p.id} href={`/projects/${p.id}`}
-              className="bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-300 hover:shadow-sm transition-all flex items-center justify-between group">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center">
-                  <Folder size={20} className="text-indigo-500" />
+          {projects.map(p => {
+            const totalThreads = (p.thread_count ?? 0) + (p.deal_thread_count ?? 0);
+            const hasNeedsReply = (p.deal_needs_reply ?? 0) > 0;
+            return (
+              <Link key={p.id} href={`/projects/${p.id}`}
+                className="bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-300 hover:shadow-sm transition-all flex items-center justify-between group">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center">
+                    <Folder size={20} className="text-indigo-500" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-gray-900">{p.name}</span>
+                      {hasNeedsReply && (
+                        <span className="flex items-center gap-1 bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded-full font-medium">
+                          <AlertCircle size={10} />要返信
+                        </span>
+                      )}
+                    </div>
+                    {p.description && <div className="text-sm text-gray-400 mt-0.5">{p.description}</div>}
+                  </div>
                 </div>
-                <div>
-                  <div className="font-semibold text-gray-900">{p.name}</div>
-                  {p.description && <div className="text-sm text-gray-400 mt-0.5">{p.description}</div>}
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-1.5 text-sm text-gray-400">
+                    <Mail size={14} />
+                    <span>{totalThreads} スレッド</span>
+                    {(p.unread_count ?? 0) > 0 && (
+                      <span className="bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 ml-1">{p.unread_count}</span>
+                    )}
+                  </div>
+                  <ChevronRight size={16} className="text-gray-300 group-hover:text-indigo-400 transition-colors" />
                 </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-1.5 text-sm text-gray-400">
-                  <Mail size={14} />
-                  <span>{p.thread_count ?? 0} スレッド</span>
-                  {(p.unread_count ?? 0) > 0 && (
-                    <span className="bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 ml-1">{p.unread_count}</span>
-                  )}
-                </div>
-                <ChevronRight size={16} className="text-gray-300 group-hover:text-indigo-400 transition-colors" />
-              </div>
-            </Link>
-          ))}
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>

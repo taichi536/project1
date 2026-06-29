@@ -9,10 +9,13 @@ export async function GET() {
   const db = getDb();
   const projects = db.prepare(`
     SELECT p.*,
-      COUNT(gt.id) as thread_count,
-      SUM(gt.has_unread) as unread_count
+      COUNT(DISTINCT gt.id) as thread_count,
+      SUM(gt.has_unread) as unread_count,
+      COUNT(DISTINCT tc.id) as deal_thread_count,
+      SUM(CASE WHEN tc.needs_reply = 1 AND tc.is_done = 0 THEN 1 ELSE 0 END) as deal_needs_reply
     FROM projects p
     LEFT JOIN gmail_threads gt ON gt.project_id = p.id
+    LEFT JOIN thread_cache tc ON tc.deal_id = p.id
     WHERE p.user_id = ?
     GROUP BY p.id
     ORDER BY p.created_at DESC
