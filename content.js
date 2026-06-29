@@ -29,6 +29,11 @@ let _batchCriteria = null;
 let _batchIsRunning = false; // chrome.storage失敗時もisFreshStartを誤判定しないためのフラグ
 let _batchScoutHistory = null; // スカウト履歴キャッシュ（CDKスクロールごとの再取得を防ぐ）
 
+// 夜間自動実行モード
+let _isAutoRunMode = false;
+let _autoRunPageCount = 0;
+let _autoRunMaxPages = 2;
+
 
 // -------------------------------------------------------
 // プラットフォーム判定
@@ -1548,12 +1553,28 @@ async function triggerAutoAdd() {
 
   // 次のページがあれば自動で移動して処理を続ける
   const nextPage = findNextPageButton();
+
+  // 夜間自動実行: ページ数上限チェック
+  if (nextPage && _isAutoRunMode) {
+    _autoRunPageCount++;
+    if (_autoRunPageCount >= _autoRunMaxPages) {
+      showAutoStatus(`🌙 自動実行完了 ✅${addedCount}人追加 (${_autoRunMaxPages}ページ)`, 5000);
+      await saveAutoAddProgress({ running: false });
+      chrome.runtime.sendMessage({ type: 'autoRunComplete' }).catch(() => {});
+      _isAutoRunMode = false;
+      return;
+    }
+  }
+
   if (nextPage) {
     showAutoStatus(`🤖 次ページへ移動中... (累計✅${addedCount}人追加)`);
     // running:true で保存 → 次ページのロード時に isFreshStart=false になる
     await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now() });
     try {
-      sessionStorage.setItem('snowWeAutoAdd', JSON.stringify({ resume: true, added: addedCount, processed: totalProcessed }));
+      sessionStorage.setItem('snowWeAutoAdd', JSON.stringify({
+        resume: true, added: addedCount, processed: totalProcessed,
+        autoRun: _isAutoRunMode ? { maxPages: _autoRunMaxPages, pageCount: _autoRunPageCount } : null,
+      }));
     } catch (_) {}
 
     await sleep(300);
@@ -1599,9 +1620,11 @@ async function triggerAutoAdd() {
     // タイムアウト：URL変化もDOM変化もなし
     console.warn('[Snow-we] 次ページ遷移タイムアウト（URL・DOM変化なし）');
     await saveAutoAddProgress({ running: false });
+    if (_isAutoRunMode) { chrome.runtime.sendMessage({ type: 'autoRunComplete' }).catch(() => {}); _isAutoRunMode = false; }
   } else {
     showAutoStatus(`🤖 完了！ ✅${addedCount}人を検討リストに追加 (全${totalProcessed}人中)`, 8000);
     await saveAutoAddProgress({ running: false });
+    if (_isAutoRunMode) { chrome.runtime.sendMessage({ type: 'autoRunComplete' }).catch(() => {}); _isAutoRunMode = false; }
   }
 }
 
@@ -3374,6 +3397,12 @@ window.addEventListener('load', () => {
       const resume = JSON.parse(raw);
       sessionStorage.removeItem('snowWeAutoAdd'); // 即座に削除して二重起動防止
       if (resume.resume) {
+        // 夜間自動実行モード復元
+        if (resume.autoRun) {
+          _isAutoRunMode = true;
+          _autoRunMaxPages = resume.autoRun.maxPages || 2;
+          _autoRunPageCount = resume.autoRun.pageCount || 0;
+        }
         // 再開時は進捗を running:true で復元してから triggerAutoAdd を呼ぶ
         // ← これをしないと isFreshStart=true になり最初からやり直しになる
         await saveAutoAddProgress({
@@ -4052,6 +4081,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     });
     sendResponse({ success: true });
+  }
+
+  if (request.type === 'autoRun') {
+    _isAutoRunMode = true;
+    _autoRunPageCount = 0;
+    _autoRunMaxPages = request.maxPages || 2;
+    console.log(`[Snow-we] 夜間自動実行開始 (最大${_autoRunMaxPages}ページ, ${request.urlIndex + 1}/${request.totalUrls})`);
+    showAutoStatus(`🌙 自動実行中... (${request.urlIndex + 1}/${request.totalUrls}件目)`);
+    triggerAutoAdd().catch(e => console.error('[Snow-we] 自動実行エラー:', e?.message));
+    sendResponse({ ok: true });
+    return true;
   }
 
   if (request.action === 'debugDOM') {

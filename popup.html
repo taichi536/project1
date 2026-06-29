@@ -767,6 +767,27 @@
     <div class="setup-code-msg" id="setup-code-msg"></div>
   </div>
 
+  <!-- 夜間自動実行設定 -->
+  <div style="margin-top:14px; padding-top:12px; border-top:0.5px solid #e0ddd6;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+      <div class="label" style="margin:0;">🌙 夜間自動実行</div>
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;">
+        <input type="checkbox" id="auto-run-enabled"> 有効
+      </label>
+    </div>
+    <div style="display:flex; align-items:center; gap:5px; margin-bottom:8px; font-size:12px; flex-wrap:wrap;">
+      毎日
+      <input type="number" id="auto-run-hour" min="0" max="23" value="2" style="width:42px; padding:4px 6px;">
+      時
+      <input type="number" id="auto-run-minute" min="0" max="59" value="0" style="width:42px; padding:4px 6px;">
+      分に実行 &nbsp;|&nbsp; 1URLあたり最大
+      <input type="number" id="auto-run-max-pages" min="1" max="20" value="2" style="width:42px; padding:4px 6px;">
+      ページ
+    </div>
+    <div class="label">処理するURL（1行1件）</div>
+    <textarea id="auto-run-urls" rows="5" style="width:100%; padding:6px 8px; border:0.5px solid #d3d1c7; border-radius:6px; font-size:11px; resize:vertical; font-family:monospace; margin-top:3px;" placeholder="https://ats.hrtech.rikunabi.com/client/scouting/scoutroom/.../searchandrecommend&#10;https://x.doda.jp/...&#10;https://ambi.jp/..."></textarea>
+  </div>
+
   <button class="settings-save-btn" id="settings-save-btn">設定を保存</button>
   <div class="settings-saved" id="settings-saved">✅ 保存しました</div>
 

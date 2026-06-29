@@ -116,9 +116,100 @@ chrome.alarms.get('snowWeUpdateCheck', (existing) => {
 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'snowWeUpdateCheck') checkForUpdate();
+  if (alarm.name === 'snowWeAutoRun') startAutoRun();
 });
 
+// ── 夜間自動実行 ──────────────────────────────────────────────────
+let _autoRunTabId = null;
+
+function startAutoRun() {
+  chrome.storage.local.get(['autoRunConfig'], ({ autoRunConfig }) => {
+    if (!autoRunConfig?.enabled) return;
+    const urls = (autoRunConfig.urls || []).filter(u => u?.trim());
+    if (!urls.length) return;
+    const maxPages = autoRunConfig.maxPagesPerUrl || 2;
+    chrome.storage.local.set({ autoRunState: { isRunning: true, urls, urlIndex: 0, maxPages, startedAt: Date.now() } });
+    openNextAutoRunUrl();
+  });
+}
+
+function openNextAutoRunUrl() {
+  chrome.storage.local.get(['autoRunState'], ({ autoRunState }) => {
+    if (!autoRunState?.isRunning) return;
+    const { urls, urlIndex, maxPages } = autoRunState;
+    if (urlIndex >= urls.length) {
+      console.log('[Snow-we] 夜間自動実行完了 - 全URL処理済み');
+      chrome.storage.local.set({ autoRunState: { isRunning: false, completedAt: Date.now() } });
+      return;
+    }
+    const url = urls[urlIndex];
+    chrome.tabs.create({ url, active: false }, (tab) => {
+      _autoRunTabId = tab.id;
+      console.log(`[Snow-we] 夜間自動実行: ${urlIndex + 1}/${urls.length} タブ開始`);
+    });
+  });
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status !== 'complete') return;
+  if (tabId !== _autoRunTabId) return;
+  chrome.storage.local.get(['autoRunState'], ({ autoRunState }) => {
+    if (!autoRunState?.isRunning) return;
+    setTimeout(() => {
+      chrome.tabs.sendMessage(tabId, {
+        type: 'autoRun',
+        maxPages: autoRunState.maxPages,
+        urlIndex: autoRunState.urlIndex,
+        totalUrls: autoRunState.urls.length,
+      }).catch(() => {});
+    }, 2500);
+  });
+});
+
+// サービスワーカー起動時にアラームを復元
+chrome.storage.local.get(['autoRunConfig'], ({ autoRunConfig }) => {
+  if (!autoRunConfig?.enabled) return;
+  chrome.alarms.get('snowWeAutoRun', (existing) => {
+    if (existing) return;
+    setAutoRunAlarm(autoRunConfig);
+  });
+});
+
+function setAutoRunAlarm(autoRunConfig) {
+  chrome.alarms.clear('snowWeAutoRun', () => {
+    if (!autoRunConfig?.enabled) return;
+    const now = new Date();
+    const h = autoRunConfig.hour ?? 2;
+    const m = autoRunConfig.minute ?? 0;
+    let minutesUntil = h * 60 + m - (now.getHours() * 60 + now.getMinutes());
+    if (minutesUntil <= 0) minutesUntil += 24 * 60;
+    chrome.alarms.create('snowWeAutoRun', { delayInMinutes: minutesUntil, periodInMinutes: 24 * 60 });
+    console.log(`[Snow-we] 自動実行アラーム: ${minutesUntil}分後 (毎日${h}:${String(m).padStart(2,'0')})`);
+  });
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  // 自動実行: 1URL完了 → 次のURLへ
+  if (msg.type === 'autoRunComplete') {
+    chrome.storage.local.get(['autoRunState'], ({ autoRunState }) => {
+      if (!autoRunState?.isRunning) return;
+      if (_autoRunTabId) { chrome.tabs.remove(_autoRunTabId, () => {}); _autoRunTabId = null; }
+      const nextIndex = (autoRunState.urlIndex || 0) + 1;
+      chrome.storage.local.set({ autoRunState: { ...autoRunState, urlIndex: nextIndex } }, () => {
+        setTimeout(openNextAutoRunUrl, 1500);
+      });
+    });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  // アラーム設定
+  if (msg.type === 'setAutoRunAlarm') {
+    setAutoRunAlarm(msg.autoRunConfig);
+    sendResponse({ ok: true });
+    return true;
+  }
+
   // GASへのPOST中継
   if (msg.type === 'gasPost') {
     const { url, payload } = msg;

@@ -78,7 +78,7 @@ $('save-btn').addEventListener('click', () => {
 // 設定の保存・読み込み
 // ============================================================
 async function loadSettings() {
-  const r = await chrome.storage.local.get(['screeningCriteria', 'gasSettings']);
+  const r = await chrome.storage.local.get(['screeningCriteria', 'gasSettings', 'autoRunConfig']);
   const c = r.screeningCriteria || {};
   const gas = r.gasSettings || {};
 
@@ -106,6 +106,13 @@ async function loadSettings() {
   if (gas.dbUrl) $('gas-db-url').value = gas.dbUrl;
   if (gas.secret) $('gas-secret').value = gas.secret;
   if (gas.positionUrl) $('position-gas-url').value = gas.positionUrl;
+
+  const arc = r.autoRunConfig || {};
+  $('auto-run-enabled').checked = arc.enabled || false;
+  $('auto-run-hour').value = arc.hour ?? 2;
+  $('auto-run-minute').value = arc.minute ?? 0;
+  $('auto-run-max-pages').value = arc.maxPagesPerUrl ?? 2;
+  $('auto-run-urls').value = (arc.urls || []).join('\n');
 
   if (c.companyTiers && c.companyTiers.length > 0) {
     document.querySelectorAll('#company-tier-group .checkbox-item').forEach(label => {
@@ -153,7 +160,17 @@ $('settings-save-btn').addEventListener('click', async () => {
     positionUrl: $('position-gas-url').value.trim(),
   };
 
-  await chrome.storage.local.set({ screeningCriteria: criteria, gasSettings });
+  const autoRunConfig = {
+    enabled: $('auto-run-enabled').checked,
+    hour: parseInt($('auto-run-hour').value) || 2,
+    minute: parseInt($('auto-run-minute').value) || 0,
+    maxPagesPerUrl: parseInt($('auto-run-max-pages').value) || 2,
+    urls: $('auto-run-urls').value.split('\n').map(u => u.trim()).filter(Boolean),
+  };
+
+  await chrome.storage.local.set({ screeningCriteria: criteria, gasSettings, autoRunConfig });
+  chrome.runtime.sendMessage({ type: 'setAutoRunAlarm', autoRunConfig }).catch(() => {});
+
   const saved = $('settings-saved');
   saved.style.display = 'block';
   setTimeout(() => { saved.style.display = 'none'; }, 2000);
