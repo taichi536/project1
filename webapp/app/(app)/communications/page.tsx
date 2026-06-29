@@ -54,7 +54,7 @@ export default function CommunicationsPage() {
     e.preventDefault();
     await fetch('/api/communications', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
     setShowForm(false);
-    setForm({ contact_name: '', company: '', platform: '', type: 'scout', direction: 'outbound', subject: '', body: '', assigned_to: '', sent_at: '' });
+    setForm({ contact_name: '', company: '', platform: '', type: 'メール', direction: 'outbound', subject: '', body: '', assigned_to: '', sent_at: '' });
     load();
   };
 
@@ -91,20 +91,41 @@ export default function CommunicationsPage() {
       {showForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <form onSubmit={handleSubmit} className="bg-white rounded-xl p-6 w-full max-w-lg shadow-xl">
-            <h3 className="font-semibold text-lg mb-4">コミュニケーション登録</h3>
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <input required placeholder="相手の名前" value={form.contact_name} onChange={e => setForm({ ...form, contact_name: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-              <input placeholder="会社名" value={form.company} onChange={e => setForm({ ...form, company: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-              <input placeholder="種別（例：メール、電話、商談）" value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-              <input placeholder="プラットフォーム (例: BizReach)" value={form.platform} onChange={e => setForm({ ...form, platform: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-              <input placeholder="件名" value={form.subject} onChange={e => setForm({ ...form, subject: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm col-span-2" />
-              <input placeholder="担当者" value={form.assigned_to} onChange={e => setForm({ ...form, assigned_to: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-              <input type="datetime-local" value={form.sent_at} onChange={e => setForm({ ...form, sent_at: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            <h3 className="font-semibold text-lg mb-5">コミュニケーション登録</h3>
+            <div className="space-y-3 mb-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">相手の名前 <span className="text-red-500">*</span></label>
+                  <input required value={form.contact_name} onChange={e => setForm({ ...form, contact_name: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full" placeholder="例: 山田 太郎" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">会社名</label>
+                  <input value={form.company} onChange={e => setForm({ ...form, company: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full" placeholder="例: 株式会社〇〇" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">件名 <span className="text-red-500">*</span></label>
+                <input required value={form.subject} onChange={e => setForm({ ...form, subject: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full" placeholder="例: 打ち合わせのご提案" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">種別</label>
+                  <input value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full" placeholder="例: メール、電話、商談" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">担当者</label>
+                  <input value={form.assigned_to} onChange={e => setForm({ ...form, assigned_to: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full" placeholder="例: 鈴木" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">日時</label>
+                <input type="datetime-local" value={form.sent_at} onChange={e => setForm({ ...form, sent_at: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full" />
+              </div>
             </div>
-            <textarea placeholder="本文" value={form.body} onChange={e => setForm({ ...form, body: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full mb-4" rows={4} />
+            <textarea placeholder="本文（任意）" value={form.body} onChange={e => setForm({ ...form, body: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full mb-4" rows={3} />
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">キャンセル</button>
-              <button type="submit" className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">登録</button>
+              <button type="submit" className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">登録する</button>
             </div>
           </form>
         </div>
