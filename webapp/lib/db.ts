@@ -30,7 +30,7 @@ function initSchema(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS communications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       contact_id INTEGER REFERENCES contacts(id),
-      type TEXT NOT NULL CHECK(type IN ('scout', 'email', 'slack', 'other')),
+      type TEXT NOT NULL DEFAULT 'email',
       direction TEXT NOT NULL CHECK(direction IN ('outbound', 'inbound')),
       subject TEXT,
       body TEXT,

@@ -28,11 +28,8 @@ const STATUS_MAP: Record<string, string> = {
   '返信なし': 'no_reply', '無返信': 'no_reply',
 };
 
-const TYPE_MAP: Record<string, string> = {
-  'スカウト': 'scout', 'scout': 'scout',
-  'メール': 'email', 'email': 'email', 'mail': 'email',
-  'slack': 'slack', 'Slack': 'slack',
-};
+// 種別はそのままの文字列を保存（汎用）
+const TYPE_MAP: Record<string, string> = {};
 
 function parseCSV(text: string): Row[] {
   const lines = text.trim().split('\n').map(l => l.trimEnd());
@@ -65,7 +62,7 @@ function normalizeRow(row: Row): { contact: Row; comm: Row } {
       if (normalized === 'status') {
         comm[normalized] = STATUS_MAP[value] ?? 'pending';
       } else if (normalized === 'type') {
-        comm[normalized] = TYPE_MAP[value] ?? 'email';
+        comm[normalized] = TYPE_MAP[value] ?? value ?? 'メール';
       } else {
         comm[normalized] = value;
       }

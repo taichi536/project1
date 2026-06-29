@@ -39,7 +39,7 @@ export default function CommunicationsPage() {
   const [filterStatus, setFilterStatus] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
-    contact_name: '', company: '', platform: '', type: 'scout',
+    contact_name: '', company: '', platform: '', type: 'メール',
     direction: 'outbound', subject: '', body: '', assigned_to: '', sent_at: '',
   });
 
@@ -95,12 +95,7 @@ export default function CommunicationsPage() {
             <div className="grid grid-cols-2 gap-3 mb-3">
               <input required placeholder="相手の名前" value={form.contact_name} onChange={e => setForm({ ...form, contact_name: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
               <input placeholder="会社名" value={form.company} onChange={e => setForm({ ...form, company: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-              <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm">
-                <option value="scout">スカウト</option>
-                <option value="email">メール</option>
-                <option value="slack">Slack</option>
-                <option value="other">その他</option>
-              </select>
+              <input placeholder="種別（例：メール、電話、商談）" value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
               <input placeholder="プラットフォーム (例: BizReach)" value={form.platform} onChange={e => setForm({ ...form, platform: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
               <input placeholder="件名" value={form.subject} onChange={e => setForm({ ...form, subject: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm col-span-2" />
               <input placeholder="担当者" value={form.assigned_to} onChange={e => setForm({ ...form, assigned_to: e.target.value })} className="border border-gray-200 rounded-lg px-3 py-2 text-sm" />
