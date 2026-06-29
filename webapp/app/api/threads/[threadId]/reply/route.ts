@@ -9,16 +9,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ thr
   if (!session.accessToken) return NextResponse.json({ error: 'Gmail未連携' }, { status: 403 });
 
   const { threadId } = await params;
-  const { to, subject, body, messageId } = await req.json();
+  const { to, cc, bcc, subject, body, inReplyTo, references } = await req.json();
   if (!to || !body) return NextResponse.json({ error: '宛先と本文は必須です' }, { status: 400 });
 
   await sendEmail(session.accessToken, {
     to,
+    cc,
+    bcc,
     subject: subject || '',
     body,
     threadId,
-    inReplyTo: messageId,
-    references: messageId,
+    inReplyTo,
+    references,
   });
 
   const db = getDb();

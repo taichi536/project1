@@ -25,9 +25,11 @@ export type GmailMessage = {
   id: string;
   from: string;
   to: string;
+  cc?: string;
   subject: string;
   date: string;
   body: string;
+  attachments?: { filename: string; mimeType: string; size: number }[];
 };
 
 function getHeader(headers: { name?: string | null; value?: string | null }[], name: string): string {
@@ -217,6 +219,8 @@ export async function fetchThreadDetail(accessToken: string, threadId: string): 
 // メール送信
 export async function sendEmail(accessToken: string, params: {
   to: string;
+  cc?: string;
+  bcc?: string;
   subject: string;
   body: string;
   threadId?: string;
@@ -232,6 +236,8 @@ export async function sendEmail(accessToken: string, params: {
     'Content-Type: text/plain; charset=UTF-8',
     'Content-Transfer-Encoding: base64',
   ];
+  if (params.cc) headers.push(`Cc: ${params.cc}`);
+  if (params.bcc) headers.push(`Bcc: ${params.bcc}`);
   if (params.inReplyTo) headers.push(`In-Reply-To: ${params.inReplyTo}`);
   if (params.references) headers.push(`References: ${params.references}`);
 
