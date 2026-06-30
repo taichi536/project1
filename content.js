@@ -15,6 +15,35 @@ window.addEventListener('unhandledrejection', event => {
   }
 });
 
+// Supabase設定
+const SUPABASE_URL = 'https://ovwnyivqnqqiagutjxoo.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_tEQ4TOve0uCydsGiEm1cDA_D1LQ49wN';
+
+async function supabaseInsert(table, data) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.warn(`[Snow-we] Supabase ${table} 保存エラー:`, err);
+      return false;
+    }
+    console.log(`[Snow-we] Supabase ${table} 保存成功`);
+    return true;
+  } catch (e) {
+    console.warn(`[Snow-we] Supabase ${table} 保存失敗:`, e.message);
+    return false;
+  }
+}
+
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
 const _posReqCache = new Map();
 
@@ -513,6 +542,27 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
         }
       } catch (_) {}
     }
+  })();
+
+  // ③ Supabaseへの保存
+  ;(async () => {
+    let recruiter = '';
+    try {
+      const s = await chrome.storage.local.get(['gasSettings']);
+      recruiter = s.gasSettings?.recruiter || '';
+    } catch (_) {}
+    const ageNum = parseInt((info.age || '').replace(/[歳才]/g, '')) || null;
+    await supabaseInsert('scouts', {
+      platform,
+      platform_candidate_id: candidateId,
+      candidate_name: info.name || '',
+      candidate_age: ageNum,
+      candidate_industry: industry,
+      position_name: positionName,
+      recruiter_name: recruiter,
+      sent_at: new Date(now).toISOString(),
+      scout_message: templateRaw || ''
+    });
   })();
 }
 
@@ -2989,6 +3039,21 @@ async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
       });
     }
   } catch (_) {}
+
+  // Supabaseにも保存
+  ;(async () => {
+    let recruiter = '';
+    try {
+      const s = await chrome.storage.local.get(['gasSettings']);
+      recruiter = s.gasSettings?.recruiter || '';
+    } catch (_) {}
+    await supabaseInsert('ai_feedback', {
+      platform,
+      original_verdict: aiVerdict,
+      corrected_verdict: correction,
+      recruiter_name: recruiter,
+    });
+  })();
 }
 
 async function loadRecentFeedbacks(limit = 10) {
