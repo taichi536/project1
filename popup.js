@@ -23,6 +23,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   // 保存済みのポジションを復元
   if (result.currentPosition) posSel.value = result.currentPosition;
+  // popup表示時に現在の選択を即座に保存（初回も含む）
+  if (posSel.value) chrome.storage.local.set({ currentPosition: posSel.value });
   // ポジション変更時にchrome.storageへ保存
   posSel.addEventListener('change', () => {
     chrome.storage.local.set({ currentPosition: posSel.value });

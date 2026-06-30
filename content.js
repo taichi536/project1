@@ -396,6 +396,9 @@ function gicsAutoClassify(companyName) {
   if (/日立|hitachi/.test(n))                                               return '情報技術サービス';
   if (/nec|日本電気/.test(n))                                               return '情報技術サービス';
   if (/ibm|日本ibm/.test(n))                                                return '情報技術サービス';
+  if (/東芝|toshiba/.test(n))                                               return '電子装置・機器・部品';
+  if (/三菱電機|mitsubishi electric/.test(n))                               return '電子装置・機器・部品';
+  if (/シャープ|sharp/.test(n))                                             return '民生用電子機器';
   if (/salesforce|セールスフォース/.test(n))                                return 'SaaS';
   if (/freee/.test(n))                                                       return 'SaaS';
   if (/smarthr/.test(n))                                                     return 'SaaS';
