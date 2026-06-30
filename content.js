@@ -27,6 +27,7 @@ let _reapplyBizreachTimer = null;
 let _batchApiKey = null;
 let _batchCriteria = null;
 let _batchIsRunning = false; // chrome.storage失敗時もisFreshStartを誤判定しないためのフラグ
+let _triggerAutoAddLock = false; // 外部からの重複起動を防ぐロック（再帰呼び出しは _batchIsRunning=true で区別）
 let _batchScoutHistory = null; // スカウト履歴キャッシュ（CDKスクロールごとの再取得を防ぐ）
 
 // 夜間自動実行モード
@@ -1232,6 +1233,13 @@ ${candidateList}
 // 自動リスト追加モード
 // -------------------------------------------------------
 async function triggerAutoAdd() {
+  // 外部からの重複起動を防ぐ（_batchIsRunning=true の再帰呼び出しは通過）
+  if (!_batchIsRunning && _triggerAutoAddLock) {
+    console.log('[Snow-we] triggerAutoAdd: 二重起動スキップ');
+    return;
+  }
+  if (!_batchIsRunning) _triggerAutoAddLock = true;
+
   // _batchApiKey が未セットの場合のみ chrome.storage を読む（再帰呼び出し時はキャッシュを使う）
   if (!_batchApiKey) {
     let stored;
@@ -1240,6 +1248,7 @@ async function triggerAutoAdd() {
     } catch (e) {
       console.warn('[Snow-we] triggerAutoAdd: ストレージ読み込みエラー', e.message);
       showAutoStatus('⚠️ 拡張機能が再起動されました。ページをリロードして再度ボタンを押してください。', 10000);
+      _triggerAutoAddLock = false;
       return;
     }
     const key = (stored.apiKey || '').replace(/[^\x21-\x7E]/g, '').trim();
@@ -3270,6 +3279,7 @@ async function saveAutoAddProgress(data) {
   if (!data.running) {
     // バッチ終了：モジュールキャッシュとsessionStorageバックアップをリセット
     _batchIsRunning = false;
+    _triggerAutoAddLock = false;
     _batchApiKey = null;
     _batchCriteria = null;
     _batchScoutHistory = null;
