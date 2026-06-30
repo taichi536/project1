@@ -547,9 +547,11 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
   // ③ Supabaseへの保存
   ;(async () => {
     let recruiter = '';
+    let currentPosition = '';
     try {
-      const s = await chrome.storage.local.get(['gasSettings']);
+      const s = await chrome.storage.local.get(['gasSettings', 'currentPosition']);
       recruiter = s.gasSettings?.recruiter || '';
+      currentPosition = s.currentPosition || '';
     } catch (_) {}
     const ageNum = parseInt((info.age || '').replace(/[歳才]/g, '')) || null;
     await supabaseInsert('scouts', {
@@ -560,7 +562,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
       candidate_industry: industry,
       company_name: info.company || '',
       university: info.univ || '',
-      position_name: positionName,
+      position_name: positionName || currentPosition,
       recruiter_name: recruiter,
       sent_at: new Date(now).toISOString(),
       scout_message: templateRaw || ''
