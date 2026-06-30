@@ -1003,8 +1003,14 @@ document.addEventListener('click', e => {
               pending.templateName = candidates.length === 1 ? candidates[0] : '';
             }
           }
-          console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし', '/ templateRaw:', pending.templateRaw || 'なし', '/ fallback:', pending.fallbackPosition || 'なし');
-          recordScoutSent(pending.id, pending.info || {}, pending.templateName || '', pending.bodyText || '', pending.fallbackPosition || '');
+          // 送信直前にインジケーターの最新選択値を読み取る（スカウトボタン押下後に変更した場合も反映）
+          let latestPosition = pending.fallbackPosition || '';
+          try {
+            const posData = await chrome.storage.local.get(['currentPosition']);
+            if (posData.currentPosition) latestPosition = posData.currentPosition;
+          } catch (_) {}
+          console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし', '/ fallback:', latestPosition || 'なし');
+          recordScoutSent(pending.id, pending.info || {}, pending.templateName || '', pending.bodyText || '', latestPosition);
         }
       } catch (_) {}
     })();
@@ -3755,7 +3761,8 @@ async function initPositionIndicator() {
         item.addEventListener('click', async (e) => {
           e.stopPropagation();
           currentPos = pos;
-          await chrome.storage.local.set({ currentPosition: pos }).catch(() => {});
+          await chrome.storage.local.set({ currentPosition: pos }).catch(e => console.warn('[Snow-we] ポジション保存失敗:', e));
+          console.log('[Snow-we] ポジション選択:', pos);
           render(pos);
           dropdown.remove();
         });
