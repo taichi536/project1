@@ -21,6 +21,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   (positions || []).forEach(name => {
     posSel.appendChild(new Option(name, name));
   });
+  // 保存済みのポジションを復元
+  if (result.currentPosition) posSel.value = result.currentPosition;
+  // ポジション変更時にchrome.storageへ保存
+  posSel.addEventListener('change', () => {
+    chrome.storage.local.set({ currentPosition: posSel.value });
+  });
 
   // タブ切り替え
   document.querySelectorAll('.tab-btn').forEach(btn => {
