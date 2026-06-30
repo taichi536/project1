@@ -474,7 +474,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
   if (!candidateId) return;
   const now = Date.now();
   const platform = getPlatform();
-  const positionName = templateName || templateRaw || fallbackPosition || '';
+  const positionName = templateName || fallbackPosition || '';
   const industry = gicsAutoClassify(info.company || '');
 
   // ① ローカル記録（メイン・必ず保存）
