@@ -499,13 +499,14 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
   // ② GASへの送信（サブ・失敗してもローカル記録には影響しない）
   ;(async () => {
     let r2 = {};
-    try { r2 = await chrome.storage.local.get(['gasSettings', 'currentPosition']); } catch (_) {}
+    try { r2 = await chrome.storage.local.get(['gasSettings', 'currentPosition', 'recruiterName']); } catch (_) {}
     const gas = r2.gasSettings || {};
-    if (!gas.url || !gas.recruiter) return;
+    const recruiterForGas = gas.recruiter || r2.recruiterName || '';
+    if (!gas.url || !recruiterForGas) return;
     const ageNum = (info.age || '').replace(/[歳才]/, '');
     const payload = {
       secret: gas.secret || 'snowwe2024',
-      recruiter: gas.recruiter,
+      recruiter: recruiterForGas,
       company: info.company || '',
       age: ageNum,
       univ: info.univ || '',
