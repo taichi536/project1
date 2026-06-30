@@ -990,24 +990,33 @@ document.addEventListener('click', e => {
       try {
         const pending = JSON.parse(raw);
         if (pending && pending.id && Date.now() - pending.ts < 30 * 60 * 1000) {
-          // AMBIはテンプレートドロップダウンからポジションを取得
-          if (!pending.templateName && getPlatform() === 'ambi') {
-            const tmplSel = document.querySelector('select');
-            const tmplVal = tmplSel ? (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim() : '';
-            if (tmplVal && tmplVal !== 'テンプレートの選択') {
-              if (!pending.templateRaw) pending.templateRaw = tmplVal;
-              const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
-              const positionList = res?.positions || [];
-              const sorted = [...positionList].sort((a, b) => b.length - a.length);
-              const normStr = s => s.replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim();
-              const stripSuffix3 = p => p.replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '').replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '').trim();
-              // 完全一致 → サフィックス除去一致（一意の場合のみ）の順で照合
-              const exactHits = sorted.filter(p => p && normStr(tmplVal) === normStr(p));
-              const stripHits = exactHits.length === 0
-                ? sorted.filter(p => { const t = stripSuffix3(p); return t.length >= 8 && normStr(tmplVal) === normStr(t); })
-                : [];
-              const candidates = exactHits.length > 0 ? exactHits : stripHits;
-              pending.templateName = candidates.length === 1 ? candidates[0] : '';
+          // AMBIはテンプレートドロップダウンからポジションを取得、本文も送信時に取得
+          if (getPlatform() === 'ambi') {
+            // テンプレート名からポジション照合
+            if (!pending.templateName) {
+              const tmplSel = document.querySelector('select');
+              const tmplVal = tmplSel ? (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim() : '';
+              if (tmplVal && tmplVal !== 'テンプレートの選択') {
+                if (!pending.templateRaw) pending.templateRaw = tmplVal;
+                const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+                const positionList = res?.positions || [];
+                const sorted = [...positionList].sort((a, b) => b.length - a.length);
+                const normStr = s => s.replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim();
+                const stripSuffix3 = p => p.replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '').replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '').trim();
+                const exactHits = sorted.filter(p => p && normStr(tmplVal) === normStr(p));
+                const stripHits = exactHits.length === 0
+                  ? sorted.filter(p => { const t = stripSuffix3(p); return t.length >= 8 && normStr(tmplVal) === normStr(t); })
+                  : [];
+                const candidates2 = exactHits.length > 0 ? exactHits : stripHits;
+                pending.templateName = candidates2.length === 1 ? candidates2[0] : '';
+              }
+            }
+            // 確認ステップがないため送信時にメール本文を取得
+            if (!pending.bodyText) {
+              const ta = document.querySelector('textarea');
+              if (ta && ta.value && ta.value !== 'スカウト本文を入力') {
+                pending.bodyText = ta.value.substring(0, 2000);
+              }
             }
           }
           // 送信直前にインジケーターの最新選択値を読み取る（スカウトボタン押下後に変更した場合も反映）
@@ -3683,7 +3692,7 @@ function buildCriteriaText(criteria, platform) {
 // -------------------------------------------------------
 async function initPositionIndicator() {
   const platform = getPlatform();
-  if (!['rds', 'dodax'].includes(platform)) return;
+  if (!['rds', 'dodax', 'ambi'].includes(platform)) return;
 
   const existing = document.getElementById('snow-we-pos-indicator');
   if (existing) existing.remove();
