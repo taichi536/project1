@@ -558,6 +558,8 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
       candidate_name: info.name || '',
       candidate_age: ageNum,
       candidate_industry: industry,
+      company_name: info.company || '',
+      university: info.univ || '',
       position_name: positionName,
       recruiter_name: recruiter,
       sent_at: new Date(now).toISOString(),
