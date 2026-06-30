@@ -515,6 +515,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
       industry,
       ts: now,
     };
+    console.log('[Snow-we] GAS送信payload:', JSON.stringify({ recruiter: payload.recruiter, position: payload.position, industry: payload.industry, media: payload.media, ts: payload.ts, age: payload.age, company: payload.company }));
     let sent = false;
     const sendGas = async (url) => {
       try {
@@ -3024,9 +3025,12 @@ async function judgeSingleCandidate(apiKey, profileText, criteria) {
   let fewShotSection = '';
   if (feedbacks.length > 0) {
     const examples = feedbacks
-      .map(f => `- 「${f.profileSummary.substring(0, 80)}…」 → 正解: ${f.correction}（AIの誤判定: ${f.aiVerdict}）`)
+      .map(f => {
+        const meta = [f.platform, f.recruiter].filter(Boolean).join('/');
+        return `- ${meta ? `[${meta}] ` : ''}「${(f.profileSummary || '').substring(0, 100)}…」\n  AI誤判定:${f.aiVerdict} → 人間正解:${f.correction}`;
+      })
       .join('\n');
-    fewShotSection = `\n【過去の訂正例（優先参照）】\n以下はAIが誤判定して人間が訂正した実例です。同様のケースは同じ判断をしてください。\n${examples}\n`;
+    fewShotSection = `\n【過去の訂正例（最優先参照）】\n同様パターンの候補者は同じ判断をすること。\n${examples}\n`;
   }
 
   const prompt = `転職エージェントの一次選定アシスタントです。
@@ -3112,10 +3116,28 @@ async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
 }
 
 async function loadRecentFeedbacks(limit = 10) {
+  // ローカルフィードバック
+  let local = [];
   try {
     const stored = await chrome.storage.local.get(['snowWeFeedbacks']);
-    return (stored.snowWeFeedbacks || []).slice(0, limit);
-  } catch (_) { return []; }
+    local = stored.snowWeFeedbacks || [];
+  } catch (_) {}
+
+  // GASからチーム全体のフィードバックも取得（30件）
+  let team = [];
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'getTeamFeedbacks' });
+    team = res?.feedbacks || [];
+  } catch (_) {}
+
+  // ローカル優先でマージ、重複排除（profileSummary+correction で判定）
+  const seen = new Set(local.map(f => (f.profileSummary || '').slice(0, 40) + f.correction));
+  const merged = [...local];
+  for (const f of team) {
+    const key = (f.profileSummary || '').slice(0, 40) + f.correction;
+    if (!seen.has(key)) { seen.add(key); merged.push(f); }
+  }
+  return merged.slice(0, limit);
 }
 
 // 訂正ポップアップを表示する

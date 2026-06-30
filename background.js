@@ -276,6 +276,23 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
+  // チームのAI判定フィードバック一覧をGASから取得
+  if (msg.type === 'getTeamFeedbacks') {
+    chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {
+      const url    = gasSettings?.dbUrl || gasSettings?.url;
+      const secret = gasSettings?.secret || 'snowwe2024';
+      if (!url) { sendResponse({ feedbacks: [] }); return; }
+      fetch(url, {
+        method: 'POST',
+        body: JSON.stringify({ secret, action: 'getFeedbacks', limit: 30 }),
+      })
+        .then(r => r.json())
+        .then(data => sendResponse({ feedbacks: data.feedbacks || [] }))
+        .catch(() => sendResponse({ feedbacks: [] }));
+    });
+    return true;
+  }
+
   // ポジション要件をGASから取得
   if (msg.type === 'getPositionRequirements') {
     const { position } = msg;
