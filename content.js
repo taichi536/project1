@@ -644,22 +644,29 @@ function extractBasicInfo(cardEl) {
   const ageMatch = text.match(/(\d{2,3})歳/);
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
-  // 大学名を抽出
+  // 大学名を抽出（学歴セクション優先）
   let univ = '';
-  const univMatch = text.match(/([^\s\n　]{1,20}(?:大学院|大学|高専|専門学校))/);
-  if (univMatch) {
-    univ = cleanUnivName(univMatch[1]);
-  }
+  const extractUnivFromText = (t) => {
+    // 「学歴」「最終学歴」セクション以降から優先的に抽出
+    const eduIdx = t.search(/学歴|最終学歴/);
+    if (eduIdx >= 0) {
+      const eduSection = t.substring(eduIdx, eduIdx + 300);
+      const m = eduSection.match(/([^\s\n　]{2,20}(?:大学院|大学|高専|専門学校))/);
+      if (m) return cleanUnivName(m[1]);
+    }
+    // 学歴セクションがない場合は全体から抽出（会社名候補を除外）
+    const m = t.match(/([^\s\n　]{2,20}(?:大学院|大学|高専|専門学校))/g) || [];
+    const companyWords = /株式会社|合同会社|有限会社|法人|グループ|ホールディングス/;
+    const candidate = m.find(s => !companyWords.test(s));
+    return candidate ? cleanUnivName(candidate) : '';
+  };
+  univ = extractUnivFromText(text);
   // RDS/AMBIはカードに大学名が出ないため、詳細パネルからも取得を試みる
   if (!univ) {
     const platform = getPlatform();
     const panel = platform === 'rds' ? findRDSDetailPanel() : findAMBIDetailPanel();
     if (panel) {
-      const panelText = panel.innerText || '';
-      const panelUnivMatch = panelText.match(/([^\s\n　]{1,20}(?:大学院|大学|高専|専門学校))/);
-      if (panelUnivMatch) {
-        univ = cleanUnivName(panelUnivMatch[1]);
-      }
+      univ = extractUnivFromText(panel.innerText || '');
     }
   }
 
