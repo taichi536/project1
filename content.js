@@ -3663,10 +3663,122 @@ function buildCriteriaText(criteria, platform) {
   return lines.join('\n');
 }
 
+// -------------------------------------------------------
+// ポジションインジケーター（RDS/doda-X用）
+// -------------------------------------------------------
+async function initPositionIndicator() {
+  const platform = getPlatform();
+  if (!['rds', 'dodax'].includes(platform)) return;
+
+  const existing = document.getElementById('snow-we-pos-indicator');
+  if (existing) existing.remove();
+
+  let positions = [];
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+    positions = res?.positions || [];
+  } catch (_) {}
+
+  const stored = await chrome.storage.local.get(['currentPosition']).catch(() => ({}));
+  let currentPos = stored.currentPosition || '';
+
+  const indicator = document.createElement('div');
+  indicator.id = 'snow-we-pos-indicator';
+  indicator.style.cssText = `
+    position:fixed;top:12px;right:12px;z-index:2147483647;
+    background:#1e293b;color:#fff;padding:7px 12px;border-radius:8px;
+    font-size:12px;font-family:sans-serif;box-shadow:0 2px 12px rgba(0,0,0,0.35);
+    cursor:pointer;display:flex;align-items:center;gap:8px;min-width:180px;
+    border:1px solid #334155;user-select:none;
+  `;
+
+  const render = (pos) => {
+    indicator.innerHTML = `
+      <span style="font-size:14px">📌</span>
+      <span style="flex:1;font-weight:500">${pos || '未設定'}</span>
+      <span style="color:#94a3b8;font-size:11px">▼</span>
+    `;
+  };
+  render(currentPos);
+
+  indicator.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const existingDrop = document.getElementById('snow-we-pos-dropdown');
+    if (existingDrop) { existingDrop.remove(); return; }
+
+    const dropdown = document.createElement('div');
+    dropdown.id = 'snow-we-pos-dropdown';
+    const rect = indicator.getBoundingClientRect();
+    dropdown.style.cssText = `
+      position:fixed;top:${rect.bottom + 4}px;right:12px;z-index:2147483647;
+      background:#fff;border:1px solid #e2e8f0;border-radius:8px;
+      box-shadow:0 4px 20px rgba(0,0,0,0.15);min-width:240px;
+    `;
+
+    // 検索ボックス
+    const searchBox = document.createElement('input');
+    searchBox.type = 'text';
+    searchBox.placeholder = 'ポジションを検索...';
+    searchBox.style.cssText = `
+      width:100%;box-sizing:border-box;padding:9px 12px;
+      border:none;border-bottom:1px solid #e2e8f0;font-size:12px;
+      font-family:sans-serif;outline:none;border-radius:8px 8px 0 0;color:#1e293b;
+    `;
+    dropdown.appendChild(searchBox);
+
+    const list = document.createElement('div');
+    list.style.cssText = 'max-height:280px;overflow-y:auto;';
+    dropdown.appendChild(list);
+
+    const renderItems = (filter = '') => {
+      list.innerHTML = '';
+      const filtered = positions.filter(p => !filter || p.toLowerCase().includes(filter.toLowerCase()));
+      if (filtered.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'padding:12px 14px;font-size:12px;color:#94a3b8;font-family:sans-serif;';
+        empty.textContent = '該当なし';
+        list.appendChild(empty);
+        return;
+      }
+      filtered.forEach(pos => {
+        const item = document.createElement('div');
+        item.style.cssText = `
+          padding:10px 14px;cursor:pointer;font-size:12px;font-family:sans-serif;
+          color:#1e293b;border-bottom:1px solid #f1f5f9;
+          ${pos === currentPos ? 'background:#eff6ff;font-weight:600;' : ''}
+        `;
+        item.textContent = pos;
+        item.addEventListener('mouseenter', () => { if (pos !== currentPos) item.style.background = '#f8fafc'; });
+        item.addEventListener('mouseleave', () => { if (pos !== currentPos) item.style.background = ''; });
+        item.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          currentPos = pos;
+          await chrome.storage.local.set({ currentPosition: pos }).catch(() => {});
+          render(pos);
+          dropdown.remove();
+        });
+        list.appendChild(item);
+      });
+    };
+
+    renderItems();
+    searchBox.addEventListener('input', () => renderItems(searchBox.value));
+    searchBox.addEventListener('click', e => e.stopPropagation());
+
+    document.body.appendChild(dropdown);
+    setTimeout(() => searchBox.focus(), 0);
+    const close = (e) => { if (!dropdown.contains(e.target) && e.target !== indicator) { dropdown.remove(); document.removeEventListener('click', close); } };
+    setTimeout(() => document.addEventListener('click', close), 0);
+  });
+
+  document.body.appendChild(indicator);
+}
+
 // ページロード後に自動追加の再開チェック（sessionStorageのみ使用）
 window.addEventListener('load', () => {
   setTimeout(async () => {
     injectStyles();
+    initPositionIndicator();
     try {
       const raw = sessionStorage.getItem('snowWeAutoAdd');
       if (!raw) {
