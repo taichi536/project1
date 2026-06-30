@@ -664,7 +664,10 @@ function extractBasicInfo(cardEl) {
   // RDS/AMBIはカードに大学名が出ないため、詳細パネルからも取得を試みる
   if (!univ) {
     const platform = getPlatform();
-    const panel = platform === 'rds' ? findRDSDetailPanel() : findAMBIDetailPanel();
+    let panel = null;
+    if (platform === 'rds') panel = findRDSDetailPanel();
+    else if (platform === 'dodax') panel = findDodaxDetailPanel();
+    else panel = findAMBIDetailPanel();
     if (panel) {
       univ = extractUnivFromText(panel.innerText || '');
     }
@@ -704,6 +707,27 @@ function extractBasicInfo(cardEl) {
     if (!company) {
       // フォールバック：ページ全体で会社名キーワードを含む行
       company = lines.find(l => companyRe.test(l))?.split(/[／/]/)[0].trim() || '';
+    }
+  } else if (getPlatform() === 'dodax') {
+    // doda-X: 「現職」「在籍」の近くか、会社名キーワードを含む行を優先
+    const companyRe2 = /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,|ホールディングス|グループ|銀行|証券|保険|大学|病院/;
+    const idx2 = lines.findIndex(l => l === '現職' || l.includes('在籍'));
+    if (idx2 >= 0) {
+      for (let i = Math.max(0, idx2 - 3); i < Math.min(lines.length, idx2 + 3); i++) {
+        if (i === idx2) continue;
+        if (companyRe2.test(lines[i]) || (lines[i].includes('／') && lines[i].length > 4)) {
+          company = lines[i].split(/[／/]/)[0].trim(); break;
+        }
+      }
+    }
+    if (!company) company = lines.find(l => companyRe2.test(l))?.split(/[／/]/)[0].trim() || '';
+    // doda-Xは詳細パネルからも会社名を取得試み
+    if (!company) {
+      const p = findDodaxDetailPanel();
+      if (p) {
+        const pLines = (p.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
+        company = pLines.find(l => companyRe2.test(l))?.split(/[／/]/)[0].trim() || '';
+      }
     }
   } else {
     company = lines[0] || '';
