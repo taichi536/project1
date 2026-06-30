@@ -3712,6 +3712,48 @@ function buildCriteriaText(criteria, platform) {
 }
 
 // -------------------------------------------------------
+// AI ポジション提案
+// -------------------------------------------------------
+async function suggestPositionWithAI(candidateProfile, positionsWithDesc) {
+  const stored = await chrome.storage.local.get(['apiKey']).catch(() => ({}));
+  const apiKey = (stored.apiKey || '').replace(/[^\x21-\x7E]/g, '').trim();
+  if (!apiKey || apiKey.length < 20) throw new Error('APIキー未設定');
+
+  const profile = candidateProfile.slice(0, 3000);
+  const posList = positionsWithDesc.slice(0, 60).map((p, i) =>
+    `${i + 1}. 【${p.name}】${p.description ? p.description.slice(0, 400) : ''}`
+  ).join('\n');
+
+  const prompt = `あなたは転職エージェントのアシスタントです。
+候補者のプロフィールを分析し、以下のポジション一覧の中からこの候補者の経験・スキル・志向に最もマッチするポジションをトップ3選んでください。
+
+【候補者プロフィール】
+${profile}
+
+【ポジション一覧】
+${posList}
+
+必ず以下のJSON形式のみで回答してください。コードブロック・前置き・説明文は不要です。
+{"suggestions":[
+  {"rank":1,"name":"ポジション名（一覧の【】内と完全一致）","reason":"マッチ理由を30文字以内で"},
+  {"rank":2,"name":"ポジション名","reason":"マッチ理由を30文字以内で"},
+  {"rank":3,"name":"ポジション名","reason":"マッチ理由を30文字以内で"}
+]}`;
+
+  const data = await claudeFetch(apiKey, {
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 400,
+    messages: [{ role: 'user', content: prompt }]
+  });
+
+  const text = (data.content?.[0]?.text || '').trim();
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('AI応答のJSON解析失敗: ' + text.slice(0, 80));
+  const parsed = JSON.parse(jsonMatch[0]);
+  return parsed.suggestions || [];
+}
+
+// -------------------------------------------------------
 // ポジションインジケーター（RDS/doda-X用）
 // -------------------------------------------------------
 async function initPositionIndicator() {
@@ -3773,6 +3815,80 @@ async function initPositionIndicator() {
       font-family:sans-serif;outline:none;border-radius:8px 8px 0 0;color:#1e293b;
     `;
     dropdown.appendChild(searchBox);
+
+    // AI提案ボタン
+    const aiBtn = document.createElement('div');
+    aiBtn.style.cssText = `
+      padding:9px 14px;cursor:pointer;font-size:12px;font-family:sans-serif;
+      color:#6366f1;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:6px;
+      background:#fafafe;font-weight:500;
+    `;
+    aiBtn.innerHTML = '<span>✨</span><span>AIがこの候補者に合うポジションを提案</span>';
+    aiBtn.addEventListener('mouseenter', () => { aiBtn.style.background = '#f0f0ff'; });
+    aiBtn.addEventListener('mouseleave', () => { aiBtn.style.background = '#fafafe'; });
+    dropdown.appendChild(aiBtn);
+
+    // AI提案結果エリア
+    const aiResults = document.createElement('div');
+    aiResults.style.cssText = 'display:none;';
+    dropdown.appendChild(aiResults);
+
+    aiBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      aiBtn.innerHTML = '<span>⏳</span><span>分析中...</span>';
+      aiBtn.style.pointerEvents = 'none';
+      aiResults.style.display = 'block';
+      aiResults.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:#94a3b8;font-family:sans-serif;">候補者プロフィールを読み取り、ポジションを分析しています...</div>';
+      try {
+        const posRes = await chrome.runtime.sendMessage({ type: 'getPositionListWithDesc' });
+        const posWithDesc = posRes?.positions || [];
+        if (posWithDesc.length === 0) throw new Error('ポジション情報を取得できませんでした');
+
+        const profile = extractProfile();
+        if (!profile || profile.trim().length < 50) throw new Error('候補者プロフィールが読み取れませんでした。詳細パネルを開いてください。');
+
+        const suggestions = await suggestPositionWithAI(profile, posWithDesc);
+        if (!suggestions || suggestions.length === 0) throw new Error('提案結果が空でした');
+
+        aiResults.innerHTML = '';
+        const header = document.createElement('div');
+        header.style.cssText = 'padding:6px 14px;font-size:10px;color:#6366f1;font-family:sans-serif;font-weight:600;background:#f5f3ff;border-bottom:1px solid #ede9fe;letter-spacing:0.5px;';
+        header.textContent = '✨ AIおすすめポジション';
+        aiResults.appendChild(header);
+
+        suggestions.forEach(s => {
+          const sItem = document.createElement('div');
+          sItem.style.cssText = `
+            padding:9px 14px;cursor:pointer;font-size:12px;font-family:sans-serif;
+            color:#1e293b;border-bottom:1px solid #ede9fe;background:#faf5ff;
+          `;
+          sItem.innerHTML = `
+            <div style="font-weight:600;color:#4f46e5;">${s.rank}位 ${s.name}</div>
+            <div style="font-size:11px;color:#6b7280;margin-top:2px;">${s.reason || ''}</div>
+          `;
+          sItem.addEventListener('mouseenter', () => { sItem.style.background = '#ede9fe'; });
+          sItem.addEventListener('mouseleave', () => { sItem.style.background = '#faf5ff'; });
+          sItem.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            currentPos = s.name;
+            await chrome.storage.local.set({ currentPosition: s.name }).catch(() => {});
+            console.log('[Snow-we] AIポジション選択:', s.name);
+            render(s.name);
+            dropdown.remove();
+          });
+          aiResults.appendChild(sItem);
+        });
+
+        const divider = document.createElement('div');
+        divider.style.cssText = 'padding:6px 14px;font-size:10px;color:#94a3b8;font-family:sans-serif;background:#f8fafc;border-bottom:1px solid #e2e8f0;letter-spacing:0.5px;';
+        divider.textContent = '─── 全ポジション ───';
+        aiResults.appendChild(divider);
+      } catch (err) {
+        aiResults.innerHTML = `<div style="padding:10px 14px;font-size:11px;color:#ef4444;font-family:sans-serif;">${err.message || 'エラーが発生しました'}</div>`;
+      }
+      aiBtn.innerHTML = '<span>✨</span><span>AIがこの候補者に合うポジションを提案</span>';
+      aiBtn.style.pointerEvents = 'auto';
+    });
 
     const list = document.createElement('div');
     list.style.cssText = 'max-height:280px;overflow-y:auto;';

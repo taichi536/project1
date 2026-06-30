@@ -322,4 +322,27 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     });
     return true;
   }
+
+  // ポジション一覧（説明付き）を返す — AI提案機能用
+  if (msg.type === 'getPositionListWithDesc') {
+    chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {
+      const positionUrl = gasSettings?.positionUrl;
+      const secret = gasSettings?.secret;
+      if (!positionUrl) { sendResponse({ positions: [] }); return; }
+      fetch(positionUrl, {
+        method: 'POST',
+        body: JSON.stringify({ secret, action: 'getPositions' }),
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data.ok && data.positions?.length > 0) {
+            sendResponse({ positions: data.positions });
+          } else {
+            sendResponse({ positions: [] });
+          }
+        })
+        .catch(() => sendResponse({ positions: [] }));
+    });
+    return true;
+  }
 });
