@@ -552,8 +552,8 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     let recruiter = '';
     let currentPosition = '';
     try {
-      const s = await chrome.storage.local.get(['gasSettings', 'currentPosition']);
-      recruiter = s.gasSettings?.recruiter || '';
+      const s = await chrome.storage.local.get(['gasSettings', 'currentPosition', 'recruiterName']);
+      recruiter = s.gasSettings?.recruiter || s.recruiterName || '';
       currentPosition = s.currentPosition || '';
     } catch (_) {}
     const ageNum = parseInt((info.age || '').replace(/[歳才]/g, '')) || null;

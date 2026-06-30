@@ -162,12 +162,14 @@ $('settings-save-btn').addEventListener('click', async () => {
   };
 
   const gasSettings = {
-    recruiter: $('gas-recruiter').value,
+    recruiter: $('gas-recruiter').value.trim(),
     url: $('gas-url').value.trim(),
     dbUrl: $('gas-db-url').value.trim(),
     secret: $('gas-secret').value.trim(),
     positionUrl: $('position-gas-url').value.trim(),
   };
+  // recruiterNameを単独でも保存（content scriptからの読み込みを安定化）
+  chrome.storage.local.set({ recruiterName: gasSettings.recruiter });
 
   const autoRunConfig = {
     enabled: $('auto-run-enabled').checked,
