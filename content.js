@@ -959,8 +959,9 @@ document.addEventListener('click', e => {
           }
         } catch (_) {}
 
-        // 生テンプレート名・照合結果を保存（templateRaw は照合失敗時のフォールバック）
+        // 生テンプレート名・メール本文・照合結果を保存
         if (tmplRaw && !pending.templateRaw) pending.templateRaw = tmplRaw;
+        if (bodyText && !pending.bodyText) pending.bodyText = bodyText.substring(0, 2000);
         if (matched) {
           pending.templateName = matched;
           console.log('[Snow-we] ポジション照合成功:', matched);
@@ -1003,7 +1004,7 @@ document.addEventListener('click', e => {
             }
           }
           console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし', '/ templateRaw:', pending.templateRaw || 'なし', '/ fallback:', pending.fallbackPosition || 'なし');
-          recordScoutSent(pending.id, pending.info || {}, pending.templateName || '', pending.templateRaw || '', pending.fallbackPosition || '');
+          recordScoutSent(pending.id, pending.info || {}, pending.templateName || '', pending.bodyText || '', pending.fallbackPosition || '');
         }
       } catch (_) {}
     })();
