@@ -343,8 +343,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // ポジション一覧（説明付き）を返す — AI提案機能用
   if (msg.type === 'getPositionListWithDesc') {
     chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {
-      const positionUrl = gasSettings?.positionUrl;
-      const secret = gasSettings?.secret;
+      // positionUrl → url → dbUrl の優先順でフォールバック
+      const positionUrl = gasSettings?.positionUrl || gasSettings?.url || gasSettings?.dbUrl;
+      const secret = gasSettings?.secret || 'snowwe2024';
       if (!positionUrl) { sendResponse({ positions: [] }); return; }
       fetch(positionUrl, {
         method: 'POST',

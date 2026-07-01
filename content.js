@@ -3864,7 +3864,7 @@ async function initPositionIndicator() {
       try {
         const posRes = await chrome.runtime.sendMessage({ type: 'getPositionListWithDesc' });
         const posWithDesc = posRes?.positions || [];
-        if (posWithDesc.length === 0) throw new Error('ポジション情報を取得できませんでした');
+        if (posWithDesc.length === 0) throw new Error('ポジション情報を取得できませんでした（ポップアップ設定でGAS URLを確認してください）');
 
         const profile = extractProfile();
         if (!profile || profile.trim().length < 50) throw new Error('候補者プロフィールが読み取れませんでした。詳細パネルを開いてください。');
