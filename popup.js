@@ -1662,7 +1662,7 @@ $('history-sync-btn').addEventListener('click', async () => {
     showHistoryMsg('GAS URLが設定されていません（設定タブを確認）', '#b91c1c'); return;
   }
   try {
-    const res = await fetch(gas.dbUrl || gas.url, {
+    const res = await fetch(gas.url || gas.dbUrl, {
       method: 'POST',
       body: JSON.stringify({ secret: gas.secret || 'snowwe2024', action: 'getTeamHistory', days: 180 }),
     });
