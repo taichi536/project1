@@ -3699,13 +3699,19 @@ function buildCriteriaText(criteria, platform) {
     lines.push(`- 「ITエンジニア系（IT・理系・技術職）」: 現在の職種がソフトウェアエンジニア・SE・インフラ・クラウド・データエンジニア・データサイエンティスト・データアナリスト・DXコンサル・ITコンサル・PMO・研究職（バイオ・化学・材料等）・建築設計・土木・機械設計・電気設計・製造技術・生産技術・品質管理等の技術職`);
     lines.push(`- 「文系職」: 現在の職種がコンサル（IT以外）・営業・マーケ・経営企画・事業企画・財務・人事・金融・その他ビジネス職。理系出身・研究職経験があっても現職が経営企画等のビジネス職であれば文系職として分類する`);
 
+    const ai2 = criteria.ageIncome || {};
+    const inc20s    = ai2.age20s    || 500;
+    const inc30to35 = ai2.age30to35 || 700;
+    const inc36to39 = ai2.age36to39 || 800;
+    const inc40to42 = ai2.age40to42 || 1000;
+    const inc43to45 = ai2.age43to45 || 1200;
     lines.push(`\n【文系職の年収基準】`);
-    lines.push(`- 20代: 500万円未満 → NG`);
-    lines.push(`- 30〜35歳: 700万円未満 → NG`);
-    lines.push(`- 36〜39歳: 800万円未満 → NG`);
-    lines.push(`- 40〜42歳: 1000万円未満 → NG`);
-    lines.push(`- 43〜45歳: 1200万円未満 → NG`);
-    lines.push(`- 46歳以上: 1200万以上かつ財務・経理・FP&A職歴あり → 要確認、それ以外 → NG`);
+    lines.push(`- 20代: ${inc20s}万円未満 → NG`);
+    lines.push(`- 30〜35歳: ${inc30to35}万円未満 → NG`);
+    lines.push(`- 36〜39歳: ${inc36to39}万円未満 → NG`);
+    lines.push(`- 40〜42歳: ${inc40to42}万円未満 → NG`);
+    lines.push(`- 43〜45歳: ${inc43to45}万円未満 → NG`);
+    lines.push(`- 46歳以上: ${inc43to45}万以上かつ財務・経理・FP&A職歴あり → 要確認、それ以外 → NG`);
     lines.push(`※年収が明記されており基準を下回る場合は必ずNG。年収が不明・記載なしの場合は「要確認」`);
     lines.push(`※年収が幅（例：750〜1000万円）で記載されている場合は上限値（1000万円）で判断すること。上限値が基準以上であればNGにしない。`);
 
