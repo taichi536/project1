@@ -1618,7 +1618,7 @@ async function triggerAutoAdd() {
     // 年収チェック：IT閾値を下回る場合は即NG確定
     if (checkIncomeNG(profileText)) {
       setBatchBadge(el, 'ng', '❌ 見送り', '年収基準未満', profileText.substring(0, 200), 'NG');
-      totalProcessed++;
+      ngCount++; totalProcessed++;
       await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now(), verdicts: { ok: okCount, ng: ngCount, pending: pendingCount } });
       continue;
     }
@@ -1626,7 +1626,7 @@ async function triggerAutoAdd() {
     // 短期在籍チェック：過去職歴に2年未満の在籍がある場合は即NG確定
     if (checkShortTenureNG(profileText)) {
       setBatchBadge(el, 'ng', '❌ 見送り(短期在籍)', '短期在籍あり', profileText.substring(0, 200), 'NG');
-      totalProcessed++;
+      ngCount++; totalProcessed++;
       await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now(), verdicts: { ok: okCount, ng: ngCount, pending: pendingCount } });
       continue;
     }
@@ -1638,7 +1638,7 @@ async function triggerAutoAdd() {
     }
     if (intentResult === 'ng') {
       setBatchBadge(el, 'ng', '❌ 見送り(転職意向なし)', '転職に興味がない', profileText.substring(0, 200), 'NG');
-      totalProcessed++;
+      ngCount++; totalProcessed++;
       await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now(), verdicts: { ok: okCount, ng: ngCount, pending: pendingCount } });
       continue;
     }
