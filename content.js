@@ -1119,11 +1119,25 @@ async function loadAllCandidatesIntoDOM() {
 async function autoScreenCandidates() {
   // APIキーと設定を取得
   let stored = {};
-  try { stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria']); } catch (_) { return; }
+  try { stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria', 'currentPosition']); } catch (_) { return; }
   const apiKey = (stored.apiKey || '').replace(/[^\x21-\x7E]/g, '').trim();
   if (!apiKey || apiKey.length < 20) return; // APIキー未設定なら何もしない
 
   const criteria = stored.screeningCriteria || {};
+  const currentPosition = stored.currentPosition || '';
+
+  // ポジション要件・フィードバックを並列取得（スクリーニング精度向上）
+  let posReq = '', feedbacks = [];
+  if (currentPosition) {
+    try {
+      const [reqRes, fbData] = await Promise.all([
+        fetchPositionRequirements(currentPosition),
+        loadRecentFeedbacks(5),
+      ]);
+      posReq = reqRes?.requirements || '';
+      feedbacks = fbData;
+    } catch (_) {}
+  }
 
   // カード検出（DOMが安定するまで待つ）
   await new Promise(r => setTimeout(r, 400));
@@ -1154,7 +1168,7 @@ async function autoScreenCandidates() {
   showAutoStatus(`🔍 ${cards.length}人を判定中...`);
 
   try {
-    const results = await callBatchScreeningAPI(apiKey, cards, criteria);
+    const results = await callBatchScreeningAPI(apiKey, cards, criteria, posReq, feedbacks, currentPosition);
 
     // 結果をカードに反映
     results.forEach((r, i) => {
@@ -1287,8 +1301,14 @@ ${candidateList}
 }
 
 // Claude APIを呼び出す（content.js内から直接）
-async function callBatchScreeningAPI(apiKey, cards, criteria) {
+async function callBatchScreeningAPI(apiKey, cards, criteria, posReq = '', feedbacks = [], positionName = '') {
   const criteriaLines = buildCriteriaText(criteria, getPlatform());
+  const posSection = posReq ? `\n【応募ポジション：${positionName}】\n${posReq.slice(0, 800)}\n` : '';
+  const fbSection = feedbacks.length > 0
+    ? '\n【過去の訂正例】\n' + feedbacks.slice(0, 5).map(f =>
+        `- 「${(f.profileSummary || '').slice(0, 60)}…」→ 正解:${f.correction}（AI誤判定:${f.aiVerdict}）`
+      ).join('\n') + '\n'
+    : '';
   const CHUNK = 80;
 
   const callChunk = async (chunk, offset) => {
@@ -1300,10 +1320,9 @@ async function callBatchScreeningAPI(apiKey, cards, criteria) {
 
 以下の【選定基準】に照らして、各候補者を判定してください。
 カード情報は概要のみのため、読み取れない項目は「情報なし」として扱ってください。
-
+${posSection}
 【選定基準】
-${criteriaLines}
-
+${criteriaLines}${fbSection}
 【候補者一覧】
 ${candidateList}
 
