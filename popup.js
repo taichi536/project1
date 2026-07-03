@@ -824,13 +824,33 @@ async function runBatchScreening() {
 
   const count = batchData.cards.length;
   const chunks = Math.ceil(count / 80);
+
+  const r = await chrome.storage.local.get(['screeningCriteria', 'gasSettings', 'currentPosition']);
+  const criteria = r.screeningCriteria || {};
+  const gas = r.gasSettings || {};
+  const currentPosition = r.currentPosition || '';
+
+  // ポジション要件をGASから取得（設定済みの場合）
+  let posReq = '';
+  if (currentPosition) {
+    const gasUrl = gas.url || gas.dbUrl;
+    if (gasUrl) {
+      try {
+        setStatus('screening', 'loading', 'ポジション要件を取得中...');
+        const posRes = await fetch(gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({ secret: gas.secret || 'snowwe2024', action: 'getPositionRequirements', position: currentPosition }),
+        });
+        const posData = await posRes.json();
+        if (posData.ok && posData.requirements) posReq = posData.requirements;
+      } catch (_) {}
+    }
+  }
+
   setStatus('screening', 'loading', chunks > 1 ? `${count}人を${chunks}回に分けて判定中...` : `${count}人を判定中...`);
 
-  const r = await chrome.storage.local.get(['screeningCriteria']);
-  const criteria = r.screeningCriteria || {};
-
   try {
-    const results = await runBatchScreeningAI(apiKey, batchData.cards, criteria);
+    const results = await runBatchScreeningAI(apiKey, batchData.cards, criteria, posReq, currentPosition);
     await chrome.tabs.sendMessage(tab.id, { action: 'setBatchResults', results });
 
     const okCount = results.filter(r => r.overall === 'OK').length;
@@ -875,10 +895,11 @@ function buildStandardCriteria(ageIncome) {
 - 年収が不明な場合・上記以外で迷う場合: OKとする`;
 }
 
-async function runBatchScreeningAI(apiKey, cards, criteria) {
+async function runBatchScreeningAI(apiKey, cards, criteria, posReq = '', positionName = '') {
   apiKey = sanitizeApiKey(apiKey);
   const criteriaLines = buildCriteriaLines(criteria);
   const standardCriteria = buildStandardCriteria(criteria.ageIncome);
+  const posSection = posReq ? `\n【応募ポジション：${positionName}】\n${posReq.slice(0, 600)}\n` : '';
   const CHUNK = 80; // 80人ずつ処理（出力トークン上限対策）
 
   const callChunk = async (chunk, offset) => {
@@ -893,7 +914,7 @@ async function runBatchScreeningAI(apiKey, cards, criteria) {
 
 以下の【選定基準】に照らして、各候補者を判定してください。
 カード情報は概要のみです。年収・学歴など情報が読み取れない項目は「問題なし」として扱い、明確にNGと確認できる場合のみNGとしてください。迷う場合は必ずOKとしてください。
-
+${posSection}
 【選定基準】
 ${standardCriteria}
 ${criteriaLines ? '\n【追加条件】\n' + criteriaLines : ''}
@@ -1581,7 +1602,8 @@ $('manual-save-btn').addEventListener('click', async () => {
 $('history-resend-btn').addEventListener('click', async () => {
   const r = await chrome.storage.local.get(['gasSettings', 'screeningCriteria']);
   const gas = r.gasSettings || {};
-  if (!gas.url || !gas.recruiter) {
+  const gasUrl = gas.url || gas.dbUrl;
+  if (!gasUrl || !gas.recruiter) {
     showHistoryMsg('GAS URLまたは担当者名が未設定です（設定タブを確認）', '#b91c1c'); return;
   }
   const history = await loadHistory();
@@ -1601,14 +1623,15 @@ $('history-resend-btn').addEventListener('click', async () => {
       univ: v.univ || '',
       media: v.platform || '',
       position: v.position || '',
+      industry: v.industry || '',
       ts: v.date,
     };
     try {
-      const res = await fetch(gas.url, { method: 'POST', body: JSON.stringify(payload) });
+      const res = await fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) });
       const json = await res.json();
       if (json.ok) { history[id].gasSent = true; success++; }
     } catch (_) {}
-    if (gas.dbUrl) {
+    if (gas.dbUrl && gas.dbUrl !== gasUrl) {
       try { await fetch(gas.dbUrl, { method: 'POST', body: JSON.stringify(payload) }); } catch (_) {}
     }
   }
