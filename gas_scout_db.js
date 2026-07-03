@@ -155,8 +155,18 @@ function doPost(e) {
         for (let i = 1; i < rows.length; i++) {
           if (!rows[i][0]) continue;
           if (normPos(String(rows[i][0])) === normInput) {
-            requirements = String(rows[i][1] || '').substring(0, 2000);
-            matchedName  = String(rows[i][0]);
+            matchedName = String(rows[i][0]);
+            // 5列形式（B=業務概要 C=必須 D=歓迎 E=人物像）と2列形式（B=説明）に両対応
+            if (rows[i].length >= 5 && (rows[i][2] || rows[i][3] || rows[i][4])) {
+              const parts = [];
+              if (rows[i][1]) parts.push('【業務概要】' + String(rows[i][1]));
+              if (rows[i][2]) parts.push('【必須スキル・経験】' + String(rows[i][2]));
+              if (rows[i][3]) parts.push('【歓迎スキル・経験】' + String(rows[i][3]));
+              if (rows[i][4]) parts.push('【求める人物像】' + String(rows[i][4]));
+              requirements = parts.join(' / ').substring(0, 2000);
+            } else {
+              requirements = String(rows[i][1] || '').substring(0, 2000);
+            }
             break;
           }
         }
@@ -175,7 +185,22 @@ function doPost(e) {
       if (!posSheet) return json({ ok: false });
       const positions = posSheet.getDataRange().getValues().slice(1)
         .filter(r => r[0])
-        .map(r => ({ name: String(r[0]), description: String(r[1] || '').substring(0, 1500) }));
+        .map(r => {
+          const name = String(r[0]);
+          // 5列形式（B=業務概要 C=必須 D=歓迎 E=人物像）と2列形式（B=説明）に両対応
+          let description;
+          if (r.length >= 5 && (r[2] || r[3] || r[4])) {
+            const parts = [];
+            if (r[1]) parts.push('【業務概要】' + String(r[1]));
+            if (r[2]) parts.push('【必須スキル・経験】' + String(r[2]));
+            if (r[3]) parts.push('【歓迎スキル・経験】' + String(r[3]));
+            if (r[4]) parts.push('【求める人物像】' + String(r[4]));
+            description = parts.join(' / ').substring(0, 1500);
+          } else {
+            description = String(r[1] || '').substring(0, 1500);
+          }
+          return { name, description };
+        });
       return json({ ok: true, positions });
     }
 
