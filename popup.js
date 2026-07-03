@@ -380,8 +380,9 @@ async function runGenerate() {
     try {
       const r2 = await chrome.storage.local.get(['gasSettings']);
       const gas2 = r2.gasSettings || {};
-      if (gas2.positionUrl) {
-        const posRes = await fetch(gas2.positionUrl, {
+      const posUrl = gas2.positionUrl || gas2.url || gas2.dbUrl;
+      if (posUrl) {
+        const posRes = await fetch(posUrl, {
           method: 'POST',
           body: JSON.stringify({ secret: gas2.secret || 'snowwe2024', action: 'getPositionRequirements', position: positionName }),
         });
@@ -1407,13 +1408,14 @@ async function renderHistory() {
       try {
         const r = await chrome.storage.local.get(['gasSettings', 'screeningCriteria']);
         const gas = r.gasSettings || {};
-        if (gas.dbUrl || gas.url) {
-          await fetch(gas.dbUrl || gas.url, {
+        const replyGasUrl = gas.url || gas.dbUrl;
+        if (replyGasUrl) {
+          await fetch(replyGasUrl, {
             method: 'POST',
             body: JSON.stringify({
               secret: gas.secret || 'snowwe2024',
               action: 'recordReply',
-              recruiter: r.screeningCriteria?.recruiterName || '',
+              recruiter: gas.recruiter || r.screeningCriteria?.recruiterName || '',
               company: h[id].company || '',
               platform: h[id].platform || '',
               sentDate: h[id].date || 0,
