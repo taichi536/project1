@@ -502,7 +502,7 @@ ${profileText}`;
 $('suggest-btn').addEventListener('click', () => runSuggestPosition());
 
 async function runSuggestPosition() {
-  const apiKey = $('api-key').value.trim();
+  const apiKey = sanitizeApiKey($('api-key').value);
   if (!apiKey) {
     setStatus('suggest', 'error', 'APIキーを入力して保存してください');
     return;
@@ -770,7 +770,7 @@ $('auto-add-btn').addEventListener('click', () => runAutoAdd());
 $('screening-btn').addEventListener('click', () => runScreening());
 
 async function runBatchScreening() {
-  const apiKey = $('api-key').value.trim();
+  const apiKey = sanitizeApiKey($('api-key').value);
   if (!apiKey) {
     setStatus('screening', 'error', 'APIキーを入力して保存してください');
     return;
@@ -815,7 +815,7 @@ async function runBatchScreening() {
   // ポジション要件をGASから取得（設定済みの場合）
   let posReq = '';
   if (currentPosition) {
-    const gasUrl = gas.url || gas.dbUrl;
+    const gasUrl = gas.positionUrl || gas.url || gas.dbUrl;
     if (gasUrl) {
       try {
         setStatus('screening', 'loading', 'ポジション要件を取得中...');
@@ -954,7 +954,7 @@ function buildCriteriaLines(criteria) {
 }
 
 async function runAutoAdd() {
-  const apiKey = $('api-key').value.trim();
+  const apiKey = sanitizeApiKey($('api-key').value);
   if (!apiKey) {
     setStatus('screening', 'error', 'APIキーを入力して保存してください');
     return;
@@ -974,7 +974,7 @@ async function runAutoAdd() {
 }
 
 async function runScreening() {
-  const apiKey = $('api-key').value.trim();
+  const apiKey = sanitizeApiKey($('api-key').value);
   if (!apiKey) {
     setStatus('screening', 'error', 'APIキーを入力して保存してください');
     return;
@@ -1022,7 +1022,7 @@ async function runScreening() {
   const currentPosition = r.currentPosition || '';
   let posReq = '';
   if (currentPosition) {
-    const gasUrl = gas.url || gas.dbUrl;
+    const gasUrl = gas.positionUrl || gas.url || gas.dbUrl;
     if (gasUrl) {
       try {
         const posRes = await fetch(gasUrl, {
@@ -1196,7 +1196,7 @@ function renderScreeningResult(result) {
 // APIキー接続テスト
 // ============================================================
 $('api-test-btn').addEventListener('click', async () => {
-  const apiKey = $('api-key').value.trim();
+  const apiKey = sanitizeApiKey($('api-key').value);
   const resultEl = $('api-test-result');
   resultEl.style.display = 'block';
   resultEl.style.color = '#2c2c2a';
