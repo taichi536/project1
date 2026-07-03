@@ -1258,7 +1258,7 @@ async function claudeFetch(apiKey, body, maxRetries = 4) {
       },
       body: JSON.stringify(body)
     });
-    if (response.status === 529) {
+    if (response.status === 529 || response.status === 429) {
       if (attempt === maxRetries) throw new Error('APIが混み合っています。しばらく待ってから再試行してください。');
       showAutoStatus(`APIが混み合っています。${delay / 1000}秒後にリトライ... (${attempt + 1}/${maxRetries})`, delay - 200);
       await sleep(delay);
