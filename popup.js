@@ -813,7 +813,7 @@ async function runBatchScreening() {
   const currentPosition = r.currentPosition || '';
 
   // ポジション要件をGASから取得（設定済みの場合）
-  let posReq = '';
+  let posReq = '', companyCriteriaBatch = '';
   if (currentPosition) {
     const gasUrl = gas.positionUrl || gas.url || gas.dbUrl;
     if (gasUrl) {
@@ -824,7 +824,10 @@ async function runBatchScreening() {
           body: JSON.stringify({ secret: gas.secret || 'snowwe2024', action: 'getPositionRequirements', position: currentPosition }),
         });
         const posData = await posRes.json();
-        if (posData.ok && posData.requirements) posReq = posData.requirements;
+        if (posData.ok && (posData.requirements || posData.companyCriteria)) {
+          posReq = posData.requirements || '';
+          companyCriteriaBatch = posData.companyCriteria || '';
+        }
       } catch (_) {}
     }
   }
@@ -832,7 +835,7 @@ async function runBatchScreening() {
   setStatus('screening', 'loading', chunks > 1 ? `${count}人を${chunks}回に分けて判定中...` : `${count}人を判定中...`);
 
   try {
-    const results = await runBatchScreeningAI(apiKey, batchData.cards, criteria, posReq, currentPosition);
+    const results = await runBatchScreeningAI(apiKey, batchData.cards, criteria, posReq, currentPosition, companyCriteriaBatch);
     await chrome.tabs.sendMessage(tab.id, { action: 'setBatchResults', results });
 
     const okCount = results.filter(r => r.overall === 'OK').length;
@@ -877,11 +880,12 @@ function buildStandardCriteria(ageIncome) {
 - 年収が不明な場合・上記以外で迷う場合: OKとする`;
 }
 
-async function runBatchScreeningAI(apiKey, cards, criteria, posReq = '', positionName = '') {
+async function runBatchScreeningAI(apiKey, cards, criteria, posReq = '', positionName = '', companyCriteria = '') {
   apiKey = sanitizeApiKey(apiKey);
   const criteriaLines = buildCriteriaLines(criteria);
   const standardCriteria = buildStandardCriteria(criteria.ageIncome);
   const posSection = posReq ? `\n【応募ポジション：${positionName}】\n${posReq.slice(0, 600)}\n` : '';
+  const companySection = companyCriteria ? `\n【会社別採用基準（共通基準より優先）】\n${companyCriteria.slice(0, 600)}\n` : '';
   const CHUNK = 80; // 80人ずつ処理（出力トークン上限対策）
 
   const callChunk = async (chunk, offset) => {
@@ -893,7 +897,7 @@ async function runBatchScreeningAI(apiKey, cards, criteria, posReq = '', positio
     }).join('\n');
 
     const prompt = `あなたは転職エージェントの一次選定アシスタントです。
-
+${companySection}
 以下の【選定基準】に照らして、各候補者を判定してください。
 カード情報は概要のみです。年収・学歴など情報が読み取れない項目は「問題なし」として扱い、明確にNGと確認できる場合のみNGとしてください。迷う場合は必ずOKとしてください。
 ${posSection}
