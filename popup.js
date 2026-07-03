@@ -2,6 +2,34 @@
 
 const $ = id => document.getElementById(id);
 
+const _ANTHROPIC_HEADERS = {
+  'Content-Type': 'application/json',
+  'anthropic-version': '2023-06-01',
+  'anthropic-dangerous-direct-browser-access': 'true'
+};
+
+async function claudeFetch(apiKey, body, maxRetries = 4) {
+  let delay = 3000;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { ..._ANTHROPIC_HEADERS, 'x-api-key': apiKey },
+      body: JSON.stringify(body)
+    });
+    if (response.status === 529 || response.status === 429) {
+      if (attempt === maxRetries) throw new Error('APIが混み合っています。しばらく待ってから再試行してください。');
+      await new Promise(r => setTimeout(r, delay));
+      delay = Math.min(delay * 2, 30000);
+      continue;
+    }
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `APIエラー (${response.status})`);
+    }
+    return response.json();
+  }
+}
+
 // ============================================================
 // 初期化
 // ============================================================
@@ -453,26 +481,11 @@ ${positionDescription ? `募集要件:\n${positionDescription.substring(0, 800)}
 【候補者プロフィール】
 ${profileText}`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 200,
-      messages: [{ role: 'user', content: prompt }]
-    })
+  const data = await claudeFetch(apiKey, {
+    model: 'claude-sonnet-4-6',
+    max_tokens: 200,
+    messages: [{ role: 'user', content: prompt }]
   });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `APIエラー (${response.status})`);
-  }
-  const data = await response.json();
   const text = data.content?.[0]?.text || '';
   if (!text) throw new Error('レスポンスが空でした');
   // Strip any appended footnotes (e.g. "---\n\n※プロフィールが..." added when profile data is thin)
@@ -553,22 +566,12 @@ ${profileText}
 JSON形式のみで出力（コードブロック不要）:
 {"current_role":"現在の役職","current_industry":"現職業界（例:SIer・コンサル・メーカー等）","company_size":"企業規模（大手・中堅・ベンチャー等）","experience_years":経験年数の整数,"key_skills":["スキル1","スキル2"],"estimated_grade":"推定グレード（例:Manager相当・Consultant相当）","transfer_axis":"転職軸（記載があれば。なければ職歴から推測）","strengths":"アクセンチュアで活かせる最大の強み1文"}`;
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 400,
-      messages: [{ role: 'user', content: prompt }]
-    })
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
+  const data = await claudeFetch(apiKey, {
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 400,
+    messages: [{ role: 'user', content: prompt }]
+  }).catch(() => null);
+  if (!data) return null;
   const text = (data.content?.[0]?.text || '').trim();
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) return null;
@@ -638,25 +641,11 @@ ${profileText}
 【重要】出力はJSON配列のみ。ポジション名は一覧に記載された文字列を一字一句そのままコピーすること:
 ["ポジション名1","ポジション名2",...]`;
 
-  const step1Res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 500,
-      messages: [{ role: 'user', content: step1Prompt }]
-    })
+  const step1Data = await claudeFetch(apiKey, {
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 500,
+    messages: [{ role: 'user', content: step1Prompt }]
   });
-  if (!step1Res.ok) {
-    const err = await step1Res.json().catch(() => ({}));
-    throw new Error(err.error?.message || `APIエラー (${step1Res.status})`);
-  }
-  const step1Data = await step1Res.json();
   const step1Text = (step1Data.content?.[0]?.text || '').trim();
   const arrMatch = step1Text.match(/\[[\s\S]*\]/);
   let top15Names = [];
@@ -719,25 +708,11 @@ ${profileText}
 {"suggestions":[{"position":"ポジション名","match_score":90,"reason":"推奨理由を1文で記述"}]}
 ※必ず守ること: reasonは1文で簡潔に。ダブルクォート・改行・バックスラッシュを含めないこと。`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1500,
-      messages: [{ role: 'user', content: prompt }]
-    })
+  const data = await claudeFetch(apiKey, {
+    model: 'claude-sonnet-4-6',
+    max_tokens: 1500,
+    messages: [{ role: 'user', content: prompt }]
   });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `APIエラー (${response.status})`);
-  }
-  const data = await response.json();
   const text = (data.content?.[0]?.text || '').trim();
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('AIの応答からJSONを抽出できませんでした');
@@ -932,26 +907,11 @@ ${candidateList}
 以下のJSON形式のみで出力してください（説明不要）:
 {"results":[{"i":${offset + 1},"o":"OK"},{"i":${offset + 2},"o":"NG"}]}`;
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1200,
-        messages: [{ role: 'user', content: prompt }]
-      })
+    const data = await claudeFetch(apiKey, {
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1200,
+      messages: [{ role: 'user', content: prompt }]
     });
-
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.error?.message || `APIエラー (${response.status})`);
-    }
-    const data = await response.json();
     const text = (data.content?.[0]?.text || '').trim();
     const clean = text.replace(/```json|```/g, '').trim();
     const jsonMatch = clean.match(/\{[\s\S]*\}/);
@@ -1138,26 +1098,11 @@ ${profileText}
   "comment": "総合的なコメントを2〜3文で。スカウトを打つべきかどうかの所見を含める。"
 }`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 800,
-      messages: [{ role: 'user', content: prompt }]
-    })
+  const data = await claudeFetch(apiKey, {
+    model: 'claude-sonnet-4-6',
+    max_tokens: 800,
+    messages: [{ role: 'user', content: prompt }]
   });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `APIエラー (${response.status})`);
-  }
-  const data = await response.json();
   const text = (data.content?.[0]?.text || '').trim();
   const clean = text.replace(/```json|```/g, '').trim();
   const jsonMatch = clean.match(/\{[\s\S]*\}/);

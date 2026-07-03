@@ -297,9 +297,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'getPositionRequirements') {
     const { position } = msg;
     chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {
-      const url    = gasSettings?.url || gasSettings?.dbUrl;
-      const secret = gasSettings?.secret;
-      if (!url || !secret) {
+      const url    = gasSettings?.positionUrl || gasSettings?.url || gasSettings?.dbUrl;
+      const secret = gasSettings?.secret || 'snowwe2024';
+      if (!url) {
         sendResponse({ ok: false, requirements: '', companyCriteria: '' });
         return;
       }
