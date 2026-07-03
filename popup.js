@@ -1567,7 +1567,7 @@ function normalizePlatform(s) {
   const map = {
     'ビズリーチ': 'bizreach', 'bizreach': 'bizreach', 'br': 'bizreach',
     'リクナビ': 'rds', 'rds': 'rds', 'hrtech': 'rds',
-    'doda': 'dodax', 'dodax': 'dodax', 'doda-x': 'dodax',
+    'doda': 'dodax', 'dodax': 'dodax', 'doda-x': 'dodax', 'doda x': 'dodax', 'x.doda': 'dodax',
     'ambi': 'ambi',
     'green': 'green', 'グリーン': 'green',
     'マイナビ': 'mynavi', 'mynavi': 'mynavi',
