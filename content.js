@@ -3271,7 +3271,7 @@ function showFeedbackPopup(badgeEl) {
 
   const popup = document.createElement('div');
   popup.className = 'snow-we-fb-popup';
-  const reasonHtml = reason ? `<div class="snow-we-fb-reason">💭 ${reason}</div>` : '';
+  const reasonHtml = reason ? `<div class="snow-we-fb-reason">💭 ${escapeHtml(reason)}</div>` : '';
   popup.innerHTML = `${reasonHtml}<span>判定を訂正</span><div class="snow-we-fb-row"></div>`;
   const row = popup.querySelector('.snow-we-fb-row');
 
@@ -3568,6 +3568,9 @@ async function loadAutoAddProgress() {
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
 // リクナビHRTechのカード上の「送済（X日前）」バッジからスカウト送信日数を取得
 function getRikunabiScoutDays(cardEl) {
@@ -4031,8 +4034,8 @@ async function initPositionIndicator() {
             color:#1e293b;border-bottom:1px solid #ede9fe;background:#faf5ff;
           `;
           sItem.innerHTML = `
-            <div style="font-weight:600;color:#4f46e5;">${s.rank}位 ${s.name}</div>
-            <div style="font-size:11px;color:#6b7280;margin-top:2px;">${s.reason || ''}</div>
+            <div style="font-weight:600;color:#4f46e5;">${s.rank}位 ${escapeHtml(s.name || '')}</div>
+            <div style="font-size:11px;color:#6b7280;margin-top:2px;">${escapeHtml(s.reason || '')}</div>
           `;
           sItem.addEventListener('mouseenter', () => { sItem.style.background = '#ede9fe'; });
           sItem.addEventListener('mouseleave', () => { sItem.style.background = '#faf5ff'; });
@@ -4052,7 +4055,7 @@ async function initPositionIndicator() {
         divider.textContent = '─── 全ポジション ───';
         aiResults.appendChild(divider);
       } catch (err) {
-        aiResults.innerHTML = `<div style="padding:10px 14px;font-size:11px;color:#ef4444;font-family:sans-serif;">${err.message || 'エラーが発生しました'}</div>`;
+        aiResults.innerHTML = `<div style="padding:10px 14px;font-size:11px;color:#ef4444;font-family:sans-serif;">${escapeHtml(err.message || 'エラーが発生しました')}</div>`;
       }
       aiBtn.innerHTML = '<span>✨</span><span>AIがこの候補者に合うポジションを提案</span>';
       aiBtn.style.pointerEvents = 'auto';
