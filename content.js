@@ -3749,12 +3749,18 @@ function buildCriteriaText(criteria, platform) {
   }
 
   // 追加条件（設定タブで入力された場合）
-  const ai = criteria.ageIncome || {};
   if (criteria.ageMin || criteria.ageMax) {
     const parts = [];
     if (criteria.ageMin) parts.push(`${criteria.ageMin}歳以上`);
     if (criteria.ageMax) parts.push(`${criteria.ageMax}歳以下`);
     lines.push(`- 年齢追加条件: ${parts.join('かつ')}`);
+  }
+  const tiers = (criteria.companyTiers || []).filter(t => t && t !== '不問');
+  if (tiers.length > 0) {
+    lines.push(`- 社格条件（追加）: 現職が${tiers.join('・')}のいずれかであること`);
+  }
+  if (criteria.educationReq && criteria.educationReq !== '不問') {
+    lines.push(`- 学歴条件（追加）: ${criteria.educationReq}を満たすこと`);
   }
   // minTenure未設定時はデフォルト2年を適用
   const tenureYears = criteria.minTenure || 2;
