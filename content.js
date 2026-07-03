@@ -4081,23 +4081,41 @@ async function showScoutedNoticeInPanel(panel) {
   const existing = document.getElementById('snow-we-scouted-notice');
   if (existing) existing.remove();
 
-  // カードからIDを取得（パネルテキストでフィンガープリント）
-  const lines = (panel.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
-  const fp = lines.slice(0, 6).join('|');
-  if (!fp) return;
-
   const history = await getScoutHistory();
-  // パネルのテキストと履歴IDの照合（URLベースIDが多いため、テキスト一致で近似判定）
+  if (!Object.keys(history).length) return;
+
   let matchRecord = null;
-  const profileUrl = location.href.replace(/[?#].*$/, '');
-  if (history[profileUrl]) {
-    matchRecord = history[profileUrl];
-  } else {
-    // フィンガープリント前方一致で探す
-    for (const [id, rec] of Object.entries(history)) {
-      if (id.includes(fp.slice(0, 30))) { matchRecord = rec; break; }
+
+  // ① パネル内にプロフィールURLがあればIDとして直接照合
+  const pUrl = findProfileUrl(panel);
+  if (pUrl) {
+    const cleanUrl = pUrl.replace(/[?#].*$/, '');
+    if (history[cleanUrl]) matchRecord = history[cleanUrl];
+  }
+
+  // ② 現在のページURL（プロフィール専用ページの場合）
+  if (!matchRecord) {
+    const pageUrl = location.href.replace(/[?#].*$/, '');
+    if (history[pageUrl]) matchRecord = history[pageUrl];
+  }
+
+  // ③ 会社名の部分一致（リスト画面で同一会社の候補者を検出）
+  if (!matchRecord) {
+    const panelInfo = extractBasicInfo(panel);
+    const panelCompany = (panelInfo.company || '').trim();
+    if (panelCompany.length >= 2) {
+      const maxAge = 180 * 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      for (const rec of Object.values(history)) {
+        if (!rec.company || !rec.date || now - rec.date > maxAge) continue;
+        const stored = rec.company.trim();
+        if (stored && (stored.includes(panelCompany) || panelCompany.includes(stored))) {
+          matchRecord = rec; break;
+        }
+      }
     }
   }
+
   if (!matchRecord) return;
 
   const daysAgo = Math.floor((Date.now() - matchRecord.date) / (1000 * 60 * 60 * 24));
@@ -4540,13 +4558,33 @@ function extractProfile() {
       ]);
     }
 
-  } else if (host.includes('doda-x') || host.includes('dodax') || url.includes('doda-x')) {
-    text = extractBySelectors([
+  } else if (host.includes('doda-x') || host.includes('dodax') || host.includes('x.doda')) {
+    detailPanel = findDodaxDetailPanel();
+    const ddRoot = detailPanel || null;
+
+    const byKeyword = extractByKeywords([
+      '職務経歴', '職歴', '業務内容', '仕事内容',
+      'スキル', '技術', '開発言語', '資格',
+      '学歴', '最終学歴', '大学', '大学院',
+      '語学', '英語', 'TOEIC',
+      '自己PR', 'PR', 'アピール',
+      '転職理由', '希望年収', '希望職種',
+      '経験業種', '経験職種', '経験社数', '年収'
+    ], ddRoot, 30, 12000);
+
+    const bySelector = extractBySelectors([
       '[class*="workHistory"]', '[class*="work-history"]',
       '[class*="career"]', '[class*="summary"]',
       '[class*="skill"]', '[class*="resume"]',
       '[class*="profile"]', 'section', 'article'
-    ]);
+    ], ddRoot);
+
+    text = byKeyword.length >= bySelector.length ? byKeyword : bySelector;
+    if (text) text = removeNonProfileSections(text);
+
+    if (!text || text.trim().length < 100) {
+      text = detailPanel ? removeNonProfileSections(extractMainText(detailPanel, 5000)) : '';
+    }
 
   } else if (host.includes('rikunabi') || host.includes('hrtech')) {
     detailPanel = findRDSDetailPanel();

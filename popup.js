@@ -7,6 +7,13 @@ const $ = id => document.getElementById(id);
 // ============================================================
 document.addEventListener('DOMContentLoaded', async () => {
   try {
+  // バージョン表示を manifest から自動更新
+  try {
+    const mv = chrome.runtime.getManifest();
+    const vEl = document.querySelector('.header-text .sub');
+    if (vEl && mv.version) vEl.textContent = `Snow-we.Inc — v${mv.version}`;
+  } catch (_) {}
+
   const result = await chrome.storage.local.get(['apiKey', 'currentPosition']).catch(() => ({}));
   if (result.apiKey) $('api-key').value = result.apiKey;
 
