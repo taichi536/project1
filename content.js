@@ -3105,7 +3105,7 @@ async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
   // GASスプレッドシートにも送信（設定済みかつフィードバック保存が有効な場合）
   try {
     const { gasSettings, screeningCriteria } = await chrome.storage.local.get(['gasSettings', 'screeningCriteria']);
-    const gasUrl = gasSettings?.dbUrl || gasSettings?.url;
+    const gasUrl = gasSettings?.url || gasSettings?.dbUrl;
     const secret = gasSettings?.secret || 'snowwe2024';
     if (gasUrl && gasSettings?.feedbackEnabled !== false) {
       chrome.runtime.sendMessage({
