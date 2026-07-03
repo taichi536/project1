@@ -3734,20 +3734,31 @@ function buildCriteriaText(criteria, platform) {
 }
 
 // -------------------------------------------------------
-// AI ポジション提案
+// AI ポジション提案（セッション内キャッシュ付き）
 // -------------------------------------------------------
+const _aiSuggestCache = new Map(); // profileKey → suggestions
+
 async function suggestPositionWithAI(candidateProfile, positionsWithDesc) {
   const stored = await chrome.storage.local.get(['apiKey']).catch(() => ({}));
   const apiKey = (stored.apiKey || '').replace(/[^\x21-\x7E]/g, '').trim();
   if (!apiKey || apiKey.length < 20) throw new Error('APIキー未設定');
+
+  // 同じ候補者に対して2回目以降はキャッシュを返す
+  const cacheKey = candidateProfile.slice(0, 200);
+  if (_aiSuggestCache.has(cacheKey)) return _aiSuggestCache.get(cacheKey);
 
   const profile = candidateProfile.slice(0, 3000);
   const posList = positionsWithDesc.slice(0, 60).map((p, i) =>
     `${i + 1}. 【${p.name}】${p.description ? p.description.slice(0, 400) : ''}`
   ).join('\n');
 
-  const prompt = `あなたは転職エージェントのアシスタントです。
-候補者のプロフィールを分析し、以下のポジション一覧の中からこの候補者の経験・スキル・志向に最もマッチするポジションをトップ3選んでください。
+  const prompt = `あなたは日本の転職エージェントのアシスタントです。
+候補者のプロフィールを分析し、以下のポジション一覧の中からこの候補者の経験・スキルに最もマッチするポジションをトップ3選んでください。
+
+選定ポイント：
+- 候補者の直近の職種・業界経験が活かせるか
+- 候補者のスキル・資格がポジション要件に合致するか
+- キャリアアップとして自然なステップか
 
 【候補者プロフィール】
 ${profile}
@@ -3755,11 +3766,11 @@ ${profile}
 【ポジション一覧】
 ${posList}
 
-必ず以下のJSON形式のみで回答してください。コードブロック・前置き・説明文は不要です。
+必ず以下のJSON形式のみで回答してください。コードブロック・前置き・説明文は不要。nameは一覧の【】内と完全一致させること。
 {"suggestions":[
-  {"rank":1,"name":"ポジション名（一覧の【】内と完全一致）","reason":"マッチ理由を30文字以内で"},
-  {"rank":2,"name":"ポジション名","reason":"マッチ理由を30文字以内で"},
-  {"rank":3,"name":"ポジション名","reason":"マッチ理由を30文字以内で"}
+  {"rank":1,"name":"ポジション名","reason":"マッチ理由を25文字以内で"},
+  {"rank":2,"name":"ポジション名","reason":"マッチ理由を25文字以内で"},
+  {"rank":3,"name":"ポジション名","reason":"マッチ理由を25文字以内で"}
 ]}`;
 
   const data = await claudeFetch(apiKey, {
@@ -3772,7 +3783,9 @@ ${posList}
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('AI応答のJSON解析失敗: ' + text.slice(0, 80));
   const parsed = JSON.parse(jsonMatch[0]);
-  return parsed.suggestions || [];
+  const suggestions = parsed.suggestions || [];
+  if (suggestions.length > 0) _aiSuggestCache.set(cacheKey, suggestions);
+  return suggestions;
 }
 
 // -------------------------------------------------------
@@ -3860,14 +3873,16 @@ async function initPositionIndicator() {
       aiBtn.innerHTML = '<span>⏳</span><span>分析中...</span>';
       aiBtn.style.pointerEvents = 'none';
       aiResults.style.display = 'block';
-      aiResults.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:#94a3b8;font-family:sans-serif;">候補者プロフィールを読み取り、ポジションを分析しています...</div>';
+      aiResults.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:#94a3b8;font-family:sans-serif;">プロフィールを読み取り中...</div>';
       try {
+        const profile = extractProfile();
+        if (!profile || profile.trim().length < 50) throw new Error('候補者プロフィールが読み取れませんでした。詳細パネルを開いてください。');
+
+        aiResults.innerHTML = `<div style="padding:8px 14px;font-size:11px;color:#6b7280;font-family:sans-serif;background:#f8fafc;border-bottom:1px solid #e2e8f0;">📄 プロフィール取得済み（${profile.length}文字）— ポジションを分析中...</div>`;
+
         const posRes = await chrome.runtime.sendMessage({ type: 'getPositionListWithDesc' });
         const posWithDesc = posRes?.positions || [];
         if (posWithDesc.length === 0) throw new Error('ポジション情報を取得できませんでした（ポップアップ設定でGAS URLを確認してください）');
-
-        const profile = extractProfile();
-        if (!profile || profile.trim().length < 50) throw new Error('候補者プロフィールが読み取れませんでした。詳細パネルを開いてください。');
 
         const suggestions = await suggestPositionWithAI(profile, posWithDesc);
         if (!suggestions || suggestions.length === 0) throw new Error('提案結果が空でした');
