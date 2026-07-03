@@ -4554,19 +4554,24 @@ function extractProfile() {
   let detailPanel = null;
 
   if (host.includes('bizreach') || host.includes('es-support')) {
-    text = extractBySelectors([
+    detailPanel = findBizreachDetailPanel();
+    const bzRoot = detailPanel || null;
+    const byKeyword = extractByKeywords([
+      '職務経歴', '職歴', 'スキル', '業務内容', '実績',
+      '学歴', '語学', '資格', '自己PR', '希望条件',
+      '経験業種', '経験職種', '希望年収', '年収'
+    ], bzRoot, 30, 12000);
+    const bySelector = extractBySelectors([
       '[class*="profile"]', '[class*="career"]',
       '[class*="resume"]', '[class*="skill"]',
       '[class*="pr"]', '[class*="history"]', '[class*="work"]',
       '[class*="scout"]', '[class*="Scout"]',
       'section', 'article'
-    ]);
-
+    ], bzRoot);
+    text = byKeyword.length >= bySelector.length ? byKeyword : bySelector;
+    if (text) text = removeNonProfileSections(text);
     if (!text || text.trim().length < 100) {
-      text = extractByKeywords([
-        '職務経歴', '職歴', 'スキル', '業務内容', '実績',
-        '学歴', '語学', '資格', '自己PR', '希望条件'
-      ]);
+      text = detailPanel ? removeNonProfileSections(extractMainText(detailPanel, 5000)) : '';
     }
 
   } else if (host.includes('doda-x') || host.includes('dodax') || host.includes('x.doda')) {
@@ -4654,6 +4659,7 @@ function extractProfile() {
       '経験業界', '経験職種', '資格', 'スカウト希望', '希望業界',
       '希望職種', '希望勤務地', '転職先に求める', '自己PR'
     ]);
+    if (text) text = removeNonProfileSections(text);
 
   } else if (host.includes('ambi') || host.includes('en-ambi')) {
     detailPanel = findAMBIDetailPanel();
