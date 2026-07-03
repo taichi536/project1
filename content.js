@@ -58,6 +58,7 @@ let _batchCriteria = null;
 let _batchIsRunning = false; // chrome.storage失敗時もisFreshStartを誤判定しないためのフラグ
 let _triggerAutoAddLock = false; // 外部からの重複起動を防ぐロック（再帰呼び出しは _batchIsRunning=true で区別）
 let _batchScoutHistory = null; // スカウト履歴キャッシュ（CDKスクロールごとの再取得を防ぐ）
+let _autoAddResuming = false; // ページ遷移後にtriggerAutoAddが再開予定の場合true（autoScreenCandidatesを抑制）
 
 // 夜間自動実行モード
 let _isAutoRunMode = false;
@@ -1203,6 +1204,8 @@ async function loadAllCandidatesIntoDOM() {
 // 自動判定：ページロード時に全候補者を自動スクリーニング
 // -------------------------------------------------------
 async function autoScreenCandidates() {
+  // triggerAutoAdd再開が予定されている場合はスキップ（APIコール重複を防ぐ）
+  if (_autoAddResuming) return;
   // APIキーと設定を取得
   let stored = {};
   try { stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria', 'currentPosition']); } catch (_) { return; }
@@ -4284,6 +4287,12 @@ function initDetailPanelObserver() {
 
 // ページロード後に自動追加の再開チェック（sessionStorageのみ使用）
 window.addEventListener('load', () => {
+  // autoScreenCandidates抑制フラグ：再開フラグを即チェック（1sタイムアウト前に設定）
+  try {
+    const _raw = sessionStorage.getItem('snowWeAutoAdd');
+    if (_raw && JSON.parse(_raw).resume) _autoAddResuming = true;
+  } catch (_) {}
+
   setTimeout(async () => {
     injectStyles();
     initPositionIndicator();
