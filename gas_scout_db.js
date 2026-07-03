@@ -726,6 +726,7 @@ function gicsAutoClassify(companyName) {
   if (/マッキンゼー|mckinsey|ボストンコンサル|bcg|roland berger|ローランドベルガー|bain|ベイン/.test(n)) return 'コンサルティングサービス';
   if (/デロイト|deloitte|pwc|kpmg|ey |アーンスト/.test(n))                 return 'コンサルティングサービス';
   if (/ベイカレント|baycurrent/.test(n))                                    return 'コンサルティングサービス';
+  if (/アビーム|abeam/.test(n))                                             return 'コンサルティングサービス';
 
   // SIer（システムインテグレーター）
   if (/ntt(データ|data|コミュニケーションズ|communications)/.test(n))       return 'SIer';
@@ -740,10 +741,25 @@ function gicsAutoClassify(companyName) {
   if (/nec|日本電気/.test(n))                                               return '情報技術サービス';
   if (/ibm|日本ibm/.test(n))                                                return '情報技術サービス';
 
+  // 電子装置・機器・部品
+  if (/東芝|toshiba/.test(n) && !/デバイス/.test(n))                       return '電子装置・機器・部品';
+  if (/三菱電機|mitsubishi electric/.test(n))                               return '電子装置・機器・部品';
+  if (/キーエンス|keyence/.test(n))                                         return '電子装置・機器・部品';
+
+  // 民生用電子機器
+  if (/ソニー|sony/.test(n))                                                return '民生用電子機器';
+  if (/パナソニック|panasonic/.test(n))                                     return '民生用電子機器';
+  if (/シャープ|sharp/.test(n))                                             return '民生用電子機器';
+
   // SaaS
   if (/salesforce|セールスフォース/.test(n))                                return 'SaaS';
   if (/freee/.test(n))                                                       return 'SaaS';
   if (/smarthr/.test(n))                                                     return 'SaaS';
+  if (/マネーフォワード|money forward/.test(n))                             return 'SaaS';
+  if (/sansan/.test(n))                                                      return 'SaaS';
+  if (/cybozu|サイボウズ|kintone/.test(n))                                  return 'SaaS';
+
+  // ソフトウェア
   if (/microsoft|マイクロソフト/.test(n))                                   return 'ソフトウェア';
   if (/oracle|オラクル/.test(n))                                            return 'ソフトウェア';
   if (/sap/.test(n))                                                         return 'ソフトウェア';
@@ -762,7 +778,7 @@ function gicsAutoClassify(companyName) {
   if (/kddi|au/.test(n))                                                     return '各種電気通信サービス';
   if (/docomo|ドコモ/.test(n))                                              return '各種電気通信サービス';
   if (/楽天モバイル|rakutenmobile/.test(n))                                 return '各種電気通信サービス';
-  if (/ntt(東日本|西日本|^$)/.test(n) || n === 'ntt')                       return '各種電気通信サービス';
+  if (/ntt(東日本|西日本)/.test(n) || n === 'ntt')                          return '各種電気通信サービス';
 
   // 金融・銀行
   if (/信託銀行|三菱uf.+信託|三井住友信託|みずほ信託/.test(n))             return '信託銀行';
@@ -793,12 +809,9 @@ function gicsAutoClassify(companyName) {
   if (/ブリヂストン|bridgestone|住友ゴム/.test(n))                          return '自動車用部品';
 
   // 重工業
-  if (/川崎重工|三菱重工|ihiエアロ|ihi|石川島/.test(n))                    return '重工業';
+  if (/川崎重工|川崎車両|川崎車輛|三菱重工|ihiエアロ|ihi|石川島/.test(n))  return '重工業';
 
-  // 半導体・電子
-  if (/キーエンス|keyence/.test(n))                                         return '電子装置・機器・部品';
-  if (/ソニー|sony/.test(n))                                                return '民生用電子機器';
-  if (/パナソニック|panasonic/.test(n))                                     return '民生用電子機器';
+  // 半導体・半導体製造装置
   if (/東京エレク|tel|applied materials|レーザーテック/.test(n))            return '半導体・半導体製造装置';
   if (/ルネサス|renesas|ローム|rohm|東芝デバイス/.test(n))                  return '半導体・半導体製造装置';
   if (/(半導体|semiconductor)/.test(n))                                      return '半導体・半導体製造装置';
@@ -841,20 +854,18 @@ function gicsAutoClassify(companyName) {
   // 物流・運輸
   if (/ヤマト|yamato|佐川|sagawa|日本郵便|jppost/.test(n))                  return '航空貨物・物流サービス';
   if (/jal|ana|日本航空|全日空|航空/.test(n))                               return '旅客航空輸送';
-  if (/jr|東海道新幹線|鉄道|railway/.test(n))                               return '陸上運輸';
+  if (/jr.*(東日本|西日本|東海|九州|北海道)|鉄道|railway/.test(n))         return '陸上運輸';
   if (/商船三井|日本郵船|川崎汽船|海運/.test(n))                            return '海上運輸';
 
   // エネルギー・化学
   if (/jxtg|eneos|出光|idemitsu|コスモ石油/.test(n))                        return '石油・ガス・消耗燃料';
-  if (/東電|東京電力|関西電力|中部電力|九州電力|電力/.test(n))              return '電力';
+  if (/東電|東京電力|関西電力|中部電力|九州電力|電力|北陸電力|東北電力|北海道電力|四国電力/.test(n)) return '電力';
+  if (/大阪ガス|東京ガス|東邦ガス|西部ガス|都市ガス/.test(n))               return 'ガス';
   if (/旭化成|住友化学|三菱化学|東レ|toray|化学/.test(n))                   return '化学';
 
   // 官公庁・教育機関
   if (/省|庁|役所|官公庁|市役所|区役所|町役場|裁判所|警察署|消防署|検察庁|税務署|法務局|国会|議会/.test(n)) return '官公庁';
   if (/大学|高校|中学校|小学校|専門学校|学校法人|教育委員会|幼稚園|保育園/.test(n)) return '教育機関';
-
-  // 重工業（固有名詞）
-  if (/川崎車両|川崎車輛/.test(n)) return '重工業';
 
   // 汎用キーワード（最後のフォールバック）
   if (/(コンサルティング|コンサルタント|consulting)/.test(n)) return 'コンサルティングサービス';

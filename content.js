@@ -384,42 +384,67 @@ const RESCOUNT_DAYS = 7; // 1週間 = 7日
 function gicsAutoClassify(companyName) {
   if (!companyName) return '';
   const n = companyName.replace(/[株式会社　\s]/g, '').toLowerCase();
+
+  // コンサルティング・専門サービス
   if (/accenture|アクセンチュア/.test(n))                                  return 'コンサルティングサービス';
   if (/マッキンゼー|mckinsey|ボストンコンサル|bcg|roland berger|ローランドベルガー|bain|ベイン/.test(n)) return 'コンサルティングサービス';
   if (/デロイト|deloitte|pwc|kpmg|ey |アーンスト/.test(n))                 return 'コンサルティングサービス';
   if (/ベイカレント|baycurrent/.test(n))                                    return 'コンサルティングサービス';
   if (/アビーム|abeam/.test(n))                                             return 'コンサルティングサービス';
+
+  // SIer（システムインテグレーター）
   if (/ntt(データ|data|コミュニケーションズ|communications)/.test(n))       return 'SIer';
   if (/野村総研|nri/.test(n))                                               return 'SIer';
   if (/伊藤忠テクノ|ctc/.test(n))                                           return 'SIer';
   if (/scsk/.test(n))                                                        return 'SIer';
   if (/インフォシス|infosys|tcs|wipro/.test(n))                             return 'SIer';
+
+  // 情報技術サービス
   if (/富士通|fujitsu/.test(n))                                             return '情報技術サービス';
   if (/日立|hitachi/.test(n))                                               return '情報技術サービス';
   if (/nec|日本電気/.test(n))                                               return '情報技術サービス';
   if (/ibm|日本ibm/.test(n))                                                return '情報技術サービス';
-  if (/東芝|toshiba/.test(n))                                               return '電子装置・機器・部品';
+
+  // 電子装置・機器・部品
+  if (/東芝|toshiba/.test(n) && !/デバイス/.test(n))                       return '電子装置・機器・部品';
   if (/三菱電機|mitsubishi electric/.test(n))                               return '電子装置・機器・部品';
+  if (/キーエンス|keyence/.test(n))                                         return '電子装置・機器・部品';
+
+  // 民生用電子機器
+  if (/ソニー|sony/.test(n))                                                return '民生用電子機器';
+  if (/パナソニック|panasonic/.test(n))                                     return '民生用電子機器';
   if (/シャープ|sharp/.test(n))                                             return '民生用電子機器';
+
+  // SaaS
   if (/salesforce|セールスフォース/.test(n))                                return 'SaaS';
   if (/freee/.test(n))                                                       return 'SaaS';
   if (/smarthr/.test(n))                                                     return 'SaaS';
   if (/マネーフォワード|money forward/.test(n))                             return 'SaaS';
-  if (/sansan|sansanビジネス/.test(n))                                      return 'SaaS';
+  if (/sansan/.test(n))                                                      return 'SaaS';
   if (/cybozu|サイボウズ|kintone/.test(n))                                  return 'SaaS';
+
+  // ソフトウェア
   if (/microsoft|マイクロソフト/.test(n))                                   return 'ソフトウェア';
   if (/oracle|オラクル/.test(n))                                            return 'ソフトウェア';
   if (/sap/.test(n))                                                         return 'ソフトウェア';
+
+  // AI
   if (/google|グーグル|alphabet/.test(n))                                   return 'AI';
+
+  // メガベンチャー
   if (/amazon|アマゾン|aws/.test(n) && !/モバイル/.test(n))                return 'メガベンチャー';
-  if (/楽天モバイル|rakutenmobile/.test(n))                                 return '各種電気通信サービス';
-  if (/楽天|rakuten/.test(n) && !/銀行/.test(n))                            return 'メガベンチャー';
+  if (/楽天|rakuten/.test(n) && !/モバイル|銀行/.test(n))                  return 'メガベンチャー';
   if (/メルカリ|mercari/.test(n))                                           return 'メガベンチャー';
   if (/サイバーエージェント|cyberagent/.test(n))                            return 'メガベンチャー';
+
+  // 通信
   if (/softbank|ソフトバンク/.test(n) && !/銀行/.test(n))                  return '各種電気通信サービス';
   if (/kddi|au/.test(n))                                                     return '各種電気通信サービス';
   if (/docomo|ドコモ/.test(n))                                              return '各種電気通信サービス';
+  if (/楽天モバイル|rakutenmobile/.test(n))                                 return '各種電気通信サービス';
   if (/ntt(東日本|西日本)/.test(n) || n === 'ntt')                          return '各種電気通信サービス';
+
+  // 金融・銀行
   if (/信託銀行|三菱uf.+信託|三井住友信託|みずほ信託/.test(n))             return '信託銀行';
   if (/三菱uf|mufg|三菱東京/.test(n))                                       return '銀行';
   if (/みずほ|mizuho/.test(n) && !/証券/.test(n))                          return '銀行';
@@ -430,38 +455,92 @@ function gicsAutoClassify(companyName) {
   if (/日本生命|第一生命|住友生命|明治安田|生命保険/.test(n))              return '生命保険・健康保険';
   if (/東京海上|損保ジャパン|三井住友海上|あいおい|損保|火災/.test(n))     return '動産保険・損害保険';
   if (/オリックス|orix/.test(n))                                            return '金融サービス';
+
+  // 不動産・デベロッパー
   if (/三井不動産|三菱地所|住友不動産|野村不動産/.test(n))                 return 'デベロッパー';
   if (/積水ハウス|大和ハウス|旭化成ホームズ|住宅/.test(n))                 return '住宅建設';
   if (/(不動産)/.test(n))                                                   return '不動産';
+
+  // 製造・自動車
   if (/toyota|トヨタ/.test(n))                                             return '自動車';
   if (/honda|ホンダ|本田技/.test(n))                                       return '自動車';
   if (/nissan|日産/.test(n))                                                return '自動車';
-  if (/デンソー|denso|アイシン|aisin/.test(n))                             return '自動車用部品';
-  if (/川崎重工|三菱重工|ihi/.test(n))                                     return '重工業';
-  if (/キーエンス|keyence/.test(n))                                         return '電子装置・機器・部品';
-  if (/ソニー|sony/.test(n))                                                return '民生用電子機器';
-  if (/パナソニック|panasonic/.test(n))                                     return '民生用電子機器';
-  if (/東京エレク|tel/.test(n))                                             return '半導体・半導体製造装置';
+  if (/mazda|マツダ/.test(n))                                               return '自動車';
+  if (/subaru|スバル/.test(n))                                              return '自動車';
+  if (/suzuki|スズキ/.test(n))                                              return '自動車';
+  if (/mitsubishi motors|三菱自動車/.test(n))                               return '自動車';
+  if (/デンソー|denso|アイシン|aisin|豊田自動/.test(n))                     return '自動車用部品';
+  if (/ブリヂストン|bridgestone|住友ゴム/.test(n))                          return '自動車用部品';
+
+  // 重工業
+  if (/川崎重工|川崎車両|川崎車輛|三菱重工|ihiエアロ|ihi|石川島/.test(n))  return '重工業';
+
+  // 半導体・半導体製造装置
+  if (/東京エレク|tel|applied materials|レーザーテック/.test(n))            return '半導体・半導体製造装置';
+  if (/ルネサス|renesas|ローム|rohm|東芝デバイス/.test(n))                  return '半導体・半導体製造装置';
   if (/(半導体|semiconductor)/.test(n))                                      return '半導体・半導体製造装置';
-  if (/武田薬品|takeda|アステラス|第一三共|大塚製薬|中外製薬|エーザイ/.test(n)) return '医薬品';
+
+  // 医薬品・ヘルスケア
+  if (/武田薬品|takeda|アステラス|astellas|第一三共|大塚製薬|中外製薬|エーザイ|eisai/.test(n)) return '医薬品';
   if (/医薬品|製薬|pharma/.test(n))                                         return '医薬品';
+  if (/オリンパス|olympus|テルモ|terumo|シスメックス/.test(n))              return 'ヘルスケア機器・用品';
+  if (/病院|クリニック|メディカル|medical|healthcare/.test(n))              return 'ヘルスケアプロバイダー';
+
+  // 人材・採用
   if (/リクルート|recruit/.test(n) && !/不動産|住宅/.test(n))              return '人事・雇用サービス';
-  if (/パーソル|persol|マンパワー/.test(n))                                 return '人事・雇用サービス';
+  if (/パーソル|persol|マンパワー|manpower/.test(n))                        return '人事・雇用サービス';
+
+  // セキュリティ
+  if (/セコム|secom|アルソック|alsok/.test(n))                              return 'セキュリティ・警報装置サービス';
+
+  // 小売
+  if (/セブン.?イレブン|ローソン|ファミリーマート|コンビニ/.test(n))       return '大規模小売り';
+  if (/イオン|ウォルマート|walmart|ドンキ|ユニー/.test(n))                  return '大規模小売り';
+  if (/ユニクロ|uniqlo|ファーストリテ|zara|h&m/.test(n))                   return '専門小売り';
+  if (/ニトリ|nitori/.test(n))                                              return '家具・装飾';
+
+  // 消費財
+  if (/花王|kao|資生堂|shiseido|p&g/.test(n))                              return '家庭用品・パーソナルケア用品';
+  if (/味の素|ajinomoto|キリン|kirin|アサヒ|asahi|サントリー|suntory|サッポロ/.test(n)) return '飲料';
+  if (/日清食品|明治|森永|カルビー|ネスレ|nestle/.test(n))                  return '食品';
+
+  // メディア・エンタメ
   if (/電通|dentsu|博報堂|hakuhodo/.test(n))                                return 'メディア';
+  if (/(テレビ|tv|放送|フジ|ntv|tbs|abc)/.test(n))                          return 'メディア';
+  if (/任天堂|nintendo|コナミ|konami|netflix|ネットフリックス/.test(n))      return '娯楽';
+
+  // 商社
   if (/三菱商事|三井物産|住友商事|伊藤忠|丸紅|双日|豊田通商|商事|物産/.test(n)) return '商社';
+
+  // 建設・土木
   if (/鹿島|清水建設|大成建設|竹中工務|大林組|建設/.test(n))               return '建設・土木';
-  if (/ヤマト|yamato|佐川|sagawa|日本郵便/.test(n))                         return '航空貨物・物流サービス';
+
+  // 物流・運輸
+  if (/ヤマト|yamato|佐川|sagawa|日本郵便|jppost/.test(n))                  return '航空貨物・物流サービス';
   if (/jal|ana|日本航空|全日空|航空/.test(n))                               return '旅客航空輸送';
   if (/jr.*(東日本|西日本|東海|九州|北海道)|鉄道|railway/.test(n))         return '陸上運輸';
-  if (/eneos|出光|idemitsu|コスモ石油/.test(n))                             return '石油・ガス・消耗燃料';
+  if (/商船三井|日本郵船|川崎汽船|海運/.test(n))                            return '海上運輸';
+
+  // エネルギー・化学
+  if (/jxtg|eneos|出光|idemitsu|コスモ石油/.test(n))                        return '石油・ガス・消耗燃料';
   if (/東電|東京電力|関西電力|中部電力|九州電力|電力|北陸電力|東北電力|北海道電力|四国電力/.test(n)) return '電力';
-  if (/(大阪ガス|東京ガス|東邦ガス|西部ガス|都市ガス)/.test(n))            return 'ガス';
-  if (/旭化成|住友化学|三菱化学|東レ|化学/.test(n))                         return '化学';
+  if (/大阪ガス|東京ガス|東邦ガス|西部ガス|都市ガス/.test(n))               return 'ガス';
+  if (/旭化成|住友化学|三菱化学|東レ|toray|化学/.test(n))                   return '化学';
+
+  // 官公庁・教育機関
+  if (/省|庁|役所|官公庁|市役所|区役所|町役場|裁判所|警察署|消防署|検察庁|税務署|法務局|国会|議会/.test(n)) return '官公庁';
+  if (/大学|高校|中学校|小学校|専門学校|学校法人|教育委員会|幼稚園|保育園/.test(n)) return '教育機関';
+
+  // 汎用キーワード（最後のフォールバック）
   if (/(コンサルティング|コンサルタント|consulting)/.test(n)) return 'コンサルティングサービス';
   if (/(人材|採用サービス|ヘッドハンティング)/.test(n)) return '人事・雇用サービス';
   if (/(フィンテック|fintech|決済サービス|ペイメント)/.test(n)) return '金融サービス';
+  if (/(ゲーム会社|ゲーム開発|gaming)/.test(n)) return '娯楽';
   if (/(物流会社|運送会社|配送サービス)/.test(n)) return '航空貨物・物流サービス';
-  if (/(病院|クリニック|医療法人|診療所)/.test(n)) return 'ヘルスケアプロバイダー';
+  if (/(医療法人|クリニック|診療所|病院)/.test(n)) return 'ヘルスケアプロバイダー';
+  if (/(介護|福祉|ケアサービス)/.test(n)) return 'ヘルスケアプロバイダー';
+  if (/(スタートアップ|ベンチャー企業)/.test(n)) return 'その他';
+
   return '';
 }
 
