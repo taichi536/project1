@@ -182,13 +182,14 @@ function doPost(e) {
     // ── 返信記録 ──
     if (data.action === 'recordReply') {
       const fbSheet = ss.getSheetByName(SHEET_FEEDBACK) || ss.insertSheet(SHEET_FEEDBACK);
+      // 列順: 日時 | 担当者 | 媒体 | AI判定 | 訂正後 | 候補者概要
       fbSheet.appendRow([
         new Date(data.repliedDate || Date.now()),
         data.recruiter || '',
-        data.company   || '',
-        data.platform  || '',
-        new Date(data.sentDate || 0),
+        MEDIA_LABEL[data.platform] || data.platform || '',
         '返信あり',
+        '',
+        data.company || '',
       ]);
       return json({ ok: true });
     }

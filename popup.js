@@ -1304,33 +1304,30 @@ $('generate-setup-code-btn').addEventListener('click', () => {
     recruiter: $('gas-recruiter').value.trim(),
   };
   const msg = $('setup-code-msg');
+  const showMsg = (text, color) => { msg.textContent = text; msg.style.color = color; msg.style.display = 'block'; };
   if (!data.url && !data.dbUrl) {
-    msg.textContent = '❌ GAS URLが入力されていません';
-    msg.style.color = '#b91c1c';
+    showMsg('❌ GAS URLが入力されていません', '#b91c1c');
     return;
   }
   try {
     const encoded = btoa(encodeURIComponent(JSON.stringify(data)));
     $('setup-code-input').value = 'snow1:' + encoded;
-    msg.textContent = '✅ コードを生成しました。コピーしてSlackで共有してください';
-    msg.style.color = '#085041';
+    showMsg('✅ コードを生成しました。コピーしてSlackで共有してください', '#085041');
   } catch (e) {
-    msg.textContent = '❌ 生成エラー: ' + e.message;
-    msg.style.color = '#b91c1c';
+    showMsg('❌ 生成エラー: ' + e.message, '#b91c1c');
   }
 });
 
 $('apply-setup-code-btn').addEventListener('click', () => {
   const code = $('setup-code-input').value.trim();
   const msg = $('setup-code-msg');
+  const showMsg = (text, color) => { msg.textContent = text; msg.style.color = color; msg.style.display = 'block'; };
   if (!code) {
-    msg.textContent = '❌ コードを入力してください';
-    msg.style.color = '#b91c1c';
+    showMsg('❌ コードを入力してください', '#b91c1c');
     return;
   }
   if (!code.startsWith('snow1:')) {
-    msg.textContent = '❌ 無効なコードです（snow1: で始まる必要があります）';
-    msg.style.color = '#b91c1c';
+    showMsg('❌ 無効なコードです（snow1: で始まる必要があります）', '#b91c1c');
     return;
   }
   try {
@@ -1340,11 +1337,9 @@ $('apply-setup-code-btn').addEventListener('click', () => {
     if (data.secret)      $('gas-secret').value = data.secret;
     if (data.positionUrl) $('position-gas-url').value = data.positionUrl;
     if (data.recruiter)   $('gas-recruiter').value = data.recruiter;
-    msg.textContent = '✅ 適用しました！「設定を保存」を押して確定してください';
-    msg.style.color = '#085041';
+    showMsg('✅ 適用しました！「設定を保存」を押して確定してください', '#085041');
   } catch (e) {
-    msg.textContent = '❌ コードの解析に失敗しました: ' + e.message;
-    msg.style.color = '#b91c1c';
+    showMsg('❌ コードの解析に失敗しました: ' + e.message, '#b91c1c');
   }
 });
 
