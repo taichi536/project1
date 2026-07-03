@@ -71,7 +71,7 @@ let _autoRunSlotId = 0;
 // -------------------------------------------------------
 function getPlatform() {
   const h = location.hostname;
-  if (h.includes('rikunabi') || h.includes('hrtech')) return 'rds';
+  if (h.includes('rikunabi') || h.includes('hrtech') || h.includes('recruitdirect')) return 'rds';
   if (h.includes('bizreach') || h.includes('es-support'))  return 'bizreach';
   if (h.includes('doda-x') || h.includes('dodax') || h.includes('x.doda')) return 'dodax';
   if (h.includes('ambi') || h.includes('en-ambi'))         return 'ambi';
