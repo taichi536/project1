@@ -2188,7 +2188,7 @@ async function getFullProfile(cardEl, fallbackText) {
 function findProfileUrl(cardEl) {
   const platform = getPlatform();
   const patterns = {
-    rds:      [/\/scout\//, /\/candidate\//, /\/member\//, /\/detail\//, /hrtech/, /rikunabi/],
+    rds:      [/\/scout\//, /\/candidate\//, /\/member\//, /\/detail\//, /hrtech/, /rikunabi/, /recruitdirect/],
     dodax:    [/member_search\/detail/, /member_detail/, /\/profile\//],
     ambi:     [/\/scout\/member\//, /\/member\/\d+/, /company\/scout/],
     green:    [/green-japan\.com\/user\//, /\/members\//],
@@ -4840,7 +4840,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'getProfile') {
     (async () => {
       try {
-        const isRDS = location.hostname.includes('rikunabi') || location.hostname.includes('hrtech');
+        const isRDS = location.hostname.includes('rikunabi') || location.hostname.includes('hrtech') || location.hostname.includes('recruitdirect');
         if (isRDS) {
           // スカウト履歴タブが表示されている場合はレジュメタブに切り替える
           await tryClickRDSResumeTab();
