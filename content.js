@@ -4708,19 +4708,35 @@ function extractProfile() {
     ], root);
 
     text = byKeyword.length >= bySelector.length ? byKeyword : bySelector;
-
+    if (text) text = removeNonProfileSections(text);
     if (!text || text.length < 100) {
-      text = extractMainText(root, 2500);
+      text = detailPanel ? removeNonProfileSections(extractMainText(root, 2500)) : '';
     }
 
   } else if (host.includes('recruitdirect') || host.includes('rds')) {
-    text = extractBySelectors([
+    detailPanel = findRDSDetailPanel();
+    const rdsRoot = detailPanel || null;
+    const byKeyword = extractByKeywords([
+      '職務経歴', '職歴', '業務内容', '仕事内容',
+      'スキル', '技術', '開発言語', '資格',
+      '学歴', '最終学歴', '大学',
+      '語学', '英語', 'TOEIC',
+      '自己PR', 'PR', 'アピール',
+      '転職理由', '希望年収', '希望職種',
+      '経験業種', '経験職種', '年収'
+    ], rdsRoot, 30, 12000);
+    const bySelector = extractBySelectors([
       '[class*="profile"]', '[class*="career"]',
       '[class*="resume"]', '[class*="skill"]',
       '[class*="history"]', '[class*="work"]',
       '[class*="candidate"]', '[class*="detail"]',
       'section', 'article', 'table'
-    ]);
+    ], rdsRoot);
+    text = byKeyword.length >= bySelector.length ? byKeyword : bySelector;
+    if (text) text = removeNonProfileSections(text);
+    if (!text || text.trim().length < 100) {
+      text = detailPanel ? removeNonProfileSections(extractMainText(detailPanel, 5000)) : '';
+    }
 
   } else {
     text = extractMainText(null, 2500);
