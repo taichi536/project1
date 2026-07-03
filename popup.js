@@ -1024,7 +1024,7 @@ async function runScreening() {
   const criteria = r.screeningCriteria || {};
   const gas = r.gasSettings || {};
   const currentPosition = r.currentPosition || '';
-  let posReq = '';
+  let posReq = '', companyCriteriaScreen = '';
   if (currentPosition) {
     const gasUrl = gas.positionUrl || gas.url || gas.dbUrl;
     if (gasUrl) {
@@ -1034,7 +1034,10 @@ async function runScreening() {
           body: JSON.stringify({ secret: gas.secret || 'snowwe2024', action: 'getPositionRequirements', position: currentPosition }),
         });
         const posData = await posRes.json();
-        if (posData.ok && posData.requirements) posReq = posData.requirements;
+        if (posData.ok && (posData.requirements || posData.companyCriteria)) {
+          posReq = posData.requirements || '';
+          companyCriteriaScreen = posData.companyCriteria || '';
+        }
       } catch (_) {}
     }
   }
@@ -1042,7 +1045,7 @@ async function runScreening() {
   setStatus('screening', 'loading', '選定基準と照合中...');
 
   try {
-    const result = await runScreeningAI(apiKey, profileData.profileText, criteria, posReq, currentPosition);
+    const result = await runScreeningAI(apiKey, profileData.profileText, criteria, posReq, currentPosition, companyCriteriaScreen);
     renderScreeningResult(result);
     $('screening-result').style.display = 'block';
 
@@ -1065,13 +1068,14 @@ async function runScreening() {
   $('screening-btn').disabled = false;
 }
 
-async function runScreeningAI(apiKey, profileText, criteria, posReq = '', positionName = '') {
+async function runScreeningAI(apiKey, profileText, criteria, posReq = '', positionName = '', companyCriteria = '') {
   apiKey = sanitizeApiKey(apiKey);
   const criteriaText = buildCriteriaLines(criteria);
   const posSection = posReq ? `\n【応募ポジション：${positionName}】\n${posReq.slice(0, 600)}\n` : '';
+  const companySection = companyCriteria ? `\n【会社別採用基準（共通基準より優先）】\n${companyCriteria.slice(0, 600)}\n` : '';
 
   const prompt = `あなたは転職エージェントの一次選定アシスタントです。
-
+${companySection}
 以下の【選定基準】と【候補者プロフィール】を照合し、各基準について候補者がクリアしているかを判定してください。
 プロフィールに情報が記載されていない項目は「情報なし」として扱ってください。
 ${posSection}
