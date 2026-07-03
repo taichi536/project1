@@ -236,6 +236,8 @@ function recordScout(ss, data) {
     try { industry = lookupIndustry(ss, data.company || ''); } catch (_) {}
   }
 
+  Logger.log('[Snow-we] recordScout受信: recruiter=' + (data.recruiter || '') + ' position=' + (data.position || '（空）') + ' media=' + (data.media || '') + ' industry=' + (industry || '（空）') + ' age=' + (data.age || '') + ' company=' + (data.company || '') + ' ts=' + ts);
+
   // ── 1. 日付別シートに書く ──
   writeToDailySheet(ss, data, ts, media, ageVal, industry);
 
@@ -251,6 +253,8 @@ function recordScout(ss, data) {
   dbSheet.appendRow([ts, data.recruiter || '', ageVal, data.company || '',
     data.univ || '', data.position || '', media, '未返信', '', '', '']);
   const lastRow = dbSheet.getLastRow();
+  // DB送信日時も日時フォーマットに設定
+  dbSheet.getRange(lastRow, 1).setNumberFormat('yyyy/MM/dd HH:mm');
 
   // ステータス列にドロップダウン設定
   const statusRule = SpreadsheetApp.newDataValidation()
@@ -294,11 +298,14 @@ function writeToDailySheet(ss, data, ts, media, ageVal, industry) {
     data.position || '', media, industry, ts,
   ]]);
 
+  // 送信日時列を日時フォーマットに設定（シリアル値で表示される問題を防ぐ）
+  sheet.getRange(nextRow, startCol + 6).setNumberFormat('yyyy/MM/dd HH:mm');
+
   // ポジション名・業界列にドロップダウン設定
   applyPositionDropdown(ss, sheet, nextRow, startCol + 3);
   applyIndustryDropdown(sheet, nextRow, startCol + 5);
 
-  Logger.log('日付シート記録: ' + sheetName + ' / ' + recruiter + ' / 行' + nextRow + ' / ' + (data.position || ''));
+  Logger.log('[Snow-we] 日付シート記録: ' + sheetName + ' 行' + nextRow + ' 担当:' + recruiter + ' ポジション:' + (data.position || '（未設定）') + ' 媒体:' + media + ' 業界:' + (industry || '（未分類）') + ' 時刻:' + ts);
 }
 
 // ── 業界ドロップダウンを設定（GICS産業リスト・1セル用）──────
