@@ -3995,11 +3995,110 @@ async function initPositionIndicator() {
   document.body.appendChild(indicator);
 }
 
+// -------------------------------------------------------
+// 詳細パネル自動AI判定（候補者を開いた瞬間に判定バッジを表示）
+// -------------------------------------------------------
+let _detailJudgeTimer = null;
+let _lastDetailText = '';
+
+async function runDetailPanelJudge() {
+  const platform = getPlatform();
+  if (!['rds', 'dodax', 'ambi'].includes(platform)) return;
+
+  let panel = null;
+  if (platform === 'rds') panel = findRDSDetailPanel();
+  else if (platform === 'dodax') panel = findDodaxDetailPanel();
+  else panel = findAMBIDetailPanel();
+  if (!panel) return;
+
+  const panelText = (panel.innerText || '').trim();
+  if (panelText.length < 100) return;
+  // 前回と同じパネルなら再判定しない
+  if (panelText.slice(0, 300) === _lastDetailText.slice(0, 300)) return;
+  _lastDetailText = panelText;
+
+  // 設定取得
+  let stored = {};
+  try { stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria', 'currentPosition']); } catch (_) { return; }
+  const apiKey = (stored.apiKey || '').replace(/[^\x21-\x7E]/g, '').trim();
+  if (!apiKey || apiKey.length < 20) return;
+  const criteria = stored.screeningCriteria || {};
+  if (!Object.keys(criteria).length) return;
+
+  // 既存バッジを削除・「判定中」バッジを表示
+  document.getElementById('snow-we-detail-badge')?.remove();
+  const badge = document.createElement('div');
+  badge.id = 'snow-we-detail-badge';
+  badge.style.cssText = `
+    position:fixed;bottom:80px;right:12px;z-index:2147483647;
+    background:#1e293b;color:#e2e8f0;padding:8px 14px;border-radius:8px;
+    font-size:12px;font-family:sans-serif;box-shadow:0 2px 12px rgba(0,0,0,0.35);
+    display:flex;align-items:center;gap:6px;border:1px solid #334155;
+    max-width:280px;
+  `;
+  badge.innerHTML = '<span style="animation:spin 1s linear infinite;display:inline-block">⏳</span><span>AI判定中...</span>';
+  document.body.appendChild(badge);
+
+  try {
+    const profileText = removeNonProfileSections(extractMainText(panel, 5000));
+    if (!profileText || profileText.trim().length < 50) { badge.remove(); return; }
+
+    const result = await judgeSingleCandidate(apiKey, profileText, criteria);
+    const { verdict, reason, confidence } = result;
+
+    badge.remove();
+    const resultBadge = document.createElement('div');
+    resultBadge.id = 'snow-we-detail-badge';
+    const [bg, border, icon] = verdict === 'OK'
+      ? ['#052e16', '#166534', '✅']
+      : verdict === 'NG'
+      ? ['#450a0a', '#991b1b', '❌']
+      : ['#1c1917', '#78716c', '⚠️'];
+    resultBadge.style.cssText = `
+      position:fixed;bottom:80px;right:12px;z-index:2147483647;
+      background:${bg};color:#f1f5f9;padding:8px 14px;border-radius:8px;
+      font-size:12px;font-family:sans-serif;box-shadow:0 2px 12px rgba(0,0,0,0.35);
+      border:1px solid ${border};max-width:300px;cursor:pointer;
+    `;
+    const confText = confidence != null ? ` (${confidence}%)` : '';
+    resultBadge.innerHTML = `
+      <div style="font-weight:600;margin-bottom:3px;">${icon} ${verdict}${confText}</div>
+      ${reason ? `<div style="font-size:11px;color:#94a3b8;">${reason}</div>` : ''}
+    `;
+    resultBadge.title = 'クリックで閉じる';
+    resultBadge.addEventListener('click', () => resultBadge.remove());
+    document.body.appendChild(resultBadge);
+    // 30秒後に自動削除
+    setTimeout(() => resultBadge.remove(), 30000);
+  } catch (_) {
+    badge.remove();
+  }
+}
+
+function initDetailPanelObserver() {
+  const platform = getPlatform();
+  if (!['rds', 'dodax', 'ambi'].includes(platform)) return;
+
+  const triggerJudge = () => {
+    clearTimeout(_detailJudgeTimer);
+    _detailJudgeTimer = setTimeout(() => runDetailPanelJudge(), 2000);
+  };
+
+  // body全体の子要素変化を監視（パネル開閉を検知）
+  new MutationObserver(triggerJudge).observe(document.body, {
+    childList: true, subtree: true, characterData: false, attributes: false
+  });
+
+  // 初回チェック
+  setTimeout(() => runDetailPanelJudge(), 3000);
+}
+
 // ページロード後に自動追加の再開チェック（sessionStorageのみ使用）
 window.addEventListener('load', () => {
   setTimeout(async () => {
     injectStyles();
     initPositionIndicator();
+    initDetailPanelObserver();
     try {
       const raw = sessionStorage.getItem('snowWeAutoAdd');
       if (!raw) {
