@@ -743,9 +743,9 @@ function renderSuggestion(result) {
         <span class="suggest-rank">${i === 0 ? '🥇 最推奨' : i === 1 ? '🥈 次点' : '🥉 候補'}</span>
         <span class="suggest-score" style="color:${scoreColor}">${score}点 <span style="font-size:10px;font-weight:normal">(${scoreLabel})</span></span>
       </div>
-      <div class="suggest-position">${s.position}</div>
-      <div class="suggest-reason">${s.reason}</div>
-      <button class="use-position-btn" data-position="${s.position}">このポジションで生成</button>
+      <div class="suggest-position">${escapeHtml(s.position || '')}</div>
+      <div class="suggest-reason">${escapeHtml(s.reason || '')}</div>
+      <button class="use-position-btn" data-position="${escapeHtml(s.position || '')}">このポジションで生成</button>
     `;
     container.appendChild(card);
 
@@ -1129,8 +1129,8 @@ function renderScreeningResult(result) {
       <div class="candidate-fields">
         ${fields.map(f => `
           <div class="candidate-field">
-            <span class="candidate-field-name">${f.name}</span>
-            <span class="candidate-field-value ${f.value ? '' : 'unknown'}">${f.value || '情報なし'}</span>
+            <span class="candidate-field-name">${escapeHtml(f.name)}</span>
+            <span class="candidate-field-value ${f.value ? '' : 'unknown'}">${f.value ? escapeHtml(f.value) : '情報なし'}</span>
           </div>
         `).join('')}
       </div>
@@ -1181,8 +1181,8 @@ function renderScreeningResult(result) {
     row.innerHTML = `
       <span class="criterion-icon">${icon}</span>
       <div class="criterion-body">
-        <div class="criterion-name">${c.name}</div>
-        <div class="criterion-detail">${c.detail}</div>
+        <div class="criterion-name">${escapeHtml(c.name || '')}</div>
+        <div class="criterion-detail">${escapeHtml(c.detail || '')}</div>
       </div>
     `;
     list.appendChild(row);
