@@ -2868,7 +2868,22 @@ function checkIncomeNG(profileText) {
   const ageMatch = profileText.match(/(\d{2})歳/);
   if (!ageMatch) return null;
   const age = parseInt(ageMatch[1], 10);
-  const income = extractIncomeFromText(profileText);
+
+  // 年収範囲（例: 700〜900万円）の場合は上限値を使用してAIと判定基準を一致させる
+  // AI prompt（buildStandardCriteria）も「上限値が基準以上であればNGにしない」と指定している
+  const numPat = '(?:\\d{1,2},\\d{3}|\\d{3,4})';
+  const parseNum = s => parseInt(s.replace(/,/g, ''), 10);
+  const labelRangeRe = new RegExp(`(?:現)?年収[^\\d]*${numPat}\\s*[〜~～]\\s*(${numPat})万`);
+  const genericRangeRe = new RegExp(`${numPat}\\s*[〜~～]\\s*(${numPat})万`);
+  const labelRangeM = profileText.match(labelRangeRe);
+  const genericRangeM = labelRangeM ? null : profileText.match(genericRangeRe);
+  const incomeUpperFromRange = labelRangeM ? parseNum(labelRangeM[1])
+                             : genericRangeM ? parseNum(genericRangeM[1]) : null;
+
+  // 年収取得：範囲の上限値を優先（確実NGは上限でも閾値未満の場合のみ）
+  const income = incomeUpperFromRange !== null && incomeUpperFromRange > 0
+    ? incomeUpperFromRange
+    : extractIncomeFromText(profileText);
   if (income === null || income === 0) return null; // 年収不明・ゼロはClaudeに任せる
 
   // ITエンジニア系キーワードで職種を判定
