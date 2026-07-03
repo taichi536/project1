@@ -317,8 +317,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // ポジション一覧を返す（GASスプレッドシートから取得、失敗時はハードコードで代替）
   if (msg.type === 'getPositionList') {
     chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {
-      const positionUrl = gasSettings?.positionUrl;
-      const secret = gasSettings?.secret;
+      const positionUrl = gasSettings?.positionUrl || gasSettings?.url || gasSettings?.dbUrl;
+      const secret = gasSettings?.secret || 'snowwe2024';
       if (!positionUrl) {
         sendResponse({ positions: POSITION_LIST });
         return;
@@ -330,7 +330,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         .then(r => r.json())
         .then(data => {
           if (data.ok && data.positions?.length > 0) {
-            sendResponse({ positions: data.positions.map(p => p.name) });
+            sendResponse({ positions: data.positions.map(p => typeof p === 'string' ? p : p.name) });
           } else {
             sendResponse({ positions: POSITION_LIST });
           }
