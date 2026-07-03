@@ -577,10 +577,11 @@ async function suggestPosition(apiKey, profileText) {
   let positions = [];
   let usingGas = false;
 
-  if (gas.positionUrl) {
+  const gasUrl = gas.positionUrl || gas.url || gas.dbUrl;
+  if (gasUrl) {
     try {
       setStatus('suggest', 'loading', 'GASからポジション情報を取得中...');
-      const fetched = await fetchPositionsFromGas(gas.positionUrl, gas.secret || 'snowwe2024');
+      const fetched = await fetchPositionsFromGas(gasUrl, gas.secret || 'snowwe2024');
       if (fetched.length > 0) {
         positions = fetched;
         usingGas = true;

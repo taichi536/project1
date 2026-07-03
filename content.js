@@ -388,10 +388,12 @@ function gicsAutoClassify(companyName) {
   if (/マッキンゼー|mckinsey|ボストンコンサル|bcg|roland berger|ローランドベルガー|bain|ベイン/.test(n)) return 'コンサルティングサービス';
   if (/デロイト|deloitte|pwc|kpmg|ey |アーンスト/.test(n))                 return 'コンサルティングサービス';
   if (/ベイカレント|baycurrent/.test(n))                                    return 'コンサルティングサービス';
+  if (/アビーム|abeam/.test(n))                                             return 'コンサルティングサービス';
   if (/ntt(データ|data|コミュニケーションズ|communications)/.test(n))       return 'SIer';
   if (/野村総研|nri/.test(n))                                               return 'SIer';
   if (/伊藤忠テクノ|ctc/.test(n))                                           return 'SIer';
   if (/scsk/.test(n))                                                        return 'SIer';
+  if (/インフォシス|infosys|tcs|wipro/.test(n))                             return 'SIer';
   if (/富士通|fujitsu/.test(n))                                             return '情報技術サービス';
   if (/日立|hitachi/.test(n))                                               return '情報技術サービス';
   if (/nec|日本電気/.test(n))                                               return '情報技術サービス';
@@ -402,12 +404,16 @@ function gicsAutoClassify(companyName) {
   if (/salesforce|セールスフォース/.test(n))                                return 'SaaS';
   if (/freee/.test(n))                                                       return 'SaaS';
   if (/smarthr/.test(n))                                                     return 'SaaS';
+  if (/マネーフォワード|money forward/.test(n))                             return 'SaaS';
+  if (/sansan|sansanビジネス/.test(n))                                      return 'SaaS';
+  if (/cybozu|サイボウズ|kintone/.test(n))                                  return 'SaaS';
   if (/microsoft|マイクロソフト/.test(n))                                   return 'ソフトウェア';
   if (/oracle|オラクル/.test(n))                                            return 'ソフトウェア';
   if (/sap/.test(n))                                                         return 'ソフトウェア';
   if (/google|グーグル|alphabet/.test(n))                                   return 'AI';
   if (/amazon|アマゾン|aws/.test(n) && !/モバイル/.test(n))                return 'メガベンチャー';
-  if (/楽天|rakuten/.test(n) && !/モバイル|銀行/.test(n))                  return 'メガベンチャー';
+  if (/楽天モバイル|rakutenmobile/.test(n))                                 return '各種電気通信サービス';
+  if (/楽天|rakuten/.test(n) && !/銀行/.test(n))                            return 'メガベンチャー';
   if (/メルカリ|mercari/.test(n))                                           return 'メガベンチャー';
   if (/サイバーエージェント|cyberagent/.test(n))                            return 'メガベンチャー';
   if (/softbank|ソフトバンク/.test(n) && !/銀行/.test(n))                  return '各種電気通信サービス';
@@ -4040,7 +4046,12 @@ async function runDetailPanelJudge() {
   document.body.appendChild(badge);
 
   try {
-    const profileText = removeNonProfileSections(extractMainText(panel, 5000));
+    // extractProfile() を優先（プラットフォーム別のキーワード抽出が効く）
+    let profileText = '';
+    try { profileText = extractProfile(); } catch (_) {}
+    if (!profileText || profileText.trim().length < 50) {
+      profileText = removeNonProfileSections(extractMainText(panel, 5000));
+    }
     if (!profileText || profileText.trim().length < 50) { badge.remove(); return; }
 
     const result = await judgeSingleCandidate(apiKey, profileText, criteria);
