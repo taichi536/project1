@@ -4068,29 +4068,75 @@ async function runDetailPanelJudge() {
     resultBadge.title = 'クリックで閉じる';
     resultBadge.addEventListener('click', () => resultBadge.remove());
     document.body.appendChild(resultBadge);
-    // 30秒後に自動削除
-    setTimeout(() => resultBadge.remove(), 30000);
+    // 60秒後に自動削除
+    setTimeout(() => resultBadge.remove(), 60000);
   } catch (_) {
     badge.remove();
   }
+}
+
+// スカウト済み通知を詳細パネルに表示
+async function showScoutedNoticeInPanel(panel) {
+  if (!panel) return;
+  const existing = document.getElementById('snow-we-scouted-notice');
+  if (existing) existing.remove();
+
+  // カードからIDを取得（パネルテキストでフィンガープリント）
+  const lines = (panel.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
+  const fp = lines.slice(0, 6).join('|');
+  if (!fp) return;
+
+  const history = await getScoutHistory();
+  // パネルのテキストと履歴IDの照合（URLベースIDが多いため、テキスト一致で近似判定）
+  let matchRecord = null;
+  const profileUrl = location.href.replace(/[?#].*$/, '');
+  if (history[profileUrl]) {
+    matchRecord = history[profileUrl];
+  } else {
+    // フィンガープリント前方一致で探す
+    for (const [id, rec] of Object.entries(history)) {
+      if (id.includes(fp.slice(0, 30))) { matchRecord = rec; break; }
+    }
+  }
+  if (!matchRecord) return;
+
+  const daysAgo = Math.floor((Date.now() - matchRecord.date) / (1000 * 60 * 60 * 24));
+  const notice = document.createElement('div');
+  notice.id = 'snow-we-scouted-notice';
+  notice.style.cssText = `
+    position:fixed;top:55px;right:12px;z-index:2147483647;
+    background:#1e3a5f;color:#bfdbfe;padding:6px 12px;border-radius:6px;
+    font-size:11px;font-family:sans-serif;box-shadow:0 2px 8px rgba(0,0,0,0.3);
+    border:1px solid #2563eb;cursor:pointer;
+  `;
+  notice.textContent = `📨 ${daysAgo === 0 ? '本日' : daysAgo + '日前'}にスカウト済み${matchRecord.position ? ' (' + matchRecord.position + ')' : ''}`;
+  notice.title = 'クリックで閉じる';
+  notice.addEventListener('click', () => notice.remove());
+  document.body.appendChild(notice);
+  setTimeout(() => notice.remove(), 30000);
 }
 
 function initDetailPanelObserver() {
   const platform = getPlatform();
   if (!['rds', 'dodax', 'ambi'].includes(platform)) return;
 
-  const triggerJudge = () => {
+  // MutationObserver on body は高コストのためポーリングに変更（2秒間隔）
+  let _pollTimer = null;
+  const poll = () => {
     clearTimeout(_detailJudgeTimer);
-    _detailJudgeTimer = setTimeout(() => runDetailPanelJudge(), 2000);
+    _detailJudgeTimer = setTimeout(async () => {
+      const p = platform === 'rds' ? findRDSDetailPanel()
+              : platform === 'dodax' ? findDodaxDetailPanel()
+              : findAMBIDetailPanel();
+      await showScoutedNoticeInPanel(p);
+      await runDetailPanelJudge();
+    }, 1500);
   };
 
-  // body全体の子要素変化を監視（パネル開閉を検知）
-  new MutationObserver(triggerJudge).observe(document.body, {
-    childList: true, subtree: true, characterData: false, attributes: false
-  });
-
-  // 初回チェック
-  setTimeout(() => runDetailPanelJudge(), 3000);
+  // ページクリックを契機にパネル変化を検知（カードクリック = 候補者切り替え）
+  document.addEventListener('click', poll, true);
+  // 初回チェック（ページロード時に詳細が開いている場合）
+  setTimeout(poll, 3000);
 }
 
 // ページロード後に自動追加の再開チェック（sessionStorageのみ使用）
