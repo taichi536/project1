@@ -4913,6 +4913,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                           : ['warn', '⚠️ 要確認'];
         setBatchBadge(el, cls, text, '', cards[i]?.summary?.substring(0, 200) || '', r.overall);
       });
+      // Bizreach: 仮想スクロールでバッジが消えないよう監視を開始
+      if (getPlatform() === 'bizreach') startBizreachBadgeObserver();
       sendResponse({ success: true });
     } catch (e) {
       sendResponse({ success: false, error: e.message });
