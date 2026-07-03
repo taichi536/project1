@@ -1277,6 +1277,9 @@ async function autoScreenCandidates() {
     const warnCount = results.filter(r => r.overall === '要確認').length;
     showAutoStatus(`✅ 判定完了 — ✅${okCount}人 ⚠️${warnCount}人 ❌${ngCount}人`, 6000);
 
+    // Bizreach: 仮想スクロールでバッジが消えないよう監視を開始
+    if (getPlatform() === 'bizreach') startBizreachBadgeObserver();
+
   } catch (e) {
     cards.forEach(c => c.el.querySelectorAll('.snow-we-badge').forEach(b => b.remove()));
     showAutoStatus(`❌ 判定エラー: ${e.message}`, 5000);
@@ -5066,3 +5069,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   return true;
 });
+
+// ページロード後に自動スクリーニングを実行（document_idle で注入されるため DOM は安定済み）
+setTimeout(() => autoScreenCandidates().catch(() => {}), 1500);
