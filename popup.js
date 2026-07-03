@@ -917,8 +917,8 @@ ${candidateList}
     const jsonMatch = clean.match(/\{[\s\S]*\}/);
     let parsed;
     try { parsed = JSON.parse(jsonMatch ? jsonMatch[0] : clean); } catch {
-      const fallback = clean.match(/"o"\s*:\s*"([^"]+)"/g) || [];
-      return chunk.map((_, i) => ({ overall: fallback[i] ? fallback[i].match(/"([^"]+)"/)?.[1] || '要確認' : '要確認' }));
+      const fallback = [...clean.matchAll(/"o"\s*:\s*"([^"]+)"/g)].map(m => m[1]);
+      return chunk.map((_, i) => ({ overall: fallback[i] || '要確認' }));
     }
     return (parsed.results || []).map(r => ({ overall: r.overall || r.o || '要確認' }));
   };
