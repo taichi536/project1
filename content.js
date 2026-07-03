@@ -4656,28 +4656,26 @@ function extractProfile() {
     ]);
 
   } else if (host.includes('ambi') || host.includes('en-ambi')) {
-    const viewportWidth = window.innerWidth;
-    const candidates = [];
-    document.querySelectorAll('div, section, article, main').forEach(el => {
-      const rect = el.getBoundingClientRect();
-      const t = (el.innerText || '').trim();
-      if (rect.left > viewportWidth * 0.3 && rect.width > 300 && t.length > 200 && t.length < 15000) {
-        const hasKeyword = ['職務経歴', '職歴', 'スキル', '経験職種', '学歴', '語学'].some(kw => t.includes(kw));
-        if (hasKeyword) candidates.push({ el, score: t.length });
-      }
-    });
-
-    if (candidates.length > 0) {
-      candidates.sort((a, b) => b.score - a.score);
-      detailPanel = candidates[0].el;
-      text = extractMainText(detailPanel, 2500);
-    }
-
+    detailPanel = findAMBIDetailPanel();
+    const ambiRoot = detailPanel || null;
+    const byKeyword = extractByKeywords([
+      '職務経歴', '職歴', '業務内容', '仕事内容',
+      'スキル', '技術', '開発言語', '資格',
+      '学歴', '最終学歴', '大学',
+      '語学', '英語', 'TOEIC',
+      '自己PR', 'PR', 'アピール',
+      '希望条件', '希望職種', '希望業界', '希望年収',
+      '経験業種', '経験職種', '転職理由'
+    ], ambiRoot, 30, 10000);
+    const bySelector = extractBySelectors([
+      '[class*="career"]', '[class*="resume"]',
+      '[class*="profile"]', '[class*="skill"]',
+      '[class*="history"]', 'section', 'article'
+    ], ambiRoot);
+    text = byKeyword.length >= bySelector.length ? byKeyword : bySelector;
+    if (text) text = removeNonProfileSections(text);
     if (!text || text.trim().length < 100) {
-      text = extractByKeywords([
-        '職務経歴', '職歴', 'スキル', '経験職種',
-        '学歴', '語学', '資格', '自己PR', '希望条件'
-      ]);
+      text = detailPanel ? removeNonProfileSections(extractMainText(detailPanel, 2500)) : '';
     }
 
   } else if (host.includes('mynavi')) {
