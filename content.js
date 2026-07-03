@@ -1135,16 +1135,14 @@ async function autoScreenCandidates() {
 
   // ポジション要件・フィードバックを並列取得（スクリーニング精度向上）
   let posReq = '', feedbacks = [];
-  if (currentPosition) {
-    try {
-      const [reqRes, fbData] = await Promise.all([
-        fetchPositionRequirements(currentPosition),
-        loadRecentFeedbacks(5),
-      ]);
-      posReq = reqRes?.requirements || '';
-      feedbacks = fbData;
-    } catch (_) {}
-  }
+  try {
+    const [reqRes, fbData] = await Promise.all([
+      currentPosition ? fetchPositionRequirements(currentPosition) : Promise.resolve(null),
+      loadRecentFeedbacks(5),
+    ]);
+    posReq = reqRes?.requirements || '';
+    feedbacks = fbData;
+  } catch (_) {}
 
   // カード検出（DOMが安定するまで待つ）
   await new Promise(r => setTimeout(r, 400));
@@ -3105,7 +3103,7 @@ async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
 
   // GASスプレッドシートにも送信（設定済みかつフィードバック保存が有効な場合）
   try {
-    const { gasSettings, screeningCriteria } = await chrome.storage.local.get(['gasSettings', 'screeningCriteria']);
+    const { gasSettings } = await chrome.storage.local.get(['gasSettings']);
     const gasUrl = gasSettings?.url || gasSettings?.dbUrl;
     const secret = gasSettings?.secret || 'snowwe2024';
     if (gasUrl && gasSettings?.feedbackEnabled !== false) {
@@ -3115,7 +3113,7 @@ async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
         payload: {
           action: 'saveFeedback',
           secret,
-          recruiter: screeningCriteria?.recruiterName || '',
+          recruiter: gasSettings?.recruiter || '',
           platform,
           aiVerdict,
           correction,

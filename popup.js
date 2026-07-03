@@ -1405,7 +1405,7 @@ async function renderHistory() {
             body: JSON.stringify({
               secret: gas.secret || 'snowwe2024',
               action: 'recordReply',
-              recruiter: gas.recruiter || r.screeningCriteria?.recruiterName || '',
+              recruiter: gas.recruiter || '',
               company: h[id].company || '',
               platform: h[id].platform || '',
               sentDate: h[id].date || 0,
