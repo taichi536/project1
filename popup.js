@@ -258,7 +258,9 @@ $('gas-test-btn').addEventListener('click', async () => {
     try { data = JSON.parse(text); } catch { data = { raw: text }; }
     if (data.ok) {
       resultEl.style.color = '#085041';
-      resultEl.textContent = `✅ 接続成功！シート「${data.sheet}」の${data.row}行目に書き込みました`;
+      resultEl.textContent = data.sheet
+        ? `✅ 接続成功！シート「${data.sheet}」の${data.row}行目に書き込みました`
+        : '✅ 接続成功！GASスプレッドシートへの書き込みを確認しました';
     } else {
       resultEl.style.color = '#b91c1c';
       resultEl.textContent = `❌ エラー: ${data.error || text}`;

@@ -218,8 +218,8 @@ function doPost(e) {
     }
 
     // ── スカウト記録 ──
-    recordScout(ss, data);
-    return json({ ok: true });
+    const scoutResult = recordScout(ss, data);
+    return json({ ok: true, sheet: scoutResult?.sheet, row: scoutResult?.row });
 
   } catch (err) {
     return json({ ok: false, error: err.message });
@@ -264,6 +264,8 @@ function recordScout(ss, data) {
 
   // ポジション名列にドロップダウン設定
   applyPositionDropdown(ss, dbSheet, lastRow, 6);
+
+  return { sheet: SHEET_DB, row: lastRow };
 }
 
 // ── 日付別シートへの書き込み ─────────────────────────────────
