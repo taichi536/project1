@@ -1100,26 +1100,7 @@ async function runScreening() {
 
 async function runScreeningAI(apiKey, profileText, criteria, posReq = '', positionName = '') {
   apiKey = sanitizeApiKey(apiKey);
-  const criteriaLines = [];
-
-  if (criteria.ageMin || criteria.ageMax) {
-    const min = criteria.ageMin ? `${criteria.ageMin}歳以上` : '';
-    const max = criteria.ageMax ? `${criteria.ageMax}歳以下` : '';
-    criteriaLines.push(`- 年齢: ${[min, max].filter(Boolean).join('かつ')}`);
-  }
-  if (criteria.minTenure) {
-    criteriaLines.push(`- 在籍期間: 過去の全職歴を含め、${criteria.minTenure}年未満の在籍が明確に確認できる場合のみNG。不明・記載なしはOK`);
-  }
-  if (criteria.requiredKeywords) {
-    criteriaLines.push(`- 必須経験: ${criteria.requiredKeywords}（いずれかを含む）`);
-  }
-  if (criteria.excludeCompanies) {
-    criteriaLines.push(`- 除外企業: 職歴に${criteria.excludeCompanies}のいずれかが含まれる場合は過去・現職問わず即NG`);
-  }
-  if (criteria.excludeKeywords) {
-    criteriaLines.push(`- 除外条件: ${criteria.excludeKeywords}（含む場合はNG）`);
-  }
-
+  const criteriaText = buildCriteriaLines(criteria);
   const posSection = posReq ? `\n【応募ポジション：${positionName}】\n${posReq.slice(0, 600)}\n` : '';
 
   const prompt = `あなたは転職エージェントの一次選定アシスタントです。
@@ -1129,7 +1110,7 @@ async function runScreeningAI(apiKey, profileText, criteria, posReq = '', positi
 ${posSection}
 【選定基準】
 ${buildStandardCriteria(criteria.ageIncome)}
-${criteriaLines.length > 0 ? '\n【追加条件】\n' + criteriaLines.join('\n') : ''}
+${criteriaText ? '\n【追加条件】\n' + criteriaText : ''}
 
 【候補者プロフィール】
 ${profileText}
