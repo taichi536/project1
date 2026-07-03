@@ -3954,7 +3954,7 @@ async function initPositionIndicator() {
   const render = (pos) => {
     indicator.innerHTML = `
       <span style="font-size:14px">📌</span>
-      <span style="flex:1;font-weight:500">${pos || '未設定'}</span>
+      <span style="flex:1;font-weight:500">${escapeHtml(pos || '未設定')}</span>
       <span style="color:#94a3b8;font-size:11px">▼</span>
     `;
   };
@@ -4182,8 +4182,8 @@ async function runDetailPanelJudge() {
     `;
     const confText = confidence != null ? ` (${confidence}%)` : '';
     resultBadge.innerHTML = `
-      <div style="font-weight:600;margin-bottom:3px;">${icon} ${verdict}${confText}</div>
-      ${reason ? `<div style="font-size:11px;color:#94a3b8;">${reason}</div>` : ''}
+      <div style="font-weight:600;margin-bottom:3px;">${icon} ${escapeHtml(verdict)}${confText}</div>
+      ${reason ? `<div style="font-size:11px;color:#94a3b8;">${escapeHtml(reason)}</div>` : ''}
     `;
     resultBadge.title = 'クリックで閉じる';
     resultBadge.addEventListener('click', () => resultBadge.remove());
