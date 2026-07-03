@@ -1488,12 +1488,13 @@ $('history-import-file').addEventListener('change', async (e) => {
     const platformKeywords = ['bizreach', 'br', 'rds', 'dodax', 'doda', 'ambi', 'green', 'mynavi', 'my', 'bireach'];
     const col3 = (cols[3] || '').toLowerCase();
     const isNewFormat = cols.length >= 7 && !platformKeywords.includes(col3);
-    let univ = '', position = '', industry = '', platform = '', candidateIdCol = '';
+    let univ = '', position = '', industry = '', platform = '', candidateIdCol = '', replied = false;
     if (isNewFormat) {
       univ = cols[3] || '';
       position = cols[4] || '';
       industry = cols[5] || '';
       platform = cols[6] || '';
+      replied = (cols[7] || '') === '返信あり';
       candidateIdCol = cols[8] || '';
     } else {
       platform = cols[3] || '';
@@ -1523,6 +1524,7 @@ $('history-import-file').addEventListener('change', async (e) => {
       industry,
       platform: normalizePlatform(platform),
       name: '',
+      ...(replied ? { replied: true } : {}),
     };
     imported++;
   }
