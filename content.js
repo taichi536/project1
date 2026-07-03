@@ -509,7 +509,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     const gas = r2.gasSettings || {};
     const recruiterForGas = gas.recruiter || r2.recruiterName || '';
     const primaryGasUrl = gas.url || gas.dbUrl;
-    if (!primaryGasUrl || !recruiterForGas) return;
+    if (!primaryGasUrl || !recruiterForGas || gas.scoutRecordEnabled === false) return;
     const ageNum = (info.age || '').replace(/[歳才]/, '');
     const payload = {
       secret: gas.secret || 'snowwe2024',
@@ -3102,12 +3102,12 @@ async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
     console.log(`[Snow-we] フィードバック保存: AI=${aiVerdict} → 訂正=${correction} (累計${feedbacks.length}件)`);
   } catch (_) {}
 
-  // GASスプレッドシートにも送信（設定済みの場合）
+  // GASスプレッドシートにも送信（設定済みかつフィードバック保存が有効な場合）
   try {
     const { gasSettings, screeningCriteria } = await chrome.storage.local.get(['gasSettings', 'screeningCriteria']);
     const gasUrl = gasSettings?.dbUrl || gasSettings?.url;
     const secret = gasSettings?.secret || 'snowwe2024';
-    if (gasUrl) {
+    if (gasUrl && gasSettings?.feedbackEnabled !== false) {
       chrome.runtime.sendMessage({
         type: 'gasPost',
         url: gasUrl,
