@@ -1293,6 +1293,62 @@ $('api-test-btn').addEventListener('click', async () => {
 });
 
 // ============================================================
+// チーム設定コード（生成・適用）
+// ============================================================
+$('generate-setup-code-btn').addEventListener('click', () => {
+  const data = {
+    url: $('gas-url').value.trim(),
+    dbUrl: $('gas-db-url').value.trim(),
+    secret: $('gas-secret').value.trim(),
+    positionUrl: $('position-gas-url').value.trim(),
+    recruiter: $('gas-recruiter').value.trim(),
+  };
+  const msg = $('setup-code-msg');
+  if (!data.url && !data.dbUrl) {
+    msg.textContent = '❌ GAS URLが入力されていません';
+    msg.style.color = '#b91c1c';
+    return;
+  }
+  try {
+    const encoded = btoa(encodeURIComponent(JSON.stringify(data)));
+    $('setup-code-input').value = 'snow1:' + encoded;
+    msg.textContent = '✅ コードを生成しました。コピーしてSlackで共有してください';
+    msg.style.color = '#085041';
+  } catch (e) {
+    msg.textContent = '❌ 生成エラー: ' + e.message;
+    msg.style.color = '#b91c1c';
+  }
+});
+
+$('apply-setup-code-btn').addEventListener('click', () => {
+  const code = $('setup-code-input').value.trim();
+  const msg = $('setup-code-msg');
+  if (!code) {
+    msg.textContent = '❌ コードを入力してください';
+    msg.style.color = '#b91c1c';
+    return;
+  }
+  if (!code.startsWith('snow1:')) {
+    msg.textContent = '❌ 無効なコードです（snow1: で始まる必要があります）';
+    msg.style.color = '#b91c1c';
+    return;
+  }
+  try {
+    const data = JSON.parse(decodeURIComponent(atob(code.slice(6))));
+    if (data.url)         $('gas-url').value = data.url;
+    if (data.dbUrl)       $('gas-db-url').value = data.dbUrl;
+    if (data.secret)      $('gas-secret').value = data.secret;
+    if (data.positionUrl) $('position-gas-url').value = data.positionUrl;
+    if (data.recruiter)   $('gas-recruiter').value = data.recruiter;
+    msg.textContent = '✅ 適用しました！「設定を保存」を押して確定してください';
+    msg.style.color = '#085041';
+  } catch (e) {
+    msg.textContent = '❌ コードの解析に失敗しました: ' + e.message;
+    msg.style.color = '#b91c1c';
+  }
+});
+
+// ============================================================
 // デバッグ
 // ============================================================
 $('debug-btn').addEventListener('click', async () => {
