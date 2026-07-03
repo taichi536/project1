@@ -1041,13 +1041,29 @@ async function runScreening() {
     return;
   }
 
-  const r = await chrome.storage.local.get(['screeningCriteria']);
+  const r = await chrome.storage.local.get(['screeningCriteria', 'gasSettings', 'currentPosition']);
   const criteria = r.screeningCriteria || {};
+  const gas = r.gasSettings || {};
+  const currentPosition = r.currentPosition || '';
+  let posReq = '';
+  if (currentPosition) {
+    const gasUrl = gas.url || gas.dbUrl;
+    if (gasUrl) {
+      try {
+        const posRes = await fetch(gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({ secret: gas.secret || 'snowwe2024', action: 'getPositionRequirements', position: currentPosition }),
+        });
+        const posData = await posRes.json();
+        if (posData.ok && posData.requirements) posReq = posData.requirements;
+      } catch (_) {}
+    }
+  }
 
   setStatus('screening', 'loading', '選定基準と照合中...');
 
   try {
-    const result = await runScreeningAI(apiKey, profileData.profileText, criteria);
+    const result = await runScreeningAI(apiKey, profileData.profileText, criteria, posReq, currentPosition);
     renderScreeningResult(result);
     $('screening-result').style.display = 'block';
 
@@ -1070,7 +1086,7 @@ async function runScreening() {
   $('screening-btn').disabled = false;
 }
 
-async function runScreeningAI(apiKey, profileText, criteria) {
+async function runScreeningAI(apiKey, profileText, criteria, posReq = '', positionName = '') {
   apiKey = sanitizeApiKey(apiKey);
   const criteriaLines = [];
 
@@ -1092,11 +1108,13 @@ async function runScreeningAI(apiKey, profileText, criteria) {
     criteriaLines.push(`- 除外条件: ${criteria.excludeKeywords}（含む場合はNG）`);
   }
 
+  const posSection = posReq ? `\n【応募ポジション：${positionName}】\n${posReq.slice(0, 600)}\n` : '';
+
   const prompt = `あなたは転職エージェントの一次選定アシスタントです。
 
 以下の【選定基準】と【候補者プロフィール】を照合し、各基準について候補者がクリアしているかを判定してください。
 プロフィールに情報が記載されていない項目は「情報なし」として扱ってください。
-
+${posSection}
 【選定基準】
 ${buildStandardCriteria(criteria.ageIncome)}
 ${criteriaLines.length > 0 ? '\n【追加条件】\n' + criteriaLines.join('\n') : ''}
