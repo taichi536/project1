@@ -206,7 +206,13 @@ function doPost(e) {
 
     // ── 返信記録 ──
     if (data.action === 'recordReply') {
-      const fbSheet = ss.getSheetByName(SHEET_FEEDBACK) || ss.insertSheet(SHEET_FEEDBACK);
+      let fbSheet = ss.getSheetByName(SHEET_FEEDBACK);
+      if (!fbSheet) {
+        fbSheet = ss.insertSheet(SHEET_FEEDBACK);
+        fbSheet.getRange(1, 1, 1, 6).setValues([['日時', '担当者', '媒体', 'AI判定', '訂正後', '候補者概要']])
+          .setBackground('#4338CA').setFontColor('#ffffff').setFontWeight('bold');
+        fbSheet.setFrozenRows(1);
+      }
       // 列順: 日時 | 担当者 | 媒体 | AI判定 | 訂正後 | 候補者概要
       fbSheet.appendRow([
         new Date(data.repliedDate || Date.now()),

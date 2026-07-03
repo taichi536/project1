@@ -2893,7 +2893,7 @@ function checkIncomeNG(profileText) {
   if (isIT) {
     if (age < 30)      threshold = 350;
     else if (age <= 35) threshold = 500;
-    else if (age <= 40) threshold = 700;
+    else if (age <= 39) threshold = 700;
     else if (age <= 45) threshold = 800;
     else threshold = null;
   } else {
@@ -3811,7 +3811,7 @@ function buildCriteriaText(criteria, platform) {
     lines.push(`\n【ITエンジニア系の年収基準】`);
     lines.push(`- 20代: 350万円未満 → NG`);
     lines.push(`- 30〜35歳: 500万円未満 → NG`);
-    lines.push(`- 36〜40歳: 700万円未満 → NG`);
+    lines.push(`- 36〜39歳: 700万円未満 → NG`);
     lines.push(`- 40〜45歳: 800万円未満 → NG`);
     lines.push(`※年収が明記されており基準を下回る場合は必ずNG。年収が不明・記載なしの場合は「要確認」`);
     lines.push(`※年収が幅（例：750〜1000万円）で記載されている場合は上限値（1000万円）で判断すること。上限値が基準以上であればNGにしない。`);
