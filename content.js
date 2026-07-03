@@ -508,7 +508,8 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     try { r2 = await chrome.storage.local.get(['gasSettings', 'currentPosition', 'recruiterName']); } catch (_) {}
     const gas = r2.gasSettings || {};
     const recruiterForGas = gas.recruiter || r2.recruiterName || '';
-    if (!gas.url || !recruiterForGas) return;
+    const primaryGasUrl = gas.url || gas.dbUrl;
+    if (!primaryGasUrl || !recruiterForGas) return;
     const ageNum = (info.age || '').replace(/[歳才]/, '');
     const payload = {
       secret: gas.secret || 'snowwe2024',
@@ -541,8 +542,8 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
         }
       }
     };
-    await sendGas(gas.url);
-    if (gas.dbUrl) await sendGas(gas.dbUrl);
+    await sendGas(primaryGasUrl);
+    if (gas.dbUrl && gas.dbUrl !== primaryGasUrl) await sendGas(gas.dbUrl);
     // GAS送信成功時にフラグを更新
     if (sent) {
       try {
