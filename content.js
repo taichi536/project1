@@ -1343,8 +1343,9 @@ ${candidateList}
     });
     const text = (data.content?.[0]?.text || '').trim();
     const clean = text.replace(/```json|```/g, '').trim();
+    const jsonMatch = clean.match(/\{[\s\S]*\}/);
     try {
-      const parsed = JSON.parse(clean);
+      const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : clean);
       return (parsed.results || []).map(r => ({ overall: r.overall || r.o || '要確認' }));
     } catch {
       return chunk.map(() => ({ overall: '要確認' }));
@@ -4648,21 +4649,21 @@ function extractProfile() {
         text = removeNonProfileSections(extractMainText(detailPanel, 5000));
       }
     } else {
-      text = extractByKeywords([
+      text = removeNonProfileSections(extractByKeywords([
         '職務経歴', '職歴', '職務要約',
         'スキル', '資格', '学歴',
         '語学', '自己PR', 'アピール',
         '希望年収', '年収', '転職理由'
-      ]);
+      ]));
 
       if (text.length < 100) {
-        text = extractBySelectors([
+        text = removeNonProfileSections(extractBySelectors([
           '[class*="resume"]', '[class*="career"]',
           '[class*="history"]', '[class*="skill"]',
           '[class*="profile"]', '[class*="summary"]',
           '[class*="candidate"]', '[class*="detail"]',
           'section', 'article', 'table'
-        ]);
+        ]));
       }
     }
 

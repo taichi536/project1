@@ -952,8 +952,9 @@ ${candidateList}
     const data = await response.json();
     const text = (data.content?.[0]?.text || '').trim();
     const clean = text.replace(/```json|```/g, '').trim();
+    const jsonMatch = clean.match(/\{[\s\S]*\}/);
     let parsed;
-    try { parsed = JSON.parse(clean); } catch {
+    try { parsed = JSON.parse(jsonMatch ? jsonMatch[0] : clean); } catch {
       const fallback = clean.match(/"o"\s*:\s*"([^"]+)"/g) || [];
       return chunk.map((_, i) => ({ overall: fallback[i] ? fallback[i].match(/"([^"]+)"/)?.[1] || '要確認' : '要確認' }));
     }
@@ -1157,7 +1158,8 @@ ${profileText}
   const data = await response.json();
   const text = (data.content?.[0]?.text || '').trim();
   const clean = text.replace(/```json|```/g, '').trim();
-  try { return JSON.parse(clean); } catch {
+  const jsonMatch = clean.match(/\{[\s\S]*\}/);
+  try { return JSON.parse(jsonMatch ? jsonMatch[0] : clean); } catch {
     throw new Error('JSON解析エラー（AIの応答形式が不正）: ' + clean.substring(0, 100));
   }
 }
