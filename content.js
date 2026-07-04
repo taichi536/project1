@@ -3141,6 +3141,7 @@ async function fetchPositionRequirements(position) {
 
 // 1候補者のAI判定
 async function judgeSingleCandidate(apiKey, profileText, criteria) {
+  console.log(`[Snow-we] judgeSingleCandidate profileText: ${profileText.length}文字 / 冒頭150字: ${profileText.slice(0, 150)}`);
   const criteriaLines = buildCriteriaText(criteria, getPlatform());
 
   // ポジション要件をGASから取得
