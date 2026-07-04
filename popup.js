@@ -1109,8 +1109,15 @@ async function runScreening() {
     renderScreeningResult(result);
     $('screening-result').style.display = 'block';
 
-    // 結果バッジをカードに表示
-    chrome.tabs.sendMessage(tab.id, { action: 'showBadgeResult', overall: result.overall }).catch(() => {});
+    // 結果バッジをカードに表示（訂正ボタン用にprofileSummary/reasonも渡す）
+    const profileSummary = profileData.profileText
+      .split('\n').map(l => l.trim()).filter(Boolean).slice(0, 12).join(' / ').substring(0, 200);
+    chrome.tabs.sendMessage(tab.id, {
+      action: 'showBadgeResult',
+      overall: result.overall,
+      reason: result.comment || '',
+      profileSummary,
+    }).catch(() => {});
 
     const overall = result.overall;
     if (overall === 'OK') {

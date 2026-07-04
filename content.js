@@ -363,12 +363,15 @@ function setupClickTracking() {
   }, true);
 }
 
-function showBadge(cls, text) {
+function showBadge(cls, text, tooltip = '', profileSummary = '', aiVerdict = '') {
   if (!_selectedCard) return;
   document.querySelectorAll('.snow-we-badge').forEach(b => b.remove());
+  if (getComputedStyle(_selectedCard).position === 'static') _selectedCard.style.position = 'relative';
   const badge = document.createElement('div');
   badge.className = `snow-we-badge ${cls}`;
   badge.textContent = text;
+  if (tooltip) badge.title = tooltip;
+  attachFeedbackHandler(badge, cls, tooltip, profileSummary, aiVerdict);
   _selectedCard.appendChild(badge);
 }
 
@@ -3373,6 +3376,17 @@ function showFeedbackPopup(badgeEl) {
   badgeEl.parentElement.appendChild(popup);
 }
 
+// ok/ng/warn 判定済みバッジにのみ訂正ハンドラを付与（単体判定・バッチ判定 共通）
+function attachFeedbackHandler(badge, cls, tooltip, profileSummary, aiVerdict) {
+  if (!((cls === 'ok' || cls === 'ng' || cls === 'warn') && profileSummary)) return;
+  badge.dataset.verdict = aiVerdict || cls.toUpperCase();
+  badge.dataset.profile = profileSummary;
+  badge.dataset.reason  = tooltip || '';
+  badge._fbHandler = (e) => { e.stopPropagation(); showFeedbackPopup(badge); };
+  badge.addEventListener('click', badge._fbHandler);
+  badge.title = (tooltip ? tooltip + '\n' : '') + '（クリックで判定を訂正）';
+}
+
 // バッジをセット（バッチ用）
 function setBatchBadge(el, cls, text, tooltip, profileSummary, aiVerdict) {
   el.querySelectorAll('.snow-we-badge.batch').forEach(b => b.remove());
@@ -3381,15 +3395,7 @@ function setBatchBadge(el, cls, text, tooltip, profileSummary, aiVerdict) {
   badge.className = `snow-we-badge batch ${cls}`;
   badge.textContent = text;
   if (tooltip) badge.title = tooltip;
-  // ok/ng/warn 判定済みバッジにのみ訂正ハンドラを付与
-  if ((cls === 'ok' || cls === 'ng' || cls === 'warn') && profileSummary) {
-    badge.dataset.verdict = aiVerdict || cls.toUpperCase();
-    badge.dataset.profile = profileSummary;
-    badge.dataset.reason  = tooltip || '';
-    badge._fbHandler = (e) => { e.stopPropagation(); showFeedbackPopup(badge); };
-    badge.addEventListener('click', badge._fbHandler);
-    badge.title = (tooltip ? tooltip + '\n' : '') + '（クリックで判定を訂正）';
-  }
+  attachFeedbackHandler(badge, cls, tooltip, profileSummary, aiVerdict);
   // Bizreach: DOM再利用検出のためresumeIdをバッジに記録
   if (getPlatform() === 'bizreach') {
     const rid = getBizreachResumeNumericId(el);
@@ -5014,7 +5020,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'showBadgeResult') {
     const map = { OK: ['ok', '✅ スカウト推奨'], NG: ['ng', '❌ 見送り'], '要確認': ['warn', '⚠️ 要確認'] };
     const [cls, text] = map[request.overall] || ['warn', '⚠️ 要確認'];
-    showBadge(cls, text);
+    showBadge(cls, text, request.reason || '', request.profileSummary || '', request.overall || '');
     sendResponse({ success: true });
   }
 
