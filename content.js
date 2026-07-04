@@ -602,7 +602,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
       industry,
       ts: now,
     };
-    console.log('[Snow-we] GAS送信payload:', JSON.stringify({ recruiter: payload.recruiter, position: payload.position, industry: payload.industry, media: payload.media, ts: payload.ts, age: payload.age, company: payload.company }));
+    console.log('[Snow-we] GAS送信payload:', JSON.stringify({ recruiter: payload.recruiter, position: payload.position, industry: payload.industry, media: payload.media, ts: payload.ts, age: payload.age, company: payload.company, univ: payload.univ }));
     let sent = false;
     const sendGas = async (url) => {
       try {
