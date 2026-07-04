@@ -1389,38 +1389,6 @@ async function recordApiCost(model, usage) {
   }
 }
 
-// プロフィールテキストの配列をバッチ判定する
-async function judgeProfileBatch(apiKey, profileTexts, criteria) {
-  const criteriaLines = buildCriteriaText(criteria, getPlatform());
-  const candidateList = profileTexts.map((t, i) =>
-    `候補者${i + 1}:\n${t.slice(0, 2000)}`
-  ).join('\n\n');
-
-  const prompt = `転職エージェントの一次選定アシスタントです。
-
-【選定基準】
-${criteriaLines}
-
-【候補者一覧】
-${candidateList}
-
-必ず以下のJSON形式のみで出力してください。説明・前置き・コードブロック不要。
-{"results":[{"i":1,"o":"OK"},{"i":2,"o":"NG"}]}
-※必ず${profileTexts.length}人分出力すること。oはOK/NG/要確認のいずれか。`;
-
-  const data = await claudeFetch(apiKey, {
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 600,
-    messages: [{ role: 'user', content: prompt }]
-  });
-  const text = (data.content?.[0]?.text || '').trim();
-  // コードブロックや前後のテキストを除去してJSONオブジェクト部分だけ抽出
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('JSON not found: ' + text.slice(0, 80));
-  const parsed = JSON.parse(jsonMatch[0]);
-  return (parsed.results || []).map(r => r.overall || r.o || '要確認');
-}
-
 // Claude APIを呼び出す（content.js内から直接）
 async function callBatchScreeningAPI(apiKey, cards, criteria, posReq = '', feedbacks = [], positionName = '', companyCriteria = '') {
   const criteriaLines = buildCriteriaText(criteria, getPlatform());
