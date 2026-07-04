@@ -926,7 +926,7 @@ async function runBatchScreeningAI(apiKey, cards, criteria, posReq = '', positio
   apiKey = sanitizeApiKey(apiKey);
   const criteriaLines = buildCriteriaLines(criteria);
   const standardCriteria = buildStandardCriteria(criteria.ageIncome);
-  const posSection = posReq ? `\n【応募ポジション：${positionName}】\n${posReq.slice(0, 600)}\n` : '';
+  const posSection = posReq ? `\n【応募ポジション：${positionName}（参考情報。必須スキル等との適合度はNG判定の根拠にしないこと）】\n${posReq.slice(0, 600)}\n` : '';
   const companySection = companyCriteria ? `\n【会社別採用基準（共通基準より優先）】\n${companyCriteria.slice(0, 600)}\n` : '';
   const CHUNK = 80; // 80人ずつ処理（出力トークン上限対策）
 
@@ -1114,7 +1114,7 @@ async function runScreening() {
 async function runScreeningAI(apiKey, profileText, criteria, posReq = '', positionName = '', companyCriteria = '') {
   apiKey = sanitizeApiKey(apiKey);
   const criteriaText = buildCriteriaLines(criteria);
-  const posSection = posReq ? `\n【応募ポジション：${positionName}】\n${posReq.slice(0, 600)}\n` : '';
+  const posSection = posReq ? `\n【応募ポジション：${positionName}（参考情報。必須スキル等との適合度はNG判定の根拠にしないこと）】\n${posReq.slice(0, 600)}\n` : '';
   const companySection = companyCriteria ? `\n【会社別採用基準（共通基準より優先）】\n${companyCriteria.slice(0, 600)}\n` : '';
 
   const prompt = `あなたは転職エージェントの一次選定アシスタントです。

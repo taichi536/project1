@@ -1392,7 +1392,7 @@ async function recordApiCost(model, usage) {
 // Claude APIを呼び出す（content.js内から直接）
 async function callBatchScreeningAPI(apiKey, cards, criteria, posReq = '', feedbacks = [], positionName = '', companyCriteria = '') {
   const criteriaLines = buildCriteriaText(criteria, getPlatform());
-  const posSection = posReq ? `\n【応募ポジション：${positionName}】\n${posReq.slice(0, 800)}\n` : '';
+  const posSection = posReq ? `\n【応募ポジション：${positionName}（参考情報。必須スキル等との適合度はNG判定の根拠にしないこと）】\n${posReq.slice(0, 800)}\n` : '';
   const companySection = companyCriteria ? `\n【会社別採用基準（共通基準より優先）】\n${companyCriteria.slice(0, 800)}\n` : '';
   const fbSection = feedbacks.length > 0
     ? '\n【過去の訂正例】\n' + feedbacks.slice(0, 5).map(f =>
@@ -3149,7 +3149,7 @@ async function judgeSingleCandidate(apiKey, profileText, criteria) {
   try { _posStored = await chrome.storage.local.get(['currentPosition']); } catch (_) {}
   const { currentPosition } = _posStored;
   const { requirements: posReq, companyCriteria } = await fetchPositionRequirements(currentPosition || '');
-  const posSection     = posReq        ? `\n【応募ポジションの職務内容】\n${posReq}\n`           : '';
+  const posSection     = posReq        ? `\n【応募ポジションの職務内容（参考情報。必須スキル・求める人物像と候補者の経歴との適合度はNG判定の根拠にしないこと。OK/NG判定は【選定基準】に記載の基準のみで行う）】\n${posReq}\n`           : '';
   const companySection = companyCriteria ? `\n【会社別採用基準（共通基準より優先）】\n${companyCriteria}\n` : '';
 
   // 過去の訂正フィードバックをfew-shot examplesとして組み込む
