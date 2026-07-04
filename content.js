@@ -2314,9 +2314,15 @@ function findProfileUrl(cardEl) {
   };
 
   const platformPatterns = patterns[platform] || [];
+  // 求人広告など、候補者を一意に識別しないリンクは常に除外する
+  // （RDSの hrtech/rikunabi/recruitdirect パターンはドメイン名だけで緩くマッチするため、
+  //  同じ求人に紐づく複数候補者が同一の求人広告URLを候補者IDとして誤取得し、
+  //  重複記録や別候補者の混同を引き起こしていた）
+  const excludePatterns = [/jobAdvertisement/i, /joboffer/i, /job_offer/i, /\/requisition\//i];
 
   const matchesPattern = (href) => {
     if (!href || href === '#' || href.startsWith('javascript')) return false;
+    if (excludePatterns.some(p => p.test(href))) return false;
     return platformPatterns.length === 0 || platformPatterns.some(p => p.test(href));
   };
 
