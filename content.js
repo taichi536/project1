@@ -4404,6 +4404,10 @@ function extractByKeywords(keywords, root, minLen, maxLen) {
   maxLen = maxLen || 6000;
   const collected = [];
   const seen = new Set();
+  // 「続きを読む」等で折りたたみ版・展開版の2つのDOM要素が同居していると、
+  // 文言が微妙に異なるため完全部分一致では重複と判定できない。
+  // 先頭の空白除去済み文字列で簡易フィンガープリントを取り、同一内容とみなす。
+  const fingerprint = t => t.replace(/\s+/g, '').slice(0, 40);
 
   root.querySelectorAll('div, section, article, li, tr, td, dl, dt, dd, p, span').forEach(el => {
     if (seen.has(el)) return;
@@ -4411,9 +4415,15 @@ function extractByKeywords(keywords, root, minLen, maxLen) {
     if (t.length < minLen || t.length > maxLen) return;
     if (!keywords.some(kw => t.includes(kw))) return;
 
+    const fp = fingerprint(t);
     let dup = false;
-    for (const prev of collected) {
-      if (prev.includes(t) || t.includes(prev)) { dup = true; break; }
+    for (let i = 0; i < collected.length; i++) {
+      const prev = collected[i];
+      if (prev.includes(t) || t.includes(prev) || (fp.length >= 20 && fingerprint(prev).slice(0, fp.length) === fp)) {
+        if (t.length > prev.length) collected[i] = t; // より詳細な（展開後の）方を残す
+        dup = true;
+        break;
+      }
     }
     if (!dup) {
       collected.push(t);
