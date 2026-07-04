@@ -2338,9 +2338,15 @@ function findProfileUrl(cardEl) {
   }
 
   // フォールバック：カード内の最初の内部リンク
-  for (const link of cardEl.querySelectorAll('a[href]')) {
-    const href = link.href || '';
-    if (href.startsWith(location.origin) && !href.includes('#')) return href;
+  // doda-xは候補者ごとに異なるIDを含まない汎用リンク（例: .../member_search/resume/ の
+  // ベースURLのみ）を持つことがあり、このフォールバックがそれを拾うと全候補者が同一の
+  // candidateIdになってしまう（別候補者の履歴・重複判定が混同される）。doda-xは直後の
+  // fiberベースの専用ロジックの方が信頼できるため、ここではスキップする。
+  if (platform !== 'dodax') {
+    for (const link of cardEl.querySelectorAll('a[href]')) {
+      const href = link.href || '';
+      if (href.startsWith(location.origin) && !href.includes('#')) return href;
+    }
   }
 
   // doda-x: React fiberのpropsからmemberId/candidateIdを探してURLを構築
