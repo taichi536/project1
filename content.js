@@ -4460,15 +4460,23 @@ function extractBySelectors(selectors, root) {
 // 完全な部分文字列一致だけでは検出できない。先頭の空白除去済み文字列を
 // フィンガープリントとして併用し、抽出系の関数はすべてこれを通す。
 function dedupeTextBlocks(blocks) {
-  const fingerprint = t => t.replace(/\s+/g, '').slice(0, 40);
+  const normalize = t => t.replace(/\s+/g, '');
   const result = [];
   for (const t of blocks) {
     if (!t) continue;
-    const fp = fingerprint(t);
+    const normT = normalize(t);
     let dupIdx = -1;
     for (let i = 0; i < result.length; i++) {
       const prev = result[i];
-      if (prev.includes(t) || t.includes(prev) || (fp.length >= 20 && fingerprint(prev).slice(0, fp.length) === fp)) {
+      if (prev.includes(t) || t.includes(prev)) {
+        dupIdx = i;
+        break;
+      }
+      // 「見出しの文言が偶然一致しただけ」の別ブロックを誤って統合しないよう、
+      // 短い方の全文が長い方の先頭と完全一致する場合のみ「省略版 vs 展開版」の重複とみなす
+      const normPrev = normalize(prev);
+      const [shorter, longer] = normT.length <= normPrev.length ? [normT, normPrev] : [normPrev, normT];
+      if (shorter.length >= 20 && longer.startsWith(shorter)) {
         dupIdx = i;
         break;
       }
