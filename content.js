@@ -845,7 +845,14 @@ document.addEventListener('click', e => {
   const isConfirmBtn         = text === '確認';
   const isSendBtn            = text === '送信' || text === '送信する';
   const isTemplateConfirmBtn = text === '確定';
-  if (!isScoutBtn && !isConfirmBtn && !isSendBtn && !isTemplateConfirmBtn) return;
+  if (!isScoutBtn && !isConfirmBtn && !isSendBtn && !isTemplateConfirmBtn) {
+    // スカウト関連らしきボタンなのに上の固定パターンに一致しないものを検知する診断ログ
+    // （記録漏れの原因調査用。ここではpendingScoutの状態には一切手を触れない）
+    if (/スカウト|送信|確認|確定/.test(text) && text.length < 30) {
+      console.log('[Snow-we] 未認識のスカウト系ボタン（記録トリガー対象外）:', JSON.stringify(text));
+    }
+    return;
+  }
 
   console.log('[Snow-we] スカウト系ボタン検知:', JSON.stringify(text));
 
