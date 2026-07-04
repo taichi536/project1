@@ -716,6 +716,12 @@ function getCandidateId(cardEl) {
 
   const text = (cardEl.innerText || '');
 
+  // RDS等：「会員ID：」ラベルの直後にある値は候補者ごとに固有かつ不変のIDのため、
+  // ハッシュフィンガープリント（タグ・コメント追加等でカード表示テキストが変わると
+  // 値が変わってしまい、同一人物が別IDとして重複記録される原因になる）より優先して使う
+  const memberIdMatch = text.match(/会員ID[：:]\s*\n?\s*([A-Za-z0-9]{10,})/);
+  if (memberIdMatch) return `${getPlatform()}_mid_${memberIdMatch[1]}`;
+
   // フォールバック1：カードテキストから候補者番号を抽出
   const m = text.match(/No\.(\d{5,})|^(\d{6,})\s/m) ||
             text.match(/\b([0-9]{6,10})\b/);
