@@ -737,19 +737,28 @@ function extractBasicInfo(cardEl) {
 
   // 大学名を抽出（学歴セクション優先）
   let univ = '';
+  // 「4年制大学」「国公立大学」等、応募資格・学歴要件としての一般名詞であり
+  // 実際の大学名ではないものを除外する（実在の大学名は固有名詞を含むため、
+  // 「年制」「公立」「私立」等の一般語のみで構成されるものはここで弾く）
+  const isGenericUnivPhrase = s => /^(?:[0-9０-９]{1,2}|[一二三四五六七八九十]{1,2})年制(?:大学院|大学)?$/.test(s)
+    || /^(?:国公立|国立|公立|私立|有名|難関|一般)(?:大学院|大学)$/.test(s);
   const extractUnivFromText = (t) => {
     // 「学歴」「最終学歴」セクション以降から優先的に抽出
     const eduIdx = t.search(/学歴|最終学歴/);
     if (eduIdx >= 0) {
       const eduSection = t.substring(eduIdx, eduIdx + 300);
-      const m = eduSection.match(/([^\s\n　]{2,20}(?:大学院|大学|高専|専門学校))/);
-      if (m) return cleanUnivName(m[1]);
+      const m = (eduSection.match(/([^\s\n　]{2,20}(?:大学院|大学|高専|専門学校))/g) || [])
+        .map(cleanUnivName).find(s => !isGenericUnivPhrase(s));
+      if (m) return m;
     }
-    // 学歴セクションがない場合は全体から抽出（会社名候補を除外）
+    // 学歴セクションがない場合は全体から抽出（会社名候補・応募資格の一般語を除外）
     const m = t.match(/([^\s\n　]{2,20}(?:大学院|大学|高専|専門学校))/g) || [];
     const companyWords = /株式会社|合同会社|有限会社|法人|グループ|ホールディングス/;
-    const candidate = m.find(s => !companyWords.test(s));
-    return candidate ? cleanUnivName(candidate) : '';
+    const candidate = m
+      .filter(s => !companyWords.test(s))
+      .map(cleanUnivName)
+      .find(s => !isGenericUnivPhrase(s));
+    return candidate || '';
   };
   univ = extractUnivFromText(text);
   // RDS/AMBIはカードに大学名が出ないため、詳細パネルからも取得を試みる
