@@ -4057,6 +4057,13 @@ async function initPositionIndicator() {
     const existingDrop = document.getElementById('snow-we-pos-dropdown');
     if (existingDrop) { existingDrop.remove(); return; }
 
+    // ページロード時に一度だけ取得した一覧のままだと、開いている間にスプレッドシートへ
+    // 追加したポジションが反映されないため、開くたびに最新の一覧を取り直す
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+      if (res?.positions?.length > 0) positions = res.positions;
+    } catch (_) {}
+
     const dropdown = document.createElement('div');
     dropdown.id = 'snow-we-pos-dropdown';
     const rect = indicator.getBoundingClientRect();
