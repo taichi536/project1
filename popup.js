@@ -949,12 +949,13 @@ ${criteriaLines ? '\n【追加条件】\n' + criteriaLines : ''}
 【候補者一覧】
 ${candidateList}
 
+各候補者について、判定理由（r）を15文字以内で簡潔に記述してください。
 以下のJSON形式のみで出力してください（説明不要）:
-{"results":[{"i":${offset + 1},"o":"OK"},{"i":${offset + 2},"o":"NG"}]}`;
+{"results":[{"i":${offset + 1},"o":"OK","r":"理由"},{"i":${offset + 2},"o":"NG","r":"理由"}]}`;
 
     const data = await claudeFetch(apiKey, {
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1200,
+      max_tokens: 4000,
       messages: [{ role: 'user', content: prompt }]
     });
     const text = (data.content?.[0]?.text || '').trim();
@@ -963,9 +964,9 @@ ${candidateList}
     let parsed;
     try { parsed = JSON.parse(jsonMatch ? jsonMatch[0] : clean); } catch {
       const fallback = [...clean.matchAll(/"o"\s*:\s*"([^"]+)"/g)].map(m => m[1]);
-      return chunk.map((_, i) => ({ overall: fallback[i] || '要確認' }));
+      return chunk.map((_, i) => ({ overall: fallback[i] || '要確認', reason: '' }));
     }
-    return (parsed.results || []).map(r => ({ overall: r.overall || r.o || '要確認' }));
+    return (parsed.results || []).map(r => ({ overall: r.overall || r.o || '要確認', reason: r.reason || r.r || '' }));
   };
 
   const allResults = [];
