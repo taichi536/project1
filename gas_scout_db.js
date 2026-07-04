@@ -206,6 +206,30 @@ function doPost(e) {
 
     // ── 返信記録 ──
     if (data.action === 'recordReply') {
+      // ① スカウト管理DBの該当行を「返信あり」に更新（効果測定・週次レポートの集計対象にする）
+      const dbSheet = ss.getSheetByName(SHEET_DB);
+      let dbUpdated = false;
+      if (dbSheet) {
+        const rows = dbSheet.getDataRange().getValues();
+        for (let i = rows.length - 1; i >= 1; i--) {
+          const r = rows[i];
+          const rowTs = r[0] ? new Date(r[0]).getTime() : 0;
+          if (r[1] === (data.recruiter || '') && r[3] === (data.company || '') &&
+              Math.abs(rowTs - (data.sentDate || 0)) < 60000) {
+            const rowNum = i + 1;
+            if (r[7] === '未返信' || !r[7]) {
+              dbSheet.getRange(rowNum, 8).setValue('返信あり'); // H列 ステータス
+            }
+            dbSheet.getRange(rowNum, 9)
+              .setValue(new Date(data.repliedDate || Date.now()))
+              .setNumberFormat('yyyy/MM/dd HH:mm'); // I列 返信日
+            dbUpdated = true;
+            break;
+          }
+        }
+      }
+
+      // ② AI判定フィードバックシートにも参考ログとして残す
       let fbSheet = ss.getSheetByName(SHEET_FEEDBACK);
       if (!fbSheet) {
         fbSheet = ss.insertSheet(SHEET_FEEDBACK);
@@ -222,7 +246,7 @@ function doPost(e) {
         '',
         data.company || '',
       ]);
-      return json({ ok: true });
+      return json({ ok: true, dbUpdated });
     }
 
     // ── チーム履歴取得（スカウト管理DBから全員分） ──
