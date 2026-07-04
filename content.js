@@ -1086,6 +1086,25 @@ document.addEventListener('click', e => {
             const bodyHits = sorted.filter(p => p && normBody.includes(normStr(p)));
             if (bodyHits.length === 1) matched = bodyHits[0];
           }
+          // 語順が入れ替わっているケースのフォールバック（例: 本文「自動車領域DXソリューション
+          // コンサルタント」 vs マスタ「DXソリューションコンサルタント(自動車領域)-IND」）。
+          // 完全な部分文字列一致はしなくても、主要な語句がすべて本文に含まれていれば一致とみなす
+          if (!matched) {
+            const tokenize = p => stripSuffix2(p)
+              .replace(/[（）()]/g, ' ')
+              .split(/[\s・\/／]+/)
+              .map(t => t.trim())
+              .filter(t => t.length >= 2);
+            const tokenHits = sorted.filter(p => {
+              if (!p) return false;
+              const tokens = tokenize(p);
+              return tokens.length > 0 && tokens.every(t => normBody.includes(normStr(t)));
+            });
+            if (tokenHits.length === 1) {
+              matched = tokenHits[0];
+              console.log('[Snow-we] 語順違いの本文照合で一致:', matched);
+            }
+          }
         } catch (_) {}
 
         // 生テンプレート名・メール本文・照合結果を保存
