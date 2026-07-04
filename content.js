@@ -3272,6 +3272,23 @@ async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
   })();
 }
 
+// スカウトメール本文・履歴等のボイラープレート文言（プロフィール本文ではない汚染データの検出に使用）
+const SCOUT_BOILERPLATE_MARKERS = [
+  'スカウト履歴', 'メモ・備考', '候補者評価', 'スカウト送信履歴',
+  'スカウトメール', '送信したメール', 'スカウト文面', 'スカウト送信文',
+  'エージェントからのメッセージ', 'この度はご連絡', '貴方様のご経歴を拝見',
+  'ご経歴を拝見し', '採用担当者からのメッセージ', 'メッセージ履歴',
+  '送信済みテンプレート', '前回スカウト', 'スカウト送信日', '送信日時',
+  'スカウト済み', '選考ステータス', 'エージェントメモ', '社内メモ',
+];
+
+// フィードバックのprofileSummaryがスカウトメール文面等の汚染データでないかを判定
+function isContaminatedFeedback(f) {
+  const summary = f?.profileSummary || '';
+  if (!summary) return false;
+  return SCOUT_BOILERPLATE_MARKERS.some(marker => summary.includes(marker));
+}
+
 async function loadRecentFeedbacks(limit = 10) {
   // ローカルフィードバック
   let local = [];
@@ -3286,6 +3303,10 @@ async function loadRecentFeedbacks(limit = 10) {
     const res = await chrome.runtime.sendMessage({ type: 'getTeamFeedbacks' });
     team = res?.feedbacks || [];
   } catch (_) {}
+
+  // スカウトメール文面のような汚染データを few-shot 対象から除外
+  local = local.filter(f => !isContaminatedFeedback(f));
+  team = team.filter(f => !isContaminatedFeedback(f));
 
   // ローカル優先でマージ、重複排除（profileSummary+correction で判定）
   const seen = new Set(local.map(f => (f.profileSummary || '').slice(0, 40) + f.correction));
@@ -4475,14 +4496,7 @@ function extractByKeywords(keywords, root, minLen, maxLen) {
 // -------------------------------------------------------
 // スカウト履歴・評価・メモなど採用管理UIセクションを除去
 function removeNonProfileSections(text) {
-  const stopMarkers = [
-    'スカウト履歴', 'メモ・備考', '候補者評価', 'スカウト送信履歴',
-    'スカウトメール', '送信したメール', 'スカウト文面', 'スカウト送信文',
-    'エージェントからのメッセージ', 'この度はご連絡', '貴方様のご経歴を拝見',
-    'ご経歴を拝見し', '採用担当者からのメッセージ', 'メッセージ履歴',
-    '送信済みテンプレート', '前回スカウト', 'スカウト送信日', '送信日時',
-    'スカウト済み', '選考ステータス', 'エージェントメモ', '社内メモ',
-  ];
+  const stopMarkers = SCOUT_BOILERPLATE_MARKERS;
   // マーカーが先頭200文字以内に現れる場合の判断：
   //   テキスト全体にプロフィールキーワード(≥2個)あり → タブラベル（スキップ）
   //   なし → パネル全体がスカウト履歴 → 空を返す
