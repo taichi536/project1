@@ -1355,7 +1355,37 @@ async function claudeFetch(apiKey, body, maxRetries = 4) {
       const err = await response.json().catch(() => ({}));
       throw new Error(err.error?.message || `APIエラー (${response.status})`);
     }
-    return response.json();
+    const data = await response.json();
+    recordApiCost(body.model, data.usage);
+    return data;
+  }
+}
+
+// USD per 1M tokens
+const CLAUDE_PRICING = {
+  'claude-sonnet-4-6': { input: 3.00, output: 15.00 },
+  'claude-haiku-4-5-20251001': { input: 1.00, output: 5.00 },
+};
+
+async function recordApiCost(model, usage) {
+  const pricing = CLAUDE_PRICING[model];
+  if (!pricing || !usage) return;
+  const cost = ((usage.input_tokens || 0) / 1e6) * pricing.input
+    + ((usage.output_tokens || 0) / 1e6) * pricing.output;
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    const r = await chrome.storage.local.get(['apiCostStats']);
+    const stats = r.apiCostStats || { totalUSD: 0, byDate: {} };
+    stats.totalUSD = (stats.totalUSD || 0) + cost;
+    stats.byDate[today] = (stats.byDate[today] || 0) + cost;
+    const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
+    for (const d of Object.keys(stats.byDate)) {
+      if (new Date(d).getTime() < cutoff) delete stats.byDate[d];
+    }
+    await chrome.storage.local.set({ apiCostStats: stats });
+  } catch (e) {
+    if (!e.message?.includes('Extension context invalidated'))
+      console.warn('[Snow-we] recordApiCost storage error:', e.message);
   }
 }
 
@@ -5080,6 +5110,3 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   return true;
 });
-
-// ページロード後に自動スクリーニングを実行（document_idle で注入されるため DOM は安定済み）
-setTimeout(() => autoScreenCandidates().catch(() => {}), 1500);
