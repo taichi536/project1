@@ -4164,6 +4164,17 @@ async function runDetailPanelJudge() {
   const platform = getPlatform();
   if (!['rds', 'dodax', 'ambi'].includes(platform)) return;
 
+  // スカウト作成/送信フォームが開いている間は自動判定しない。
+  // 本文入力欄やスカウト送信系ボタンが画面上にあると、判定対象の innerText に
+  // 候補者プロフィールではなくスカウトメールの本文（宛先企業名等）が混入し、
+  // 「スカウト送信内容からアクセンチュア関連の経歴があると判断」のような
+  // 誤判定を招くため。
+  const composeButtonTexts = ['送信', '送信する', '確認', '確定'];
+  const hasComposeButton = Array.from(document.querySelectorAll('button, a')).some(
+    b => composeButtonTexts.includes((b.innerText || '').trim())
+  );
+  if (hasComposeButton) return;
+
   let panel = null;
   if (platform === 'rds') panel = findRDSDetailPanel();
   else if (platform === 'dodax') panel = findDodaxDetailPanel();
