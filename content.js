@@ -4322,7 +4322,8 @@ function initDetailPanelObserver() {
               : platform === 'dodax' ? findDodaxDetailPanel()
               : findAMBIDetailPanel();
       await showScoutedNoticeInPanel(p);
-      await runDetailPanelJudge();
+      // 詳細パネル自動AI判定は無効化済み（誤判定の温床だったため）。
+      // 判定は手動ボタン（一括判定・自動追加・選択中の1人を判定）からのみ実行する。
     }, 1500);
   };
 
