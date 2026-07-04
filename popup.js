@@ -27,34 +27,20 @@ async function claudeFetch(apiKey, body, maxRetries = 4) {
       throw new Error(err.error?.message || `APIエラー (${response.status})`);
     }
     const data = await response.json();
-    recordApiCost(body.model, data.usage);
+    await recordApiCost(body.model, data.usage);
     return data;
   }
 }
 
-// USD per 1M tokens
-const CLAUDE_PRICING = {
-  'claude-sonnet-4-6': { input: 3.00, output: 15.00 },
-  'claude-haiku-4-5-20251001': { input: 1.00, output: 5.00 },
-};
-
+// API利用額の記録はbackground.js（service worker）に一元化する。
+// ポップアップは閉じると同時にJSが即座に終了するため、ここでchrome.storage.local
+// に直接書き込むと、ユーザーが結果を見てすぐポップアップを閉じた場合に書き込みが
+// 完了せず記録が失われる（実際の請求額と大きく乖離する原因になっていた）。
 async function recordApiCost(model, usage) {
-  const pricing = CLAUDE_PRICING[model];
-  if (!pricing || !usage) return;
-  const cost = ((usage.input_tokens || 0) / 1e6) * pricing.input
-    + ((usage.output_tokens || 0) / 1e6) * pricing.output;
-  const today = new Date().toISOString().slice(0, 10);
+  if (!usage) return;
   try {
-    const r = await chrome.storage.local.get(['apiCostStats']);
-    const stats = r.apiCostStats || { totalUSD: 0, byDate: {} };
-    stats.totalUSD = (stats.totalUSD || 0) + cost;
-    stats.byDate[today] = (stats.byDate[today] || 0) + cost;
-    const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
-    for (const d of Object.keys(stats.byDate)) {
-      if (new Date(d).getTime() < cutoff) delete stats.byDate[d];
-    }
-    await chrome.storage.local.set({ apiCostStats: stats });
-    renderApiCostDisplay(stats);
+    const res = await chrome.runtime.sendMessage({ type: 'recordApiCost', model, usage });
+    if (res?.stats) renderApiCostDisplay(res.stats);
   } catch (_) {}
 }
 

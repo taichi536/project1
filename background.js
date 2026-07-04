@@ -79,6 +79,34 @@ const POSITION_LIST = [
   'インダストリーコンサルタント（消費財・サービス領域）-BUS',
 ];
 
+// ── API利用額トラッキング（バックグラウンド側で一元管理） ──────────────────
+// popup.js/content.jsは短命（ポップアップは閉じるとJSが即終了、content.jsは
+// ページ遷移で破棄される）なため、chrome.storage.localへの書き込みが完了する
+// 前にコンテキストごと消えて記録が失われることがある。永続的なservice worker
+// 側で一元的に書き込むことで、この取りこぼしを防ぐ。
+const CLAUDE_PRICING = {
+  'claude-sonnet-4-6': { input: 3.00, output: 15.00 },
+  'claude-haiku-4-5-20251001': { input: 1.00, output: 5.00 },
+};
+
+async function recordApiCostInBackground(model, usage) {
+  const pricing = CLAUDE_PRICING[model];
+  if (!pricing || !usage) return null;
+  const cost = ((usage.input_tokens || 0) / 1e6) * pricing.input
+    + ((usage.output_tokens || 0) / 1e6) * pricing.output;
+  const today = new Date().toISOString().slice(0, 10);
+  const r = await chrome.storage.local.get(['apiCostStats']);
+  const stats = r.apiCostStats || { totalUSD: 0, byDate: {} };
+  stats.totalUSD = (stats.totalUSD || 0) + cost;
+  stats.byDate[today] = (stats.byDate[today] || 0) + cost;
+  const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  for (const d of Object.keys(stats.byDate)) {
+    if (new Date(d).getTime() < cutoff) delete stats.byDate[d];
+  }
+  await chrome.storage.local.set({ apiCostStats: stats });
+  return stats;
+}
+
 // ── 自動更新チェック ────────────────────────────────────────────────────
 const GITHUB_MANIFEST_URL =
   'https://raw.githubusercontent.com/taichi536/project1/main/manifest.json';
@@ -234,6 +262,15 @@ function setAutoRunAlarm(autoRunConfig) {
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  // API利用額の記録（popup/content.jsの短命なコンテキストに依存しないよう、
+  // service worker側で書き込みを完結させる）
+  if (msg.type === 'recordApiCost') {
+    recordApiCostInBackground(msg.model, msg.usage)
+      .then(stats => sendResponse({ ok: true, stats }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
   // 自動実行: 1URL完了 → 次のURLへ
   if (msg.type === 'autoRunComplete') {
     const slotId = msg.slotId ?? 0;

@@ -1359,36 +1359,21 @@ async function claudeFetch(apiKey, body, maxRetries = 4) {
       throw new Error(err.error?.message || `APIエラー (${response.status})`);
     }
     const data = await response.json();
-    recordApiCost(body.model, data.usage);
+    await recordApiCost(body.model, data.usage);
     return data;
   }
 }
 
-// USD per 1M tokens
-const CLAUDE_PRICING = {
-  'claude-sonnet-4-6': { input: 3.00, output: 15.00 },
-  'claude-haiku-4-5-20251001': { input: 1.00, output: 5.00 },
-};
-
+// API利用額の記録はbackground.js（service worker）に一元化する。
+// content.jsはページ遷移で破棄されるため、ここでchrome.storage.localに
+// 直接書き込むと、遷移のタイミング次第で書き込みが完了せず記録が失われることがある。
 async function recordApiCost(model, usage) {
-  const pricing = CLAUDE_PRICING[model];
-  if (!pricing || !usage) return;
-  const cost = ((usage.input_tokens || 0) / 1e6) * pricing.input
-    + ((usage.output_tokens || 0) / 1e6) * pricing.output;
-  const today = new Date().toISOString().slice(0, 10);
+  if (!usage) return;
   try {
-    const r = await chrome.storage.local.get(['apiCostStats']);
-    const stats = r.apiCostStats || { totalUSD: 0, byDate: {} };
-    stats.totalUSD = (stats.totalUSD || 0) + cost;
-    stats.byDate[today] = (stats.byDate[today] || 0) + cost;
-    const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
-    for (const d of Object.keys(stats.byDate)) {
-      if (new Date(d).getTime() < cutoff) delete stats.byDate[d];
-    }
-    await chrome.storage.local.set({ apiCostStats: stats });
+    await chrome.runtime.sendMessage({ type: 'recordApiCost', model, usage });
   } catch (e) {
     if (!e.message?.includes('Extension context invalidated'))
-      console.warn('[Snow-we] recordApiCost storage error:', e.message);
+      console.warn('[Snow-we] recordApiCost送信エラー:', e.message);
   }
 }
 
