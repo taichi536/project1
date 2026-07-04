@@ -967,7 +967,24 @@ ${candidateList}
       const fallback = [...clean.matchAll(/"o"\s*:\s*"([^"]+)"/g)].map(m => m[1]);
       return chunk.map((_, i) => ({ overall: fallback[i] || '要確認', reason: '' }));
     }
-    return (parsed.results || []).map(r => ({ overall: r.overall || r.o || '要確認', reason: r.reason || r.r || '' }));
+    return (parsed.results || []).map((r, i) => {
+      let overall = r.overall || r.o || '要確認';
+      let reason = r.reason || r.r || '';
+      // AIがアクセンチュア/ベイカレントを理由にNGとしたが、候補者本人のカード概要に
+      // その記載が実際にはない場合、応募ポジションの依頼主企業名との混同（ハルシネーション）
+      // とみなし、機械的に要確認へ格下げする
+      const summary = chunk[i]?.summary || '';
+      if (overall === 'NG') {
+        if (/アクセンチュア/.test(reason) && !/アクセンチュア|accenture/i.test(summary)) {
+          overall = '要確認';
+          reason = `[要確認:記載なし] ${reason}`;
+        } else if (/ベイカレント/.test(reason) && !/ベイカレント|baycurrent/i.test(summary)) {
+          overall = '要確認';
+          reason = `[要確認:記載なし] ${reason}`;
+        }
+      }
+      return { overall, reason };
+    });
   };
 
   const allResults = [];
@@ -1163,9 +1180,28 @@ ${profileText}
   const text = (data.content?.[0]?.text || '').trim();
   const clean = text.replace(/```json|```/g, '').trim();
   const jsonMatch = clean.match(/\{[\s\S]*\}/);
-  try { return JSON.parse(jsonMatch ? jsonMatch[0] : clean); } catch {
+  let parsed;
+  try { parsed = JSON.parse(jsonMatch ? jsonMatch[0] : clean); } catch {
     throw new Error('JSON解析エラー（AIの応答形式が不正）: ' + clean.substring(0, 100));
   }
+
+  // AIがアクセンチュア/ベイカレントを理由にNGとしたが、候補者自身のプロフィールに
+  // その記載が実際にはない場合、応募ポジションの依頼主企業名との混同（ハルシネーション）
+  // とみなし、機械的に要確認へ格下げする（posSection等の他情報には一切依存しない）
+  if (parsed.overall === 'NG') {
+    const ngText = [parsed.comment, ...(parsed.criteria || []).map(c => c.detail)].filter(Boolean).join(' ');
+    if (/アクセンチュア/.test(ngText) && !/アクセンチュア|accenture/i.test(profileText)) {
+      console.warn('[Snow-we] アクセンチュアNGだが候補者プロフィールに記載なし → 要確認に修正');
+      parsed.overall = '要確認';
+      parsed.comment = `[要確認: 候補者プロフィールにアクセンチュアの記載が見当たりません] ${parsed.comment || ''}`;
+    } else if (/ベイカレント/.test(ngText) && !/ベイカレント|baycurrent/i.test(profileText)) {
+      console.warn('[Snow-we] ベイカレントNGだが候補者プロフィールに記載なし → 要確認に修正');
+      parsed.overall = '要確認';
+      parsed.comment = `[要確認: 候補者プロフィールにベイカレントの記載が見当たりません] ${parsed.comment || ''}`;
+    }
+  }
+
+  return parsed;
 }
 
 function renderScreeningResult(result) {

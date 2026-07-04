@@ -3193,9 +3193,25 @@ JSON1行のみで出力（rを先に書いてからoを確定し、最後にcで
   const verdictMatch    = text.match(/"o"\s*:\s*"([^"]+)"/);
   const reasonMatch     = text.match(/"r"\s*:\s*"([^"]+)"/);
   const confidenceMatch = text.match(/"c"\s*:\s*(\d+)/);
-  const verdict    = verdictMatch    ? verdictMatch[1]        : '要確認';
-  const reason     = reasonMatch     ? reasonMatch[1]         : '';
+  let verdict      = verdictMatch    ? verdictMatch[1]        : '要確認';
+  let reason       = reasonMatch     ? reasonMatch[1]         : '';
   const confidence = confidenceMatch ? parseInt(confidenceMatch[1], 10) : null;
+
+  // AIがアクセンチュア/ベイカレントを理由にNGとしたが、候補者自身のプロフィールに
+  // その記載が実際にはない場合、応募ポジションの依頼主企業名との混同（ハルシネーション）
+  // とみなし、機械的に要確認へ格下げする（posSection等の他情報には一切依存しない）
+  if (verdict === 'NG') {
+    if (/アクセンチュア/.test(reason) && !/アクセンチュア|accenture/i.test(profileText)) {
+      console.warn('[Snow-we] アクセンチュアNGだが候補者プロフィールに記載なし → 要確認に修正:', reason);
+      verdict = '要確認';
+      reason = `[要確認: 候補者プロフィールにアクセンチュアの記載が見当たりません] ${reason}`;
+    } else if (/ベイカレント/.test(reason) && !/ベイカレント|baycurrent/i.test(profileText)) {
+      console.warn('[Snow-we] ベイカレントNGだが候補者プロフィールに記載なし → 要確認に修正:', reason);
+      verdict = '要確認';
+      reason = `[要確認: 候補者プロフィールにベイカレントの記載が見当たりません] ${reason}`;
+    }
+  }
+
   console.log(`[Snow-we] AI判定: ${verdict}${confidence != null ? ` (${confidence}%)` : ''}${reason ? ` / ${reason}` : ''}`);
   return { verdict, reason, confidence };
 }
