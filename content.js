@@ -4968,7 +4968,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const [cls, text] = r.overall === 'OK' ? ['ok', '✅ スカウト推奨']
                           : r.overall === 'NG' ? ['ng', '❌ 見送り']
                           : ['warn', '⚠️ 要確認'];
-        setBatchBadge(el, cls, text, '', cards[i]?.summary?.substring(0, 200) || '', r.overall);
+        setBatchBadge(el, cls, text, r.reason || '', cards[i]?.summary?.substring(0, 200) || '', r.overall);
       });
       // Bizreach: 仮想スクロールでバッジが消えないよう監視を開始
       if (getPlatform() === 'bizreach') startBizreachBadgeObserver();
