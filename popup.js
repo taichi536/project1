@@ -950,9 +950,9 @@ ${criteriaLines ? '\n【追加条件】\n' + criteriaLines : ''}
 【候補者一覧】
 ${candidateList}
 
-各候補者について、判定理由（r）を15文字以内で簡潔に記述してください。
+各候補者について、判定理由（r）を15文字以内で簡潔に記述してください。NGの場合のみ、根拠となる候補者一覧本文からの引用（q）を12文字以内でそのまま書き写してください（要約・言い換え不可、OK/要確認の場合qは省略可）。
 以下のJSON形式のみで出力してください（説明不要）:
-{"results":[{"i":${offset + 1},"o":"OK","r":"理由"},{"i":${offset + 2},"o":"NG","r":"理由"}]}`;
+{"results":[{"i":${offset + 1},"o":"OK","r":"理由"},{"i":${offset + 2},"o":"NG","r":"理由","q":"引用"}]}`;
 
     const data = await claudeFetch(apiKey, {
       model: 'claude-haiku-4-5-20251001',
@@ -970,17 +970,17 @@ ${candidateList}
     return (parsed.results || []).map((r, i) => {
       let overall = r.overall || r.o || '要確認';
       let reason = r.reason || r.r || '';
-      // AIがアクセンチュア/ベイカレントを理由にNGとしたが、候補者本人のカード概要に
-      // その記載が実際にはない場合、応募ポジションの依頼主企業名との混同（ハルシネーション）
-      // とみなし、機械的に要確認へ格下げする
+      const quote = r.quote || r.q || '';
+      // NG判定の根拠引用(q)が、実際に候補者本人のカード概要に存在するかを機械的に検証する。
+      // 見当たらない場合（応募ポジション欄の依頼主企業名や基準にない独自解釈との混同等）は
+      // 根拠のない判定とみなし、要確認へ格下げする。
       const summary = chunk[i]?.summary || '';
+      const normalize = s => s.replace(/\s+/g, '');
       if (overall === 'NG') {
-        if (/アクセンチュア/.test(reason) && !/アクセンチュア|accenture/i.test(summary)) {
+        const grounded = quote && quote.length >= 3 && normalize(summary).includes(normalize(quote));
+        if (!grounded) {
           overall = '要確認';
-          reason = `[要確認:記載なし] ${reason}`;
-        } else if (/ベイカレント/.test(reason) && !/ベイカレント|baycurrent/i.test(summary)) {
-          overall = '要確認';
-          reason = `[要確認:記載なし] ${reason}`;
+          reason = `[要確認:根拠不明] ${reason}`;
         }
       }
       return { overall, reason };
@@ -1166,7 +1166,8 @@ ${profileText}
     {
       "name": "判定項目名",
       "result": "OK" | "NG" | "情報なし",
-      "detail": "判定根拠を1文で（プロフィールから読み取れた具体的な情報を含める）"
+      "detail": "判定根拠を1文で（プロフィールから読み取れた具体的な情報を含める）",
+      "quote": "resultがNGの場合、根拠となる【候補者プロフィール】本文からの引用を20字以内でそのまま書き写す（要約・言い換え・応募ポジション欄からの引用は不可）。それ以外は空文字"
     }
   ],
   "comment": "総合的なコメントを2〜3文で。スカウトを打つべきかどうかの所見を含める。"
@@ -1185,19 +1186,19 @@ ${profileText}
     throw new Error('JSON解析エラー（AIの応答形式が不正）: ' + clean.substring(0, 100));
   }
 
-  // AIがアクセンチュア/ベイカレントを理由にNGとしたが、候補者自身のプロフィールに
-  // その記載が実際にはない場合、応募ポジションの依頼主企業名との混同（ハルシネーション）
-  // とみなし、機械的に要確認へ格下げする（posSection等の他情報には一切依存しない）
+  // NG判定した各criteria項目のquote（根拠引用）が、実際に候補者プロフィール本文に
+  // 存在するかを機械的に検証する。NG項目が1つ以上あるのに、いずれのquoteも本文に
+  // 見当たらない場合は根拠のない判定（応募ポジション欄との混同・基準にない独自解釈等）
+  // とみなし、要確認へ格下げする。
   if (parsed.overall === 'NG') {
-    const ngText = [parsed.comment, ...(parsed.criteria || []).map(c => c.detail)].filter(Boolean).join(' ');
-    if (/アクセンチュア/.test(ngText) && !/アクセンチュア|accenture/i.test(profileText)) {
-      console.warn('[Snow-we] アクセンチュアNGだが候補者プロフィールに記載なし → 要確認に修正');
+    const normalize = s => s.replace(/\s+/g, '');
+    const normProfile = normalize(profileText);
+    const ngCriteria = (parsed.criteria || []).filter(c => c.result === 'NG');
+    const hasGroundedNG = ngCriteria.some(c => c.quote && c.quote.length >= 3 && normProfile.includes(normalize(c.quote)));
+    if (ngCriteria.length > 0 && !hasGroundedNG) {
+      console.warn('[Snow-we] NG判定の根拠引用が候補者プロフィールに見当たらない → 要確認に修正:', ngCriteria);
       parsed.overall = '要確認';
-      parsed.comment = `[要確認: 候補者プロフィールにアクセンチュアの記載が見当たりません] ${parsed.comment || ''}`;
-    } else if (/ベイカレント/.test(ngText) && !/ベイカレント|baycurrent/i.test(profileText)) {
-      console.warn('[Snow-we] ベイカレントNGだが候補者プロフィールに記載なし → 要確認に修正');
-      parsed.overall = '要確認';
-      parsed.comment = `[要確認: 候補者プロフィールにベイカレントの記載が見当たりません] ${parsed.comment || ''}`;
+      parsed.comment = `[要確認: NG判定の根拠となる引用が候補者プロフィールに見当たりません] ${parsed.comment || ''}`;
     }
   }
 

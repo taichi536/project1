@@ -3180,9 +3180,10 @@ ${ageNote}
 【候補者情報】
 ${profileText}
 
-JSON1行のみで出力（rを先に書いてからoを確定し、最後にcで確信度0-100を付けること。rは判定理由を50字以内で）:
-{"r":"理由","o":"OK","c":90} または {"r":"理由","o":"NG","c":85} または {"r":"理由","o":"要確認","c":45}
-※cは判定の確信度（0〜100の整数）。基準に明確に合致/不合致なら80以上、判断が難しければ60未満。`;
+JSON1行のみで出力（rを先に書いてからoを確定し、最後にcで確信度0-100を付けること。rは判定理由を50字以内で、qはNG判定の根拠となる【候補者情報】本文からの引用を20字以内でそのまま書き写すこと。OK判定の場合qは空文字でよい）:
+{"r":"理由","o":"OK","c":90,"q":""} または {"r":"理由","o":"NG","c":85,"q":"候補者情報本文からの引用"} または {"r":"理由","o":"要確認","c":45,"q":""}
+※cは判定の確信度（0〜100の整数）。基準に明確に合致/不合致なら80以上、判断が難しければ60未満。
+※qはNGの場合のみ必須。【候補者情報】に実際に書かれている文字列をそのまま抜き出すこと。要約・言い換え・推測・応募ポジション欄からの引用は不可。`;
 
   const data = await claudeFetch(apiKey, {
     model: 'claude-haiku-4-5-20251001',
@@ -3193,22 +3194,24 @@ JSON1行のみで出力（rを先に書いてからoを確定し、最後にcで
   const verdictMatch    = text.match(/"o"\s*:\s*"([^"]+)"/);
   const reasonMatch     = text.match(/"r"\s*:\s*"([^"]+)"/);
   const confidenceMatch = text.match(/"c"\s*:\s*(\d+)/);
+  const quoteMatch      = text.match(/"q"\s*:\s*"([^"]*)"/);
   let verdict      = verdictMatch    ? verdictMatch[1]        : '要確認';
   let reason       = reasonMatch     ? reasonMatch[1]         : '';
   const confidence = confidenceMatch ? parseInt(confidenceMatch[1], 10) : null;
+  const quote      = quoteMatch      ? quoteMatch[1]          : '';
 
-  // AIがアクセンチュア/ベイカレントを理由にNGとしたが、候補者自身のプロフィールに
-  // その記載が実際にはない場合、応募ポジションの依頼主企業名との混同（ハルシネーション）
-  // とみなし、機械的に要確認へ格下げする（posSection等の他情報には一切依存しない）
+  // NG判定の根拠として提示された引用(q)が、実際に候補者情報本文に存在するかを
+  // 機械的に検証する。存在しない（＝応募ポジション欄の依頼主企業名や、基準にない
+  // 独自解釈と混同した等）場合は根拠のない判定とみなし、要確認へ格下げする。
   if (verdict === 'NG') {
-    if (/アクセンチュア/.test(reason) && !/アクセンチュア|accenture/i.test(profileText)) {
-      console.warn('[Snow-we] アクセンチュアNGだが候補者プロフィールに記載なし → 要確認に修正:', reason);
+    const normalize = s => s.replace(/\s+/g, '');
+    const grounded = quote && quote.length >= 3 && normalize(profileText).includes(normalize(quote));
+    if (!grounded) {
+      console.warn('[Snow-we] NG判定の根拠引用が候補者情報に見当たらない → 要確認に修正:', JSON.stringify(quote), '/', reason);
       verdict = '要確認';
-      reason = `[要確認: 候補者プロフィールにアクセンチュアの記載が見当たりません] ${reason}`;
-    } else if (/ベイカレント/.test(reason) && !/ベイカレント|baycurrent/i.test(profileText)) {
-      console.warn('[Snow-we] ベイカレントNGだが候補者プロフィールに記載なし → 要確認に修正:', reason);
-      verdict = '要確認';
-      reason = `[要確認: 候補者プロフィールにベイカレントの記載が見当たりません] ${reason}`;
+      reason = quote
+        ? `[要確認: 判定根拠「${quote}」が候補者情報に見当たりません] ${reason}`
+        : `[要確認: 判定根拠の引用なし] ${reason}`;
     }
   }
 
