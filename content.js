@@ -3165,12 +3165,18 @@ async function judgeSingleCandidate(apiKey, profileText, criteria) {
     fewShotSection = `\n【過去の訂正例（最優先参照）】\n同様パターンの候補者は同じ判断をすること。\n${examples}\n`;
   }
 
+  // 年齢はAIの自由読解に任せると誤読・誤比較が起きるため、コード側で確実に抽出して明示する
+  const ageMatch = profileText.match(/(\d{2,3})歳/);
+  const ageNote = ageMatch
+    ? `\n【候補者の年齢（自動抽出・正）】${ageMatch[1]}歳 ※年齢条件の判定は必ずこの数値を使うこと。プロフィール本文中の勤続年数・経験年数・西暦等、他の数字と混同しないこと。`
+    : '';
+
   const prompt = `転職エージェントの一次選定アシスタントです。
 ${companySection}
 【選定基準】
 ${criteriaLines}${posSection}${fewShotSection}
 【重要：職種分類の注意】候補者の職種分類（ITエンジニア系/文系職）は、候補者自身の現在・直近の職種で判断すること。【応募ポジションの職務内容】が文系・ビジネス職であっても、候補者の実際の職種がITエンジニア・技術職であれば「ITエンジニア系」として分類すること。ポジション内容は候補者の職種分類に影響しない。
-
+${ageNote}
 【候補者情報】
 ${profileText}
 

@@ -1117,6 +1117,12 @@ async function runScreeningAI(apiKey, profileText, criteria, posReq = '', positi
   const posSection = posReq ? `\n【応募ポジション：${positionName}（参考情報。必須スキル等との適合度はNG判定の根拠にしないこと）】\n${posReq.slice(0, 600)}\n` : '';
   const companySection = companyCriteria ? `\n【会社別採用基準（共通基準より優先）】\n${companyCriteria.slice(0, 600)}\n` : '';
 
+  // 年齢はAIの自由読解に任せると誤読・誤比較が起きるため、コード側で確実に抽出して明示する
+  const ageMatch = profileText.match(/(\d{2,3})歳/);
+  const ageNote = ageMatch
+    ? `\n【候補者の年齢（自動抽出・正）】${ageMatch[1]}歳 ※年齢条件の判定は必ずこの数値を使うこと。プロフィール本文中の勤続年数・経験年数・西暦等、他の数字と混同しないこと。`
+    : '';
+
   const prompt = `あなたは転職エージェントの一次選定アシスタントです。
 ${companySection}
 以下の【選定基準】と【候補者プロフィール】を照合し、各基準について候補者がクリアしているかを判定してください。
@@ -1125,7 +1131,7 @@ ${posSection}
 【選定基準】
 ${buildStandardCriteria(criteria.ageIncome)}
 ${criteriaText ? '\n【追加条件】\n' + criteriaText : ''}
-
+${ageNote}
 【候補者プロフィール】
 ${profileText}
 
