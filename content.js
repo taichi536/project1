@@ -4393,45 +4393,53 @@ function extractBySelectors(selectors, root) {
       });
     } catch (e) {}
   }
-  return parts.join('\n');
+  // 複数セレクターが同じ内容を持つ入れ子要素（親div/section/tableなど）に
+  // 重複してヒットするため、他の抽出関数と同じ重複除去を通す
+  return dedupeTextBlocks(parts).join('\n');
 }
 
 // -------------------------------------------------------
 // ユーティリティ：キーワードを含むテキストブロックを収集
 // -------------------------------------------------------
+// テキストブロック配列から重複・準重複を除去する。
+// RDS/dodax等のカード・詳細パネルは、入れ子要素や「続きを読む」の
+// 折りたたみ版・展開版が同じ内容をわずかに異なる文言で複数回含むことがあり、
+// 完全な部分文字列一致だけでは検出できない。先頭の空白除去済み文字列を
+// フィンガープリントとして併用し、抽出系の関数はすべてこれを通す。
+function dedupeTextBlocks(blocks) {
+  const fingerprint = t => t.replace(/\s+/g, '').slice(0, 40);
+  const result = [];
+  for (const t of blocks) {
+    if (!t) continue;
+    const fp = fingerprint(t);
+    let dupIdx = -1;
+    for (let i = 0; i < result.length; i++) {
+      const prev = result[i];
+      if (prev.includes(t) || t.includes(prev) || (fp.length >= 20 && fingerprint(prev).slice(0, fp.length) === fp)) {
+        dupIdx = i;
+        break;
+      }
+    }
+    if (dupIdx === -1) result.push(t);
+    else if (t.length > result[dupIdx].length) result[dupIdx] = t; // より詳細な方を残す
+  }
+  return result;
+}
+
 function extractByKeywords(keywords, root, minLen, maxLen) {
   root = root || document;
   minLen = minLen || 30;
   maxLen = maxLen || 6000;
-  const collected = [];
-  const seen = new Set();
-  // 「続きを読む」等で折りたたみ版・展開版の2つのDOM要素が同居していると、
-  // 文言が微妙に異なるため完全部分一致では重複と判定できない。
-  // 先頭の空白除去済み文字列で簡易フィンガープリントを取り、同一内容とみなす。
-  const fingerprint = t => t.replace(/\s+/g, '').slice(0, 40);
+  const candidates = [];
 
   root.querySelectorAll('div, section, article, li, tr, td, dl, dt, dd, p, span').forEach(el => {
-    if (seen.has(el)) return;
     const t = (el.innerText || '').trim();
     if (t.length < minLen || t.length > maxLen) return;
     if (!keywords.some(kw => t.includes(kw))) return;
-
-    const fp = fingerprint(t);
-    let dup = false;
-    for (let i = 0; i < collected.length; i++) {
-      const prev = collected[i];
-      if (prev.includes(t) || t.includes(prev) || (fp.length >= 20 && fingerprint(prev).slice(0, fp.length) === fp)) {
-        if (t.length > prev.length) collected[i] = t; // より詳細な（展開後の）方を残す
-        dup = true;
-        break;
-      }
-    }
-    if (!dup) {
-      collected.push(t);
-      seen.add(el);
-    }
+    candidates.push(t);
   });
 
+  const collected = dedupeTextBlocks(candidates);
   collected.sort((a, b) => b.length - a.length);
   return collected.slice(0, 5).join('\n\n');
 }
