@@ -841,7 +841,7 @@ document.addEventListener('click', e => {
   if (!btn) return;
   const text = (btn.innerText || '').trim();
 
-  const isScoutBtn           = text === 'スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする');
+  const isScoutBtn           = text === 'スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする') || text.includes('スカウトを作成');
   const isConfirmBtn         = text === '確認';
   const isSendBtn            = text === '送信' || text === '送信する';
   const isTemplateConfirmBtn = text === '確定';
