@@ -142,19 +142,89 @@ async function updateScoutQueueStatus(candidateId, platform, patch) {
   }
 }
 
-// 【ドライラン】実際にはスカウトを送信せず、送信フローのどのステップまで到達できるかを
-// ログにだけ出す。本番の自動送信ボタンクリック（スカウト作成→確認→確定→送信）は
-// 実際のDOM挙動をこのログで確認してから有効化する。
-async function dryRunAutoScoutSend(item) {
-  console.log(`[Snow-we][ドライラン] 送信対象: candidateId=${item.candidateId} platform=${getPlatform()} position=${item.position} company=${item.info?.company || ''} age=${item.info?.age || ''}`);
-  const cardStillInDom = document.body.contains(item.el);
-  console.log(`[Snow-we][ドライラン] カードDOM生存: ${cardStillInDom}`);
-  if (!cardStillInDom) {
-    console.warn('[Snow-we][ドライラン] カードがDOMから消えているため、実際の送信では候補者を再特定できません');
+// スカウト送信フローのボタン判定（document.addEventListener('click', ...)の
+// 観測側と全く同じ文言判定を共有する。ここで実際にクリックした場合も同じ観測側リスナーが
+// 反応してpendingScout保存・ポジション照合・recordScoutSent（GAS/Supabase記録）まで
+// 従来通り自動で行われるため、記録処理をここで重複実装する必要はない）
+const isScoutTriggerText   = t => t === 'スカウト' || t.includes('スカウトを送る') || t.includes('スカウトする') || t.includes('スカウトを作成');
+const isTemplateConfirmText = t => t === '確定';
+const isConfirmStepText     = t => t === '確認';
+const isSendStepText        = t => t === '送信' || t === '送信する';
+
+// 指定した条件に一致するボタンが現れるまでポーリングする（最大timeoutMs）
+async function waitForButton(matchFn, timeoutMs = 8000, pollMs = 300) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = Array.from(document.querySelectorAll('button, a, [role="button"]'))
+      .find(b => { const t = (b.innerText || '').trim(); return t && matchFn(t); });
+    if (found) return found;
+    await sleep(pollMs);
+  }
+  return null;
+}
+
+// 実際にスカウト送信フローをクリックで進める（本文はテンプレ標準文のまま。
+// パーソナライズ生成はしない）。想定外のステップで止まった場合は安全側に倒し、
+// 「送信」ボタンが確実に見つかった場合以外は絶対にクリックしない。
+async function executeAutoScoutSend(item) {
+  const cardEl = item.el;
+  console.log(`[Snow-we][自動送信] 開始 candidateId=${item.candidateId} position=${item.position}`);
+  if (!document.body.contains(cardEl)) {
+    console.warn('[Snow-we][自動送信] カードがDOMから消えているため中断:', item.candidateId);
     return { ok: false, reason: 'card_detached' };
   }
-  console.log('[Snow-we][ドライラン] ここで実際は: スカウト作成ボタンをクリック→テンプレ標準文のまま→確認→確定→送信、の順にクリックする予定（未実装・クリックはしていません）');
-  return { ok: true, dryRun: true };
+
+  // ① カード内のスカウト作成ボタンをクリック
+  const scoutBtn = Array.from(cardEl.querySelectorAll('button, a, [role="button"]'))
+    .find(b => isScoutTriggerText((b.innerText || '').trim()));
+  if (!scoutBtn) {
+    console.warn('[Snow-we][自動送信] スカウトボタンが見つからないため中断:', item.candidateId);
+    return { ok: false, reason: 'scout_button_not_found' };
+  }
+  scoutBtn.scrollIntoView({ block: 'center' });
+  await sleep(300);
+  scoutBtn.click();
+  console.log('[Snow-we][自動送信] スカウトボタンをクリックしました');
+
+  // ② テンプレート確定
+  const templateConfirmBtn = await waitForButton(isTemplateConfirmText);
+  if (!templateConfirmBtn) {
+    console.warn('[Snow-we][自動送信] 「確定」ボタンが現れず中断（送信はしていません）:', item.candidateId);
+    return { ok: false, reason: 'template_confirm_not_found' };
+  }
+  await sleep(500);
+  templateConfirmBtn.click();
+  console.log('[Snow-we][自動送信] 「確定」をクリックしました');
+
+  // ③ 確認
+  const confirmBtn = await waitForButton(isConfirmStepText);
+  if (!confirmBtn) {
+    console.warn('[Snow-we][自動送信] 「確認」ボタンが現れず中断（送信はしていません）:', item.candidateId);
+    return { ok: false, reason: 'confirm_not_found' };
+  }
+  await sleep(500);
+  confirmBtn.click();
+  console.log('[Snow-we][自動送信] 「確認」をクリックしました');
+
+  // ④ 送信（実際にメッセージが送信される最終ステップ）
+  const sendBtn = await waitForButton(isSendStepText);
+  if (!sendBtn) {
+    console.warn('[Snow-we][自動送信] 「送信」ボタンが現れず中断（送信はしていません）:', item.candidateId);
+    return { ok: false, reason: 'send_not_found' };
+  }
+  await sleep(500);
+  sendBtn.click();
+  console.log('[Snow-we][自動送信] 「送信」をクリックしました。候補者ID:', item.candidateId);
+  await sleep(800);
+  return { ok: true };
+}
+
+// 承認パネルで複数件を素早く承認された場合に送信フローが同時に重ならないよう直列化する
+let _autoSendQueue = Promise.resolve();
+function enqueueAutoScoutSend(item) {
+  const run = _autoSendQueue.then(() => executeAutoScoutSend(item));
+  _autoSendQueue = run.catch(() => {});
+  return run;
 }
 
 // AIが星をつけた候補者を、このページを離れる前にその場でレビューする画面。
@@ -182,7 +252,7 @@ async function showApprovalReviewPanel(items) {
     header.style.cssText = 'padding:14px 16px;border-bottom:1px solid #e2e8f0;flex-shrink:0;';
     header.innerHTML = `
       <div style="font-size:14px;font-weight:700;color:#1e293b;">✅ 承認待ち（${items.length}件）</div>
-      <div style="font-size:11px;color:#64748b;margin-top:3px;line-height:1.5;">AIが星をつけた候補者です。ポジションを確認・修正し、承認または却下してください。（現在ドライランモード：実際の送信は行いません）</div>
+      <div style="font-size:11px;color:#64748b;margin-top:3px;line-height:1.5;">AIが星をつけた候補者です。ポジションを確認・修正し、承認するとテンプレート標準文のままスカウトが自動送信されます（本文のパーソナライズ生成はしません）。</div>
     `;
     overlay.appendChild(header);
 
@@ -236,10 +306,21 @@ async function showApprovalReviewPanel(items) {
 
       approveBtn.addEventListener('click', async () => {
         approveBtn.disabled = true; rejectBtn.disabled = true;
+        approveBtn.textContent = '⏳ 送信中...';
         item.position = select.value;
         await updateScoutQueueStatus(item.candidateId, getPlatform(), { status: 'approved', position: select.value, reviewed_at: new Date().toISOString() });
-        await dryRunAutoScoutSend(item);
-        finish();
+        const result = await enqueueAutoScoutSend(item);
+        if (result.ok) {
+          await updateScoutQueueStatus(item.candidateId, getPlatform(), { status: 'sent', sent_at: new Date().toISOString() });
+          finish();
+        } else {
+          await updateScoutQueueStatus(item.candidateId, getPlatform(), { status: 'send_failed', ai_reason: `送信失敗: ${result.reason}` });
+          console.warn('[Snow-we][自動送信] 失敗のため要手動確認:', item.candidateId, result.reason);
+          approveBtn.textContent = '⚠️ 送信失敗（手動確認要）';
+          approveBtn.style.background = '#fef3c7';
+          approveBtn.style.color = '#92400e';
+          approveBtn.style.borderColor = '#fbbf24';
+        }
       });
       rejectBtn.addEventListener('click', async () => {
         approveBtn.disabled = true; rejectBtn.disabled = true;
