@@ -1223,18 +1223,25 @@ function extractBasicInfo(cardEl) {
     const idx = lines.findIndex(l => l === '現職' || l === '前職');
     const companyRe = /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,|ホールディングス|グループ|銀行|証券|保険|大学|病院/;
     if (idx >= 0) {
-      // 現職/前職の前後5行で、会社名キーワードを含む最も近い行を使う
-      let bestLine = '';
-      let bestDist = Infinity;
+      // 現職/前職の前後5行から会社名を探す。「会社名／職種」形式の行（／を含む）は
+      // 職種名だけの単独行より確実に会社名を含むため優先する。優先度を分けずに
+      // 単純な最近傍を取ると、職種名だけの行（例:「証券法人営業」）と本来の
+      // 「みずほ証券株式会社／証券法人営業」行が同じ距離にある場合、キーワード一致の
+      // 判定順で職種名だけの行が先に採用されてしまう不具合があった
+      let bestSlashLine = '', bestSlashDist = Infinity;
+      let bestPlainLine = '', bestPlainDist = Infinity;
       for (let i = Math.max(0, idx - 5); i < Math.min(lines.length, idx + 5); i++) {
         if (i === idx) continue;
         const line = lines[i];
         if (!line || line.length < 2) continue;
-        if (companyRe.test(line) || (line.includes('／') && line.length > 4)) {
-          const dist = Math.abs(i - idx);
-          if (dist < bestDist) { bestDist = dist; bestLine = line; }
+        const dist = Math.abs(i - idx);
+        if (line.includes('／') && line.length > 4) {
+          if (dist < bestSlashDist) { bestSlashDist = dist; bestSlashLine = line; }
+        } else if (companyRe.test(line)) {
+          if (dist < bestPlainDist) { bestPlainDist = dist; bestPlainLine = line; }
         }
       }
+      const bestLine = bestSlashLine || bestPlainLine;
       if (bestLine) company = bestLine.split(/[／/]/)[0].trim();
     }
     if (!company) {
