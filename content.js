@@ -1748,6 +1748,17 @@ async function triggerAutoAdd() {
       continue;
     }
 
+    // 除外キャリアチェック：投資銀行・プルデンシャル出身は、AI判定に委ねず確実にNGにする
+    // （AIへのプロンプト指示だけだと見落として稀にOK判定になってしまうため、他の
+    // 確定NG条件と同様に判定前の決定的チェックとして弾く）
+    const excludedCareer = checkExcludedCareerNG(profileText);
+    if (excludedCareer) {
+      setBatchBadge(el, 'ng', '❌ 見送り(除外対象)', `除外対象: ${excludedCareer}`, profileText.substring(0, 200), 'NG');
+      ngCount++; totalProcessed++;
+      await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now(), verdicts: { ok: okCount, ng: ngCount, pending: pendingCount } });
+      continue;
+    }
+
     // 転職意向チェック（doda Xのみ）
     const intentResult = checkJobChangeIntentNG(profileText);
     if (intentResult === null && getPlatform() === 'dodax') {
@@ -2963,6 +2974,23 @@ function extractIncomeFromText(text) {
 }
 
 // 転職意向チェック（doda Xのみ）：'ng' | null
+// 投資銀行・プルデンシャル出身者を確実に除外する（AI任せだと稀に見落としてOKになるため）
+function checkExcludedCareerNG(profileText) {
+  if (!profileText) return null;
+  const ngPatterns = [
+    { re: /投資銀行/, label: '投資銀行' },
+    { re: /インベストメントバンキング/, label: 'インベストメントバンキング' },
+    { re: /インベストバンキング/, label: 'インベストメントバンキング' },
+    { re: /プルデンシャル/, label: 'プルデンシャル' },
+  ];
+  const hit = ngPatterns.find(p => p.re.test(profileText));
+  if (hit) {
+    console.log('[Snow-we] 除外キャリアNG:', hit.label);
+    return hit.label;
+  }
+  return null;
+}
+
 function checkJobChangeIntentNG(profileText) {
   if (!profileText || getPlatform() !== 'dodax') return null;
 
