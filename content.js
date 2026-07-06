@@ -908,6 +908,11 @@ function gicsAutoClassify(companyName) {
 
   // 医薬品・ヘルスケア
   if (/武田薬品|takeda|アステラス|astellas|第一三共|大塚製薬|中外製薬|エーザイ|eisai/.test(n)) return '医薬品';
+  if (/塩野義|田辺三菱|協和キリン|小野薬品|住友ファーマ|大日本住友/.test(n))  return '医薬品';
+  if (/ファイザー|pfizer|ノバルティス|novartis|アストラゼネカ|astrazeneca/.test(n)) return '医薬品';
+  if (/msd|グラクソ|gsk|サノフィ|sanofi|ロシュ|roche|アッヴィ|abbvie/.test(n)) return '医薬品';
+  if (/バイエル|bayer|イーライリリー|eli lilly|ノボノルディスク|novo nordisk/.test(n)) return '医薬品';
+  if (/ジョンソン.エンド.ジョンソン|johnson.{0,2}johnson/.test(n))          return '医薬品';
   if (/医薬品|製薬|pharma/.test(n))                                         return '医薬品';
   if (/オリンパス|olympus|テルモ|terumo|シスメックス/.test(n))              return 'ヘルスケア機器・用品';
   if (/病院|クリニック|メディカル|medical|healthcare/.test(n))              return 'ヘルスケアプロバイダー';
@@ -4554,6 +4559,11 @@ async function initPositionIndicator() {
   // 「開いた瞬間だけ取得」だと、開くタイミング次第で古いまま選択してしまう可能性があるため、
   // 60秒おきにも更新し、最終同期時刻をドロップダウン内に表示して状態を可視化する。
   let lastPositionSync = null;
+  // ここで定義するrefreshPositionsは60秒おきの定期同期専用。ドロップダウンが開いている間の
+  // リスト再描画（renderItems/searchBox）は、クリックした瞬間のクロージャ内でのみ有効な
+  // ローカル変数のため、ここから参照することはできない（参照するとReferenceErrorになり、
+  // 定期同期が無言で失敗し続けるバグになっていた）。定期同期はpositions配列と最終同期時刻の
+  // 更新のみ行い、実際の表示更新はドロップダウンを開いた時の再取得に任せる。
   const refreshPositions = () => {
     try {
       chrome.runtime.sendMessage({ type: 'getPositionList' }).then(res => {
@@ -4561,7 +4571,6 @@ async function initPositionIndicator() {
         if (res?.positions?.length > 0) {
           positions = res.positions;
           lastPositionSync = new Date();
-          if (document.getElementById('snow-we-pos-dropdown')) renderItems(searchBox.value);
           const syncLabel = document.getElementById('snow-we-pos-sync-label');
           if (syncLabel) syncLabel.textContent = `最終同期: ${lastPositionSync.toLocaleTimeString('ja-JP')}`;
         }
@@ -4587,9 +4596,14 @@ async function initPositionIndicator() {
       chrome.runtime.sendMessage({ type: 'getPositionList' }).then(res => {
         console.log('[Snow-we] ポジション一覧バックグラウンド取得:', res?.positions?.length || 0, '件');
         if (res?.positions?.length > 0) {
+          // 内容が変わっていない場合はリストを再描画しない。再描画（list.innerHTML再構築）を
+          // 挟むと、ちょうどその瞬間に候補者がクリックしていた項目のDOM要素が
+          // 置き換わってクリックが成立しなくなる（mousedown後にDOMが差し替わるとclickが
+          // 発火しない）ことがあり、「たまに選択されない」不具合の一因になっていたため
+          const changed = JSON.stringify(res.positions) !== JSON.stringify(positions);
           positions = res.positions;
           lastPositionSync = new Date();
-          if (document.getElementById('snow-we-pos-dropdown')) renderItems(searchBox.value);
+          if (changed && document.getElementById('snow-we-pos-dropdown')) renderItems(searchBox.value);
         }
       }).catch(e => console.warn('[Snow-we] ポジション一覧バックグラウンド取得失敗:', e.message));
     } catch (_) {
