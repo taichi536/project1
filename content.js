@@ -4058,34 +4058,20 @@ async function initPositionIndicator() {
   };
   render(currentPos);
 
-  let isOpeningDropdown = false;
-  indicator.addEventListener('click', async (e) => {
+  indicator.addEventListener('click', (e) => {
     e.stopPropagation();
     const existingDrop = document.getElementById('snow-we-pos-dropdown');
     if (existingDrop) { existingDrop.remove(); return; }
 
-    // 一覧取得中に連打されると、取得完了を待つ間に二重にドロップダウンが
-    // 開いてしまい（表示が重なる・選択が効いたり効かなかったりする不具合の原因）、
-    // このガードで取得中の再クリックを無視する
-    if (isOpeningDropdown) return;
-    isOpeningDropdown = true;
-
-    // ページロード時に一度だけ取得した一覧のままだと、開いている間にスプレッドシートへ
-    // 追加したポジションが反映されないため、開くたびに最新の一覧を取り直す。
-    // Extension context invalidated等でメッセージが返ってこないまま固まると
-    // isOpeningDropdownがtrueのままになり二度とドロップダウンが開かなくなるため、
-    // タイムアウトで必ず解除されるようにする
-    try {
-      const res = await Promise.race([
-        chrome.runtime.sendMessage({ type: 'getPositionList' }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
-      ]);
-      if (res?.positions?.length > 0) positions = res.positions;
-    } catch (_) {}
-    isOpeningDropdown = false;
-
-    // 取得待ちの間に既に別のドロップダウンが開いていれば、二重生成を避けて中断
-    if (document.getElementById('snow-we-pos-dropdown')) return;
+    // ドロップダウンはクリック直後に即座に表示する（体感速度優先）。
+    // 最新一覧の取得はバックグラウンドで行い、取得できた時点で
+    // 表示中のリストだけを更新する（開くたびに待たされる不具合を回避）。
+    chrome.runtime.sendMessage({ type: 'getPositionList' }).then(res => {
+      if (res?.positions?.length > 0) {
+        positions = res.positions;
+        if (document.getElementById('snow-we-pos-dropdown')) renderItems(searchBox.value);
+      }
+    }).catch(() => {});
 
     const dropdown = document.createElement('div');
     dropdown.id = 'snow-we-pos-dropdown';
