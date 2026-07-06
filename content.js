@@ -203,16 +203,23 @@ function findAndClickMatchingRadio(position) {
 async function selectTemplateRadioForPosition(position) {
   if (!position) return false;
 
-  // モーダル自体が現れるまで待つ（テンプレート名検索欄を目印にする）
-  const deadline1 = Date.now() + 8000;
+  // モーダル自体が現れるまで待つ（テンプレート名検索欄、またはモーダルの見出しを目印にする。
+  // 自動クリックでは手動操作時より表示が遅れることがあるため長めに待つ）
+  const deadline1 = Date.now() + 15000;
   let searchInput = null;
+  let modalSeen = false;
   while (Date.now() < deadline1) {
     searchInput = document.querySelector('input[placeholder="テンプレート名を入力する"]');
     if (searchInput) break;
+    if (!modalSeen) {
+      const heading = Array.from(document.querySelectorAll('h1,h2,h3,div,span'))
+        .find(el => (el.innerText || '').trim() === 'スカウトテンプレート選択');
+      if (heading) { modalSeen = true; console.log('[Snow-we][自動送信] モーダルの見出しは検出（検索欄はまだ）'); }
+    }
     await sleep(300);
   }
   if (!searchInput) {
-    console.warn('[Snow-we][自動送信] テンプレート選択モーダルが現れませんでした:', position);
+    console.warn(`[Snow-we][自動送信] テンプレート選択モーダルが現れませんでした（見出し検出:${modalSeen}）:`, position);
     return false;
   }
 
@@ -280,8 +287,18 @@ async function executeAutoScoutSend(item) {
   }
   scoutBtn.scrollIntoView({ block: 'center' });
   await sleep(300);
+  console.log(`[Snow-we][自動送信] スカウトボタン詳細: tag=${scoutBtn.tagName} class="${(scoutBtn.className || '').toString().slice(0, 80)}" text="${(scoutBtn.innerText || '').trim()}"`);
   scoutBtn.click();
   console.log('[Snow-we][自動送信] スカウトボタンをクリックしました');
+  // クリックがページ遷移を伴わない同期的な合成クリックとして無視される場合に備え、
+  // 少し待った後にモーダル/遷移の兆候が全くなければnative dispatchも試す
+  await sleep(500);
+  const hasAnySignOfModal = !!document.querySelector('input[placeholder="テンプレート名を入力する"]') ||
+    Array.from(document.querySelectorAll('h1,h2,h3,div,span')).some(el => (el.innerText || '').trim() === 'スカウトテンプレート選択');
+  if (!hasAnySignOfModal) {
+    console.log('[Snow-we][自動送信] クリック後もモーダルの兆候なし。MouseEventで再試行します');
+    scoutBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+  }
 
   // ② テンプレート選択モーダルで、承認パネルで確定したポジションのラジオボタンを選択する。
   // これをしないと「その時点でたまたま選ばれていたテンプレート」のまま送信されてしまい、
