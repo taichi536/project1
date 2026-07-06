@@ -288,17 +288,34 @@ async function executeAutoScoutSend(item) {
   scoutBtn.scrollIntoView({ block: 'center' });
   await sleep(300);
   console.log(`[Snow-we][自動送信] スカウトボタン詳細: tag=${scoutBtn.tagName} class="${(scoutBtn.className || '').toString().slice(0, 80)}" text="${(scoutBtn.innerText || '').trim()}"`);
-  scoutBtn.click();
-  console.log('[Snow-we][自動送信] スカウトボタンをクリックしました');
-  // クリックがページ遷移を伴わない同期的な合成クリックとして無視される場合に備え、
-  // 少し待った後にモーダル/遷移の兆候が全くなければnative dispatchも試す
-  await sleep(500);
-  const hasAnySignOfModal = !!document.querySelector('input[placeholder="テンプレート名を入力する"]') ||
+
+  // Reactで作られたUIは単純な.click()だけでは反応しないことがある
+  // （doda-xの星ボタンで実際に必要だったのと同じ理由）。モーダルの兆候が出るまで、
+  // PointerEvent→ネイティブclick→MouseEventシーケンスの順に段階的に試す
+  const opts = { bubbles: true, cancelable: true, view: window };
+  const modalAppeared = () =>
+    !!document.querySelector('input[placeholder="テンプレート名を入力する"]') ||
     Array.from(document.querySelectorAll('h1,h2,h3,div,span')).some(el => (el.innerText || '').trim() === 'スカウトテンプレート選択');
-  if (!hasAnySignOfModal) {
-    console.log('[Snow-we][自動送信] クリック後もモーダルの兆候なし。MouseEventで再試行します');
-    scoutBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+
+  try { scoutBtn.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, isPrimary: true })); } catch (_) {}
+  try { scoutBtn.dispatchEvent(new PointerEvent('pointerup',   { ...opts, pointerId: 1, isPrimary: true })); } catch (_) {}
+  scoutBtn.dispatchEvent(new MouseEvent('click', opts));
+  console.log('[Snow-we][自動送信] スカウトボタンをクリックしました(pointer+click)');
+  await sleep(600);
+
+  if (!modalAppeared()) {
+    console.log('[Snow-we][自動送信] モーダルの兆候なし。native .click()で再試行');
+    scoutBtn.click();
+    await sleep(600);
   }
+  if (!modalAppeared()) {
+    console.log('[Snow-we][自動送信] モーダルの兆候なし。mousedown/mouseupシーケンスで再試行');
+    scoutBtn.dispatchEvent(new MouseEvent('mousedown', opts));
+    scoutBtn.dispatchEvent(new MouseEvent('mouseup',   opts));
+    scoutBtn.dispatchEvent(new MouseEvent('click',     opts));
+    await sleep(600);
+  }
+  console.log('[Snow-we][自動送信] クリック手順完了。モーダル兆候:', modalAppeared());
 
   // ② テンプレート選択モーダルで、承認パネルで確定したポジションのラジオボタンを選択する。
   // これをしないと「その時点でたまたま選ばれていたテンプレート」のまま送信されてしまい、
