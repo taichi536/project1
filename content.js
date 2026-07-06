@@ -897,9 +897,10 @@ function getCandidateId(cardEl) {
     // フォールバック: No.XXXXXXX テキスト
     const m = (cardEl.innerText || '').match(/No\.(\d{5,})/);
     if (m) return `ambi_${m[1]}`;
-    // 最終フォールバック: カードテキストハッシュ
+    // 最終フォールバック: カードテキストハッシュ（先頭5行だと共通属性の候補者同士が
+    // 衝突しやすいため10行まで広げる。RDSで発覚した同種の問題への対応と同じ）
     const lines = (cardEl.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
-    const fp = lines.slice(0, 5).join('|');
+    const fp = lines.slice(0, 10).join('|');
     if (fp.length > 10) return `ambi_h${simpleHash(fp)}`;
     return null;
   }
@@ -942,8 +943,12 @@ function getCandidateId(cardEl) {
   if (m) return `${getPlatform()}_${m[1] || m[2]}`;
 
   // フォールバック2：年齢+会社名+経歴先頭のハッシュ（RDS等URL取得不可の場合）
+  // RDSのカードは「最終ログイン日・年齢・年収・経験社数」等の共通情報が先頭に来やすく、
+  // 会社名・大学名が出てくる前の先頭5行だけだと同じ属性の別候補者が同一ハッシュに衝突し、
+  // 一方が「処理済み」として無言でスキップされる（バッジが一切つかない）原因になっていた。
+  // 会社名等の識別性の高い情報を含むよう先頭10行まで広げて衝突を減らす。
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-  const fingerprint = lines.slice(0, 5).join('|');
+  const fingerprint = lines.slice(0, 10).join('|');
   if (fingerprint.length > 10) return `${getPlatform()}_h${simpleHash(fingerprint)}`;
 
   return null;
@@ -3197,7 +3202,9 @@ function checkIncomeNG(profileText) {
   if (income === null || income === 0) return null; // 年収不明・ゼロはClaudeに任せる
 
   // ITエンジニア系キーワードで職種を判定
-  const isIT = /エンジニア|ソフトウェア開発|インフラ|クラウド|システム開発|SE[^\w]|データエンジニア|バックエンド|フロントエンド|DevOps/.test(profileText);
+  // 「SE[^\w]」はSEが文字列末尾に来ると直後の文字が存在せず一致しないため、
+  // 後読み否定（Latin文字が続かない）に変更。あわせてプログラマ等の表記ゆれも追加
+  const isIT = /エンジニア|ソフトウェア開発|ソフトウェアエンジニア|プログラマ|システム開発|システムエンジニア|インフラ|クラウド|SE(?![A-Za-z])|データエンジニア|データサイエンティスト|機械学習|バックエンド|フロントエンド|DevOps|情報システム/.test(profileText);
 
   let threshold;
   if (isIT) {
