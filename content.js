@@ -3539,12 +3539,15 @@ async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
   } catch (_) {}
 
   // GASスプレッドシートにも送信（設定済みかつフィードバック保存が有効な場合）
+  // sendMessageをawaitせず投げっぱなしにしていたため、送信が実際に成功したかわからず、
+  // ページ遷移等でコンテキストが切れると結果が来る前に無言で失敗していた
+  // （ローカル保存はされるがシートには反映されない、という症状の原因）
   try {
     const { gasSettings } = await chrome.storage.local.get(['gasSettings']);
     const gasUrl = gasSettings?.url || gasSettings?.dbUrl;
     const secret = gasSettings?.secret || 'snowwe2024';
     if (gasUrl && gasSettings?.feedbackEnabled !== false) {
-      chrome.runtime.sendMessage({
+      const r = await chrome.runtime.sendMessage({
         type: 'gasPost',
         url: gasUrl,
         payload: {
@@ -3558,8 +3561,12 @@ async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
           ts,
         }
       });
+      if (!r?.ok) console.warn('[Snow-we] フィードバックのGAS送信失敗:', JSON.stringify(r || {}));
+      else console.log('[Snow-we] フィードバックをGASスプレッドシートに送信しました');
     }
-  } catch (_) {}
+  } catch (e) {
+    console.warn('[Snow-we] フィードバックGAS送信エラー:', e.message);
+  }
 
   // Supabaseにも保存
   ;(async () => {
