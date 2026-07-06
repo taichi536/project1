@@ -2351,7 +2351,7 @@ function findProfileUrl(cardEl) {
   if (platform !== 'dodax') {
     for (const link of cardEl.querySelectorAll('a[href]')) {
       const href = link.href || '';
-      if (href.startsWith(location.origin) && !href.includes('#')) return href;
+      if (href.startsWith(location.origin) && !href.includes('#') && !excludePatterns.some(p => p.test(href))) return href;
     }
   }
 
