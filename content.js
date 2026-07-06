@@ -161,42 +161,90 @@ function normalizePositionForMatch(s) {
     .trim().toLowerCase();
 }
 
+// テンプレート名から比較用の「核」となる文字列を取り出す（AC）/BC(等のプレフィックスと
+// 末尾の部門コードを除いた中心部分。RDSのテンプレート一覧の検索窓はこの部分での
+// 部分一致検索に強いため、ここで絞り込んでから該当行を探す）
+function extractPositionCore(position) {
+  return normalizePositionForMatch(position)
+    .replace(/\s*-[a-z]{2,10}$/i, '') // 末尾の "-tec" "-bus" 等の部門コードを除去
+    .trim();
+}
+
+// 一覧（現在DOM上にあるラジオ行）から、指定ポジション名に一致する行を探してクリックする
+function findAndClickMatchingRadio(position) {
+  const radios = Array.from(document.querySelectorAll('input[type="radio"]'));
+  if (radios.length === 0) return 'no_radios';
+  const normTarget = normalizePositionForMatch(position);
+  const rowTexts = [];
+  for (const radio of radios) {
+    const row = radio.closest('tr, [role="row"]') || radio.closest('li, [class*="row"], [class*="item"]');
+    if (!row) continue;
+    let rowText = '';
+    for (const cell of row.querySelectorAll('td, [role="cell"], div, span, p')) {
+      if (cell.querySelector('input, button')) continue;
+      const t = (cell.textContent || '').trim();
+      if (t.length > 3 && t.length < 120) { rowText = t; break; }
+    }
+    if (!rowText) continue;
+    rowTexts.push(rowText);
+    if (normalizePositionForMatch(rowText) === normTarget) {
+      if (!radio.checked) radio.click();
+      console.log('[Snow-we][自動送信] テンプレート選択:', rowText);
+      return true;
+    }
+  }
+  console.warn('[Snow-we][自動送信] テンプレート一覧に一致する行が見当たりません。候補行:', rowTexts.slice(0, 20));
+  return false;
+}
+
 // RDS等のテンプレート選択モーダル（ラジオボタン一覧）から、指定ポジション名に一致する
-// 行を探してクリックする。一致する行が見つからない場合は誤送信を避けるためnullを返す
+// 行を探してクリックする。一致する行が見つからない場合は誤送信を避けるためfalseを返す
 // （呼び出し側は「確定」に進まず中断する）
 async function selectTemplateRadioForPosition(position) {
   if (!position) return false;
-  const deadline = Date.now() + 8000;
-  while (Date.now() < deadline) {
-    const radios = Array.from(document.querySelectorAll('input[type="radio"]'));
-    if (radios.length > 0) {
-      const normTarget = normalizePositionForMatch(position);
-      for (const radio of radios) {
-        const row = radio.closest('tr, [role="row"]') || radio.closest('li, [class*="row"], [class*="item"]');
-        if (!row) continue;
-        let rowText = '';
-        for (const cell of row.querySelectorAll('td, [role="cell"], div, span, p')) {
-          if (cell.querySelector('input, button')) continue;
-          const t = (cell.textContent || '').trim();
-          if (t.length > 3 && t.length < 120) { rowText = t; break; }
-        }
-        if (!rowText) continue;
-        if (normalizePositionForMatch(rowText) === normTarget) {
-          if (!radio.checked) {
-            radio.click();
-            await sleep(300);
-          }
-          console.log('[Snow-we][自動送信] テンプレート選択:', rowText);
-          return true;
-        }
-      }
-      // ラジオは表示されているが一致する行がない → これ以上待っても結果は変わらないため打ち切る
-      console.warn('[Snow-we][自動送信] テンプレート一覧に一致するポジションが見当たりません:', position);
-      return false;
-    }
+
+  // モーダル自体が現れるまで待つ（テンプレート名検索欄を目印にする）
+  const deadline1 = Date.now() + 8000;
+  let searchInput = null;
+  while (Date.now() < deadline1) {
+    searchInput = document.querySelector('input[placeholder="テンプレート名を入力する"]');
+    if (searchInput) break;
     await sleep(300);
   }
-  console.warn('[Snow-we][自動送信] テンプレート選択モーダルが現れませんでした:', position);
+  if (!searchInput) {
+    console.warn('[Snow-we][自動送信] テンプレート選択モーダルが現れませんでした:', position);
+    return false;
+  }
+
+  // 「設定画面で登録したテンプレート」タブがあれば切り替える（マスタ一覧のポジション名と
+  // 対応するのはこちらのタブのため）
+  const masterTab = Array.from(document.querySelectorAll('button, [role="tab"], a, li'))
+    .find(el => (el.innerText || '').trim() === '設定画面で登録したテンプレート');
+  if (masterTab) { masterTab.click(); await sleep(500); }
+
+  // 94件全部をスクロールして探すのではなく、検索窓にポジション名の核部分を入力して絞り込む
+  const core = extractPositionCore(position);
+  if (core.length >= 4 && searchInput) {
+    searchInput.focus();
+    searchInput.value = core;
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    searchInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await sleep(200);
+    const searchBtn = Array.from(document.querySelectorAll('button')).find(b => (b.innerText || '').trim() === '検索');
+    if (searchBtn) { searchBtn.click(); await sleep(800); }
+  }
+
+  // 検索結果（絞り込み後）のラジオ一覧から一致行を探す。見つからなければ最大12秒ポーリングする
+  // （絞り込み結果の読み込みに時間がかかる場合に対応）
+  const deadline2 = Date.now() + 12000;
+  while (Date.now() < deadline2) {
+    const result = findAndClickMatchingRadio(position);
+    if (result === true) { await sleep(300); return true; }
+    if (result === 'no_radios') { await sleep(300); continue; }
+    // 一致なし（ラジオはあるが該当行がない）→ これ以上待っても変わらないため打ち切り
+    return false;
+  }
+  console.warn('[Snow-we][自動送信] テンプレート一覧の読み込みがタイムアウトしました:', position);
   return false;
 }
 
@@ -244,25 +292,30 @@ async function executeAutoScoutSend(item) {
     return { ok: false, reason: 'template_radio_not_found' };
   }
 
-  // ③ テンプレート確定
-  const templateConfirmBtn = await waitForButton(isTemplateConfirmText);
-  if (!templateConfirmBtn) {
-    console.warn('[Snow-we][自動送信] 「確定」ボタンが現れず中断（送信はしていません）:', item.candidateId);
-    return { ok: false, reason: 'template_confirm_not_found' };
-  }
-  await sleep(500);
-  templateConfirmBtn.click();
-  console.log('[Snow-we][自動送信] 「確定」をクリックしました');
+  // ③④ テンプレート確定〜確認：実際の画面では「求人票を変更しますか？」等、
+  // 「確定」「確認」ラベルの確認ダイアログが複数回連続することがあるため、
+  // 「送信」が現れるまで「確定」「確認」ボタンを繰り返しクリックする。
+  // 無限ループにならないよう最大回数・最大時間で打ち切る
+  const maxSteps = 6;
+  const overallDeadline = Date.now() + 20000;
+  for (let step = 0; step < maxSteps; step++) {
+    if (Date.now() > overallDeadline) {
+      console.warn('[Snow-we][自動送信] 確定/確認ステップが長引きすぎたため中断（送信はしていません）:', item.candidateId);
+      return { ok: false, reason: 'confirm_steps_timeout' };
+    }
+    // 「送信」が既に現れていれば確定/確認ループを抜けて最終ステップへ
+    const alreadySendable = Array.from(document.querySelectorAll('button, a, [role="button"]'))
+      .find(b => { const t = (b.innerText || '').trim(); return t && isSendStepText(t); });
+    if (alreadySendable) break;
 
-  // ④ 確認
-  const confirmBtn = await waitForButton(isConfirmStepText);
-  if (!confirmBtn) {
-    console.warn('[Snow-we][自動送信] 「確認」ボタンが現れず中断（送信はしていません）:', item.candidateId);
-    return { ok: false, reason: 'confirm_not_found' };
+    const stepBtn = await waitForButton(t => isTemplateConfirmText(t) || isConfirmStepText(t), 4000);
+    if (!stepBtn) break; // これ以上「確定/確認」が現れない → 送信ボタン待ちへ
+    await sleep(500);
+    const label = (stepBtn.innerText || '').trim();
+    stepBtn.click();
+    console.log(`[Snow-we][自動送信] 「${label}」をクリックしました (${step + 1}回目)`);
+    await sleep(500);
   }
-  await sleep(500);
-  confirmBtn.click();
-  console.log('[Snow-we][自動送信] 「確認」をクリックしました');
 
   // ⑤ 送信（実際にメッセージが送信される最終ステップ）
   const sendBtn = await waitForButton(isSendStepText);
