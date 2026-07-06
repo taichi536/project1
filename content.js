@@ -4058,10 +4058,17 @@ async function initPositionIndicator() {
   };
   render(currentPos);
 
+  let isOpeningDropdown = false;
   indicator.addEventListener('click', async (e) => {
     e.stopPropagation();
     const existingDrop = document.getElementById('snow-we-pos-dropdown');
     if (existingDrop) { existingDrop.remove(); return; }
+
+    // 一覧取得中に連打されると、取得完了を待つ間に二重にドロップダウンが
+    // 開いてしまい（表示が重なる・選択が効いたり効かなかったりする不具合の原因）、
+    // このガードで取得中の再クリックを無視する
+    if (isOpeningDropdown) return;
+    isOpeningDropdown = true;
 
     // ページロード時に一度だけ取得した一覧のままだと、開いている間にスプレッドシートへ
     // 追加したポジションが反映されないため、開くたびに最新の一覧を取り直す
@@ -4069,6 +4076,10 @@ async function initPositionIndicator() {
       const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
       if (res?.positions?.length > 0) positions = res.positions;
     } catch (_) {}
+    isOpeningDropdown = false;
+
+    // 取得待ちの間に既に別のドロップダウンが開いていれば、二重生成を避けて中断
+    if (document.getElementById('snow-we-pos-dropdown')) return;
 
     const dropdown = document.createElement('div');
     dropdown.id = 'snow-we-pos-dropdown';
