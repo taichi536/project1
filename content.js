@@ -151,6 +151,55 @@ const isTemplateConfirmText = t => t === '確定';
 const isConfirmStepText     = t => t === '確認';
 const isSendStepText        = t => t === '送信' || t === '送信する';
 
+// テンプレート名・ポジション名を比較用に正規化する（AC）/BC(等の部門プレフィックス、
+// 全角括弧・ダッシュの表記ゆれを吸収する。既存の確定ボタン観測ロジックと同じ正規化方針）
+function normalizePositionForMatch(s) {
+  return String(s || '')
+    .replace(/^[A-Za-z]+[）)]\s*/u, '')
+    .replace(/[（]/g, '(').replace(/[）]/g, ')')
+    .replace(/　/g, ' ').replace(/\s*[-－–—]\s*/g, '-')
+    .trim().toLowerCase();
+}
+
+// RDS等のテンプレート選択モーダル（ラジオボタン一覧）から、指定ポジション名に一致する
+// 行を探してクリックする。一致する行が見つからない場合は誤送信を避けるためnullを返す
+// （呼び出し側は「確定」に進まず中断する）
+async function selectTemplateRadioForPosition(position) {
+  if (!position) return false;
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    const radios = Array.from(document.querySelectorAll('input[type="radio"]'));
+    if (radios.length > 0) {
+      const normTarget = normalizePositionForMatch(position);
+      for (const radio of radios) {
+        const row = radio.closest('tr, [role="row"]') || radio.closest('li, [class*="row"], [class*="item"]');
+        if (!row) continue;
+        let rowText = '';
+        for (const cell of row.querySelectorAll('td, [role="cell"], div, span, p')) {
+          if (cell.querySelector('input, button')) continue;
+          const t = (cell.textContent || '').trim();
+          if (t.length > 3 && t.length < 120) { rowText = t; break; }
+        }
+        if (!rowText) continue;
+        if (normalizePositionForMatch(rowText) === normTarget) {
+          if (!radio.checked) {
+            radio.click();
+            await sleep(300);
+          }
+          console.log('[Snow-we][自動送信] テンプレート選択:', rowText);
+          return true;
+        }
+      }
+      // ラジオは表示されているが一致する行がない → これ以上待っても結果は変わらないため打ち切る
+      console.warn('[Snow-we][自動送信] テンプレート一覧に一致するポジションが見当たりません:', position);
+      return false;
+    }
+    await sleep(300);
+  }
+  console.warn('[Snow-we][自動送信] テンプレート選択モーダルが現れませんでした:', position);
+  return false;
+}
+
 // 指定した条件に一致するボタンが現れるまでポーリングする（最大timeoutMs）
 async function waitForButton(matchFn, timeoutMs = 8000, pollMs = 300) {
   const deadline = Date.now() + timeoutMs;
@@ -186,7 +235,16 @@ async function executeAutoScoutSend(item) {
   scoutBtn.click();
   console.log('[Snow-we][自動送信] スカウトボタンをクリックしました');
 
-  // ② テンプレート確定
+  // ② テンプレート選択モーダルで、承認パネルで確定したポジションのラジオボタンを選択する。
+  // これをしないと「その時点でたまたま選ばれていたテンプレート」のまま送信されてしまい、
+  // 承認パネルでのポジション確認・修正が実際の送信内容に反映されない
+  const templateSelected = await selectTemplateRadioForPosition(item.position);
+  if (!templateSelected) {
+    console.warn('[Snow-we][自動送信] 対象ポジションのテンプレートを選択できず中断（誤ったポジションで送信するのを避けるため）:', item.candidateId, item.position);
+    return { ok: false, reason: 'template_radio_not_found' };
+  }
+
+  // ③ テンプレート確定
   const templateConfirmBtn = await waitForButton(isTemplateConfirmText);
   if (!templateConfirmBtn) {
     console.warn('[Snow-we][自動送信] 「確定」ボタンが現れず中断（送信はしていません）:', item.candidateId);
@@ -196,7 +254,7 @@ async function executeAutoScoutSend(item) {
   templateConfirmBtn.click();
   console.log('[Snow-we][自動送信] 「確定」をクリックしました');
 
-  // ③ 確認
+  // ④ 確認
   const confirmBtn = await waitForButton(isConfirmStepText);
   if (!confirmBtn) {
     console.warn('[Snow-we][自動送信] 「確認」ボタンが現れず中断（送信はしていません）:', item.candidateId);
@@ -206,7 +264,7 @@ async function executeAutoScoutSend(item) {
   confirmBtn.click();
   console.log('[Snow-we][自動送信] 「確認」をクリックしました');
 
-  // ④ 送信（実際にメッセージが送信される最終ステップ）
+  // ⑤ 送信（実際にメッセージが送信される最終ステップ）
   const sendBtn = await waitForButton(isSendStepText);
   if (!sendBtn) {
     console.warn('[Snow-we][自動送信] 「送信」ボタンが現れず中断（送信はしていません）:', item.candidateId);
