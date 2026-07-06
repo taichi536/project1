@@ -367,12 +367,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         .then(r => r.json())
         .then(data => {
           if (data.ok && data.positions?.length > 0) {
+            console.log('[Snow-we] getPositionList: GASから取得成功', data.positions.length, '件');
             sendResponse({ positions: data.positions.map(p => typeof p === 'string' ? p : p.name) });
           } else {
+            console.warn('[Snow-we] getPositionList: GAS応答が空/NG。ハードコード一覧にフォールバック', JSON.stringify(data).slice(0, 200));
             sendResponse({ positions: POSITION_LIST });
           }
         })
-        .catch(() => sendResponse({ positions: POSITION_LIST }));
+        .catch(e => {
+          console.warn('[Snow-we] getPositionList: GAS取得失敗。ハードコード一覧にフォールバック', e.message);
+          sendResponse({ positions: POSITION_LIST });
+        });
     });
     return true;
   }

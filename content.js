@@ -4347,11 +4347,12 @@ async function initPositionIndicator() {
     // throwすることがあるため、Promiseの.catch()だけでなくtry-catchでも囲む
     try {
       chrome.runtime.sendMessage({ type: 'getPositionList' }).then(res => {
+        console.log('[Snow-we] ポジション一覧バックグラウンド取得:', res?.positions?.length || 0, '件');
         if (res?.positions?.length > 0) {
           positions = res.positions;
           if (document.getElementById('snow-we-pos-dropdown')) renderItems(searchBox.value);
         }
-      }).catch(() => {});
+      }).catch(e => console.warn('[Snow-we] ポジション一覧バックグラウンド取得失敗:', e.message));
     } catch (_) {
       showExtensionInvalidatedBanner();
     }
