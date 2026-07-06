@@ -12,8 +12,39 @@ window.addEventListener('unhandledrejection', event => {
   const msg = event.reason?.message || String(event.reason || '');
   if (msg.includes('Extension context invalidated') || msg.includes('message channel closed')) {
     event.preventDefault();
+    showExtensionInvalidatedBanner();
   }
 });
+
+// chrome.runtime/chrome.storage呼び出しは、拡張機能が再読み込みされた直後は
+// Promiseのrejectではなく同期的なthrowになることがあり、try-catchで囲んでいない
+// 箇所ではコンソールにUncaught Errorとして大量に出続け、かつGAS送信等が
+// 何のエラー表示もなく無音で失敗する（ユーザーには「記録されない」としか見えない）。
+// ここで検知し、原因（ページ再読み込みが必要）を画面上に明示する。
+window.addEventListener('error', event => {
+  const msg = event.error?.message || event.message || '';
+  if (msg.includes('Extension context invalidated')) {
+    event.preventDefault();
+    showExtensionInvalidatedBanner();
+  }
+});
+
+let _extensionInvalidatedBannerShown = false;
+function showExtensionInvalidatedBanner() {
+  if (_extensionInvalidatedBannerShown) return;
+  _extensionInvalidatedBannerShown = true;
+  try {
+    const banner = document.createElement('div');
+    banner.textContent = '⚠️ Snow-we拡張機能が更新されました。この操作以降は記録されない可能性があります。ページを再読み込みしてください。';
+    banner.style.cssText = `
+      position:fixed;top:0;left:0;right:0;z-index:2147483647;
+      background:#fef3c7;color:#78350f;font-family:sans-serif;font-size:13px;
+      font-weight:600;padding:10px 16px;text-align:center;
+      box-shadow:0 2px 8px rgba(0,0,0,0.15);
+    `;
+    document.documentElement.appendChild(banner);
+  } catch (_) {}
+}
 
 // Supabase設定
 const SUPABASE_URL = 'https://ovwnyivqnqqiagutjxoo.supabase.co';
@@ -4125,12 +4156,18 @@ async function initPositionIndicator() {
     // ドロップダウンはクリック直後に即座に表示する（体感速度優先）。
     // 最新一覧の取得はバックグラウンドで行い、取得できた時点で
     // 表示中のリストだけを更新する（開くたびに待たされる不具合を回避）。
-    chrome.runtime.sendMessage({ type: 'getPositionList' }).then(res => {
-      if (res?.positions?.length > 0) {
-        positions = res.positions;
-        if (document.getElementById('snow-we-pos-dropdown')) renderItems(searchBox.value);
-      }
-    }).catch(() => {});
+    // 拡張機能が再読み込みされた直後はchrome.runtime.sendMessageが同期的に
+    // throwすることがあるため、Promiseの.catch()だけでなくtry-catchでも囲む
+    try {
+      chrome.runtime.sendMessage({ type: 'getPositionList' }).then(res => {
+        if (res?.positions?.length > 0) {
+          positions = res.positions;
+          if (document.getElementById('snow-we-pos-dropdown')) renderItems(searchBox.value);
+        }
+      }).catch(() => {});
+    } catch (_) {
+      showExtensionInvalidatedBanner();
+    }
 
     const dropdown = document.createElement('div');
     dropdown.id = 'snow-we-pos-dropdown';
