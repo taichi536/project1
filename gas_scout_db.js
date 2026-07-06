@@ -282,45 +282,54 @@ function doPost(e) {
 }
 
 // ── スカウト記録：日付別シート ＋ スカウト管理DB の両方に書く ──
+// 複数人が近いタイミングでスカウトを送信すると、appendRow直後のgetLastRow()が
+// 他の実行とレースして書き込み内容が意図しない行に反映される（＝ある行だけ特定の
+// 列が空欄になる等）ことがあるため、スクリプトロックで直列化する
 function recordScout(ss, data) {
-  const ts      = data.ts ? new Date(data.ts) : new Date();
-  const media   = MEDIA_LABEL[data.media] || data.media || '';
-  const ageVal  = parseInt(data.age) || '';
-  // クライアント送信の業界を優先、なければマスタ検索
-  let industry = data.industry || '';
-  if (!industry) {
-    try { industry = lookupIndustry(ss, data.company || ''); } catch (_) {}
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000); // 最大30秒待つ。取得できなければ例外を投げてdoPostのcatchに任せる
+  try {
+    const ts      = data.ts ? new Date(data.ts) : new Date();
+    const media   = MEDIA_LABEL[data.media] || data.media || '';
+    const ageVal  = parseInt(data.age) || '';
+    // クライアント送信の業界を優先、なければマスタ検索
+    let industry = data.industry || '';
+    if (!industry) {
+      try { industry = lookupIndustry(ss, data.company || ''); } catch (_) {}
+    }
+
+    Logger.log('[Snow-we] recordScout受信: recruiter=' + (data.recruiter || '') + ' position=' + (data.position || '（空）') + ' media=' + (data.media || '') + ' industry=' + (industry || '（空）') + ' age=' + (data.age || '') + ' company=' + (data.company || '') + ' ts=' + ts);
+
+    // ── 1. 日付別シートに書く ──
+    writeToDailySheet(ss, data, ts, media, ageVal, industry);
+
+    // ── 2. スカウト管理DBにも書く（集計・Slackレポート用） ──
+    let dbSheet = ss.getSheetByName(SHEET_DB);
+    if (!dbSheet) {
+      dbSheet = ss.insertSheet(SHEET_DB);
+      const headers = ['送信日時', '担当者', '年齢', '会社名', '大学', 'ポジション名', '媒体', 'ステータス', '返信日', '面談日', 'メモ'];
+      dbSheet.getRange(1, 1, 1, headers.length).setValues([headers])
+        .setBackground('#4338CA').setFontColor('#ffffff').setFontWeight('bold');
+      dbSheet.setFrozenRows(1);
+    }
+    dbSheet.appendRow([ts, data.recruiter || '', ageVal, data.company || '',
+      data.univ || '', data.position || '', media, '未返信', '', '', '']);
+    const lastRow = dbSheet.getLastRow();
+    // DB送信日時も日時フォーマットに設定
+    dbSheet.getRange(lastRow, 1).setNumberFormat('yyyy/MM/dd HH:mm');
+
+    // ステータス列にドロップダウン設定
+    const statusRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(STATUS_LIST, true).setAllowInvalid(false).build();
+    dbSheet.getRange(lastRow, 8).setDataValidation(statusRule);
+
+    // ポジション名列にドロップダウン設定
+    applyPositionDropdown(ss, dbSheet, lastRow, 6);
+
+    return { sheet: SHEET_DB, row: lastRow };
+  } finally {
+    lock.releaseLock();
   }
-
-  Logger.log('[Snow-we] recordScout受信: recruiter=' + (data.recruiter || '') + ' position=' + (data.position || '（空）') + ' media=' + (data.media || '') + ' industry=' + (industry || '（空）') + ' age=' + (data.age || '') + ' company=' + (data.company || '') + ' ts=' + ts);
-
-  // ── 1. 日付別シートに書く ──
-  writeToDailySheet(ss, data, ts, media, ageVal, industry);
-
-  // ── 2. スカウト管理DBにも書く（集計・Slackレポート用） ──
-  let dbSheet = ss.getSheetByName(SHEET_DB);
-  if (!dbSheet) {
-    dbSheet = ss.insertSheet(SHEET_DB);
-    const headers = ['送信日時', '担当者', '年齢', '会社名', '大学', 'ポジション名', '媒体', 'ステータス', '返信日', '面談日', 'メモ'];
-    dbSheet.getRange(1, 1, 1, headers.length).setValues([headers])
-      .setBackground('#4338CA').setFontColor('#ffffff').setFontWeight('bold');
-    dbSheet.setFrozenRows(1);
-  }
-  dbSheet.appendRow([ts, data.recruiter || '', ageVal, data.company || '',
-    data.univ || '', data.position || '', media, '未返信', '', '', '']);
-  const lastRow = dbSheet.getLastRow();
-  // DB送信日時も日時フォーマットに設定
-  dbSheet.getRange(lastRow, 1).setNumberFormat('yyyy/MM/dd HH:mm');
-
-  // ステータス列にドロップダウン設定
-  const statusRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(STATUS_LIST, true).setAllowInvalid(false).build();
-  dbSheet.getRange(lastRow, 8).setDataValidation(statusRule);
-
-  // ポジション名列にドロップダウン設定
-  applyPositionDropdown(ss, dbSheet, lastRow, 6);
-
-  return { sheet: SHEET_DB, row: lastRow };
 }
 
 // ── 日付別シートへの書き込み ─────────────────────────────────
