@@ -381,6 +381,35 @@
 
     .position-row { margin-bottom: 10px; }
 
+    /* 承認待ちカード */
+    .approval-card {
+      border: 0.5px solid #d3d1c7; border-radius: 8px;
+      padding: 10px 12px; margin-bottom: 8px; background: #fff;
+    }
+    .approval-card-top { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+    .approval-card-platform {
+      font-size: 10px; font-weight: 600; padding: 2px 6px;
+      border-radius: 10px; background: #EEEDFE; color: #3C3489; flex-shrink: 0;
+    }
+    .approval-card-meta { font-size: 11px; color: #5F5E5A; }
+    .approval-card-reason { font-size: 11px; color: #888780; line-height: 1.5; margin-bottom: 7px; }
+    .approval-card select { margin-bottom: 7px; }
+    .approval-card-actions { display: flex; gap: 6px; }
+    .approve-btn {
+      flex: 1; padding: 7px;
+      background: #D1FAE5; color: #065F46;
+      border: 0.5px solid #34D399; border-radius: 6px;
+      font-size: 11px; font-weight: 500; cursor: pointer;
+    }
+    .approve-btn:hover { background: #A7F3D0; }
+    .reject-btn {
+      flex: 1; padding: 7px;
+      background: #FEE2E2; color: #991B1B;
+      border: 0.5px solid #F87171; border-radius: 6px;
+      font-size: 11px; font-weight: 500; cursor: pointer;
+    }
+    .reject-btn:hover { background: #FECACA; }
+
     /* 履歴タブ */
     .history-item {
       display: flex; align-items: flex-start; gap: 8px;
@@ -428,6 +457,7 @@
   <button class="tab-btn active" data-tab="generate">✍️ 文生成</button>
   <button class="tab-btn" data-tab="suggest">🎯 ポジション</button>
   <button class="tab-btn" data-tab="screening">🔍 一次選定</button>
+  <button class="tab-btn" data-tab="approval">✅ 承認待ち</button>
   <button class="tab-btn" data-tab="history">📋 履歴</button>
   <button class="tab-btn" data-tab="settings">⚙️ 設定</button>
 </div>
@@ -488,6 +518,20 @@
     <div class="comment-label">AIコメント</div>
     <div class="screening-comment" id="screening-comment"></div>
     <div id="screening-feedback" style="display:none; margin-top:8px;"></div>
+  </div>
+</div>
+
+<!-- タブ: 承認待ち（AIが星をつけた候補者のレビュー） -->
+<div class="tab-content" id="tab-approval">
+  <div style="margin-bottom:10px; font-size:12px; color:#5F5E5A; line-height:1.6;">
+    AIが選定・星付けした候補者を確認し、ポジションの承認・修正・却下ができます。承認した候補者がRPA自動送信の対象になります。
+  </div>
+  <div style="display:flex; gap:6px; margin-bottom:8px;">
+    <button class="save-btn" id="approval-refresh-btn" style="flex:1; font-size:11px;">🔄 更新</button>
+  </div>
+  <div style="font-size:10px; color:#888780; margin-bottom:5px;" id="approval-count-label">読み込み中...</div>
+  <div id="approval-list" style="max-height:320px; overflow-y:auto;">
+    <div style="padding:20px; text-align:center; color:#aaa; font-size:12px;">読み込み中...</div>
   </div>
 </div>
 

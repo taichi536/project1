@@ -44,6 +44,55 @@ async function supabaseInsert(table, data) {
   }
 }
 
+// 同一候補者×媒体の重複レコードを避けるため upsert（onConflict列で衝突時の挙動をresolutionで指定）
+async function supabaseUpsert(table, data, onConflict, resolution = 'ignore-duplicates') {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': `resolution=${resolution},return=minimal`
+      },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.warn(`[Snow-we] Supabase ${table} upsertエラー:`, err);
+      return false;
+    }
+    console.log(`[Snow-we] Supabase ${table} upsert成功`);
+    return true;
+  } catch (e) {
+    console.warn(`[Snow-we] Supabase ${table} upsert失敗:`, e.message);
+    return false;
+  }
+}
+
+// AIが星をつけた候補者を承認待ちキューに記録する（承認/ポジション修正/却下はポップアップの
+// 承認待ちリスト画面で行う。星を押す処理自体はこれまで通りtriggerAutoAdd内で完結する）
+async function recordScoutQueueEntry({ candidateId, platform, position, info, reason, verdict }) {
+  if (!candidateId) return;
+  let recruiterName = '';
+  try {
+    const s = await chrome.storage.local.get(['recruiterName']);
+    recruiterName = s.recruiterName || '';
+  } catch (_) {}
+  await supabaseUpsert('scout_queue', {
+    candidate_id: candidateId,
+    platform,
+    position: position || '',
+    recruiter: recruiterName,
+    age: info?.age || '',
+    company: info?.company || '',
+    univ: info?.univ || '',
+    ai_reason: (reason || '').substring(0, 500),
+    ai_verdict: verdict || '',
+    status: 'pending_review',
+  }, 'candidate_id,platform');
+}
+
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
 const _posReqCache = new Map();
 
@@ -55,6 +104,7 @@ let _reapplyBizreachTimer = null;
 // バッチ処理中のAPIキー・条件キャッシュ（Extension context invalidated 後の再読み込みを防ぐ）
 let _batchApiKey = null;
 let _batchCriteria = null;
+let _batchPosition = null; // このバッチ実行が対象としているポジション名（承認キュー記録用）
 let _batchIsRunning = false; // chrome.storage失敗時もisFreshStartを誤判定しないためのフラグ
 let _triggerAutoAddLock = false; // 外部からの重複起動を防ぐロック（再帰呼び出しは _batchIsRunning=true で区別）
 let _batchScoutHistory = null; // スカウト履歴キャッシュ（CDKスクロールごとの再取得を防ぐ）
@@ -1489,7 +1539,7 @@ async function triggerAutoAdd() {
   if (!_batchApiKey) {
     let stored;
     try {
-      stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria']);
+      stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria', 'currentPosition']);
     } catch (e) {
       console.warn('[Snow-we] triggerAutoAdd: ストレージ読み込みエラー', e.message);
       showAutoStatus('⚠️ 拡張機能が再起動されました。ページをリロードして再度ボタンを押してください。', 10000);
@@ -1504,6 +1554,7 @@ async function triggerAutoAdd() {
     }
     _batchApiKey = key;
     _batchCriteria = stored.screeningCriteria || {};
+    _batchPosition = stored.currentPosition || '';
   }
   const apiKey = _batchApiKey;
   const criteria = _batchCriteria;
@@ -1721,6 +1772,14 @@ async function triggerAutoAdd() {
           addedCount++;
           if (candidateId) {
             scoutHistory[`listed_${candidateId}`] = { date: Date.now(), platform: getPlatform() };
+            recordScoutQueueEntry({
+              candidateId,
+              platform: getPlatform(),
+              position: _batchPosition,
+              info: extractBasicInfo(el),
+              reason: judgeReason,
+              verdict: overall,
+            }).catch(() => {});
           }
         }
       } catch (err) {

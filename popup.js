@@ -2,6 +2,10 @@
 
 const $ = id => document.getElementById(id);
 
+// Supabase設定（content.jsと同一プロジェクト。承認待ちキューの読み書きに使用）
+const SUPABASE_URL = 'https://ovwnyivqnqqiagutjxoo.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_tEQ4TOve0uCydsGiEm1cDA_D1LQ49wN';
+
 const _ANTHROPIC_HEADERS = {
   'Content-Type': 'application/json',
   'anthropic-version': '2023-06-01',
@@ -173,6 +177,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       btn.classList.add('active');
       $(`tab-${btn.dataset.tab}`).classList.add('active');
       if (btn.dataset.tab === 'history') renderHistory();
+      if (btn.dataset.tab === 'approval') renderApprovalQueue();
     });
   });
 
@@ -1586,6 +1591,110 @@ async function renderHistory() {
 function escapeHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+// ============================================================
+// 承認待ちリスト（AIが星をつけた候補者の人間レビュー画面）
+// ============================================================
+const PLATFORM_LABELS = { bizreach: 'Bizreach', rds: 'RDS', dodax: 'Doda X', ambi: 'AMBI', green: 'Green', mynavi: 'Mynavi' };
+
+async function fetchPendingScoutQueue() {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/scout_queue?status=eq.pending_review&order=created_at.desc&limit=100`,
+    { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function updateScoutQueueEntry(id, patch) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/scout_queue?id=eq.${id}`, {
+    method: 'PATCH',
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+async function renderApprovalQueue() {
+  const listEl = $('approval-list');
+  const countEl = $('approval-count-label');
+  listEl.innerHTML = '<div style="padding:20px; text-align:center; color:#aaa; font-size:12px;">読み込み中...</div>';
+
+  let rows, positions;
+  try {
+    [rows, positions] = await Promise.all([
+      fetchPendingScoutQueue(),
+      chrome.runtime.sendMessage({ type: 'getPositionList' }).then(r => r?.positions || []).catch(() => []),
+    ]);
+  } catch (e) {
+    listEl.innerHTML = `<div style="padding:20px; text-align:center; color:#A32D2D; font-size:12px;">読み込み失敗: ${escapeHtml(e.message || '')}</div>`;
+    countEl.textContent = '';
+    return;
+  }
+
+  countEl.textContent = `${rows.length}件が承認待ち`;
+  if (rows.length === 0) {
+    listEl.innerHTML = '<div style="padding:20px; text-align:center; color:#aaa; font-size:12px;">承認待ちの候補者はいません</div>';
+    return;
+  }
+
+  listEl.innerHTML = rows.map(row => {
+    const platformLabel = PLATFORM_LABELS[row.platform] || row.platform;
+    const metaParts = [row.age, row.company, row.univ].filter(Boolean);
+    const posOptions = positions.length > 0 ? positions : (row.position ? [row.position] : []);
+    const optionsHtml = posOptions.map(p =>
+      `<option value="${escapeHtml(p)}"${p === row.position ? ' selected' : ''}>${escapeHtml(p)}</option>`
+    ).join('');
+    return `<div class="approval-card" data-id="${row.id}">
+      <div class="approval-card-top">
+        <span class="approval-card-platform">${escapeHtml(platformLabel)}</span>
+        <span class="approval-card-meta">${escapeHtml(metaParts.join(' · ') || '情報なし')}</span>
+      </div>
+      ${row.ai_reason ? `<div class="approval-card-reason">🤖 ${escapeHtml(row.ai_reason)}</div>` : ''}
+      <select class="approval-position-select">${optionsHtml || '<option value="">（ポジション一覧未取得）</option>'}</select>
+      <div class="approval-card-actions">
+        <button class="approve-btn" data-action="approve">✅ 承認</button>
+        <button class="reject-btn" data-action="reject">❌ 却下</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  listEl.querySelectorAll('.approval-card').forEach(card => {
+    const id = card.dataset.id;
+    const select = card.querySelector('.approval-position-select');
+    card.querySelector('[data-action="approve"]').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        await updateScoutQueueEntry(id, { status: 'approved', position: select.value, reviewed_at: new Date().toISOString() });
+        card.remove();
+        countEl.textContent = `${listEl.querySelectorAll('.approval-card').length}件が承認待ち`;
+      } catch (err) {
+        btn.disabled = false;
+        alert('承認処理に失敗しました: ' + (err.message || ''));
+      }
+    });
+    card.querySelector('[data-action="reject"]').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        await updateScoutQueueEntry(id, { status: 'rejected', reviewed_at: new Date().toISOString() });
+        card.remove();
+        countEl.textContent = `${listEl.querySelectorAll('.approval-card').length}件が承認待ち`;
+      } catch (err) {
+        btn.disabled = false;
+        alert('却下処理に失敗しました: ' + (err.message || ''));
+      }
+    });
+  });
+}
+
+$('approval-refresh-btn').addEventListener('click', renderApprovalQueue);
 
 // CSVエクスポート
 $('history-export-btn').addEventListener('click', async () => {
