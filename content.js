@@ -5015,14 +5015,21 @@ function removeNonProfileSections(text) {
   const totalKwHits = profileKws.filter(kw => text.includes(kw)).length;
   let cutIdx = text.length;
   for (const marker of stopMarkers) {
-    let idx = text.indexOf(marker);
-    if (idx < 0) continue;
+    const firstIdx = text.indexOf(marker);
+    if (firstIdx < 0) continue;
+    let idx = firstIdx;
 
     if (idx < 200) {
       if (totalKwHits >= 2) {
-        // 全文にプロフィールキーワードが2個以上 → タブラベル: スキップして次の出現を探す
-        idx = text.indexOf(marker, idx + marker.length);
-        while (idx >= 0 && idx < 200) idx = text.indexOf(marker, idx + marker.length);
+        // 全文にプロフィールキーワードが2個以上 → 先頭付近の出現はタブラベルの可能性が
+        // あるため、次の出現（実際のスカウト履歴セクション本体）を探す。
+        // ただしマーカーが1回しか現れない場合（タブがアクティブでスカウト履歴の内容
+        // そのものが先頭に表示されているケース）は次が見つからず idx=-1 になり、
+        // 以前はこの場合にマーカーを無視して汚染データがそのまま残ってしまっていた。
+        // 次が見つからない場合は元の出現位置を境界として使う（安全側に倒す）
+        let nextIdx = text.indexOf(marker, idx + marker.length);
+        while (nextIdx >= 0 && nextIdx < 200) nextIdx = text.indexOf(marker, nextIdx + marker.length);
+        idx = nextIdx >= 0 ? nextIdx : firstIdx;
       } else {
         // パネルがスカウト履歴そのもの → 空を返す
         return '';
