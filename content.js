@@ -4071,9 +4071,15 @@ async function initPositionIndicator() {
     isOpeningDropdown = true;
 
     // ページロード時に一度だけ取得した一覧のままだと、開いている間にスプレッドシートへ
-    // 追加したポジションが反映されないため、開くたびに最新の一覧を取り直す
+    // 追加したポジションが反映されないため、開くたびに最新の一覧を取り直す。
+    // Extension context invalidated等でメッセージが返ってこないまま固まると
+    // isOpeningDropdownがtrueのままになり二度とドロップダウンが開かなくなるため、
+    // タイムアウトで必ず解除されるようにする
     try {
-      const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+      const res = await Promise.race([
+        chrome.runtime.sendMessage({ type: 'getPositionList' }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+      ]);
       if (res?.positions?.length > 0) positions = res.positions;
     } catch (_) {}
     isOpeningDropdown = false;
