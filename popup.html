@@ -47,12 +47,13 @@
     }
     .save-btn:hover { background: #CECBF6; }
 
-    .tabs { display: flex; border-bottom: 0.5px solid #e0ddd6; }
+    .tabs { display: flex; flex-wrap: wrap; border-bottom: 0.5px solid #e0ddd6; }
     .tab-btn {
-      flex: 1; padding: 8px 4px;
+      flex: 1 1 33.33%; min-width: 0; padding: 8px 4px;
       background: none; border: none; cursor: pointer;
       font-size: 11px; font-weight: 500; color: #888780;
       border-bottom: 2px solid transparent;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       transition: all .15s;
     }
     .tab-btn.active { color: #534AB7; border-bottom-color: #534AB7; }
