@@ -3696,12 +3696,43 @@ async function judgeSingleCandidate(apiKey, profileText, criteria) {
     ? `\n【候補者の年齢（自動抽出・正）】${ageMatch[1]}歳 ※年齢条件の判定は必ずこの数値を使うこと。プロフィール本文中の勤続年数・経験年数・西暦等、他の数字と混同しないこと。`
     : '';
 
+  // 年収基準の年齢区分をAI任せで計算させると、隣接する年齢層の基準（例:36歳を
+  // 40〜45歳区分の基準で判定）を取り違えることがあり、実際に良い候補者を誤ってNGに
+  // してしまう事例があった。コード側で確実に計算し、この候補者に適用する基準額を
+  // そのまま明示することで、AIに年齢区分の計算をさせないようにする
+  let thresholdNote = '';
+  if (ageMatch) {
+    const age = parseInt(ageMatch[1], 10);
+    const isIT = /エンジニア|ソフトウェア開発|ソフトウェアエンジニア|プログラマ|システム開発|システムエンジニア|インフラ|クラウド|SE(?![A-Za-z])|データエンジニア|データサイエンティスト|機械学習|バックエンド|フロントエンド|DevOps|情報システム/.test(profileText);
+    let threshold;
+    if (isIT) {
+      if (age < 30) threshold = 350;
+      else if (age <= 35) threshold = 500;
+      else if (age <= 39) threshold = 700;
+      else if (age <= 45) threshold = 800;
+      else threshold = null;
+    } else {
+      const ai2 = criteria.ageIncome || {};
+      if (age < 30) threshold = ai2.age20s || 500;
+      else if (age <= 35) threshold = ai2.age30to35 || 700;
+      else if (age <= 39) threshold = ai2.age36to39 || 800;
+      else if (age <= 42) threshold = ai2.age40to42 || 1000;
+      else if (age <= 45) threshold = ai2.age43to45 || 1200;
+      else threshold = null;
+    }
+    if (threshold != null) {
+      thresholdNote = `\n【この候補者に適用する年収基準（自動計算・確定値。必ずこの数値のみを使い、他の年齢層の基準と混同しないこと）】${age}歳・${isIT ? 'ITエンジニア系' : '文系職'}のため年収基準は${threshold}万円。`;
+    } else if (!isIT) {
+      thresholdNote = `\n【年収基準について】${age}歳は年収額での基準ではなく、46歳以上の特別ルール（財務・経理・FP&A等の職歴があるかどうか）で判定すること。`;
+    }
+  }
+
   const prompt = `転職エージェントの一次選定アシスタントです。
 ${companySection}
 【選定基準】
 ${criteriaLines}${posSection}${fewShotSection}
 【重要：職種分類の注意】候補者の職種分類（ITエンジニア系/文系職）は、候補者自身の現在・直近の職種で判断すること。【応募ポジションの職務内容】が文系・ビジネス職であっても、候補者の実際の職種がITエンジニア・技術職であれば「ITエンジニア系」として分類すること。ポジション内容は候補者の職種分類に影響しない。
-${ageNote}
+${ageNote}${thresholdNote}
 【候補者情報】
 ${profileText}
 
