@@ -389,6 +389,22 @@ async function showApprovalReviewPanel(items) {
         <div style="font-size:12px;color:#334155;margin-bottom:5px;">${escapeHtml(metaParts.join(' · ') || '情報なし')}</div>
         ${item.reason ? `<div style="font-size:11px;color:#94a3b8;margin-bottom:6px;line-height:1.4;">🤖 ${escapeHtml(item.reason)}</div>` : ''}
       `;
+      // 年齢・会社名・大学とAI理由だけではポジション判断の材料として薄いため、
+      // 実際の候補者カード（本来の経歴情報）へその場でスクロール・ハイライトできるようにする
+      const viewBtn = document.createElement('button');
+      viewBtn.textContent = '🔍 候補者を見る';
+      viewBtn.style.cssText = 'width:100%;padding:6px;margin-bottom:7px;background:#eff6ff;color:#1e40af;border:1px solid #93c5fd;border-radius:6px;font-size:11px;cursor:pointer;';
+      viewBtn.addEventListener('click', () => {
+        if (!document.body.contains(item.el)) { alert('候補者のカードがページ上に見つかりません（スクロール等で表示が変わった可能性があります）'); return; }
+        item.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const prevOutline = item.el.style.outline;
+        const prevOffset = item.el.style.outlineOffset;
+        item.el.style.outline = '3px solid #6366f1';
+        item.el.style.outlineOffset = '2px';
+        setTimeout(() => { item.el.style.outline = prevOutline; item.el.style.outlineOffset = prevOffset; }, 3000);
+      });
+      card.appendChild(viewBtn);
+
       const select = document.createElement('select');
       select.style.cssText = 'width:100%;padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-bottom:7px;';
       const posOptions = positions.length > 0 ? positions : (item.position ? [item.position] : []);
