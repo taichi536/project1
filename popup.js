@@ -587,7 +587,7 @@ ${positionDescription ? `募集要件:\n${positionDescription.substring(0, 800)}
 ${profileText}`;
 
   const data = await claudeFetch(apiKey, {
-    model: 'claude-sonnet-4-6',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 200,
     messages: [{ role: 'user', content: prompt }]
   });
@@ -814,7 +814,7 @@ ${profileText}
 ※必ず守ること: reasonは1文で簡潔に。ダブルクォート・改行・バックスラッシュを含めないこと。`;
 
   const data = await claudeFetch(apiKey, {
-    model: 'claude-sonnet-4-6',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 1500,
     messages: [{ role: 'user', content: prompt }]
   });
@@ -1250,7 +1250,7 @@ ${profileText}
 }`;
 
   const data = await claudeFetch(apiKey, {
-    model: 'claude-sonnet-4-6',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 800,
     messages: [{ role: 'user', content: prompt }]
   });
