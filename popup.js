@@ -52,6 +52,79 @@ function renderApiCostDisplay(stats) {
   el.textContent = `API利用額 — 本日: $${todayUSD.toFixed(3)} / 累計: $${(stats.totalUSD || 0).toFixed(2)}`;
 }
 
+// ホスト名から媒体名を判定（フィードバック記録用。content.jsのgetPlatform()と同じ対応）
+function platformFromHostname(hostname = '') {
+  if (/bizreach|es-support/.test(hostname)) return 'bizreach';
+  if (/doda-x|x\.doda/.test(hostname)) return 'dodax';
+  if (/ambi|en-ambi/.test(hostname)) return 'ambi';
+  if (/green-japan/.test(hostname)) return 'green';
+  if (/mynavi/.test(hostname)) return 'mynavi';
+  if (/rikunabi|hrtech|recruitdirect/.test(hostname)) return 'rds';
+  return hostname || 'unknown';
+}
+
+// 単体判定の訂正フィードバックを記録する。ポップアップは独立したコンテキストで
+// 完結するため、doda-xのようにページ遷移でオンページのバッジ・訂正ボタンが
+// 消えてしまう媒体でも、ここから確実にフィードバックを記録できる
+async function saveFeedback(profileSummary, aiVerdict, correction, platform) {
+  const ts = Date.now();
+  try {
+    const stored = await chrome.storage.local.get(['snowWeFeedbacks']);
+    const feedbacks = stored.snowWeFeedbacks || [];
+    feedbacks.unshift({ profileSummary, aiVerdict, correction, platform, ts });
+    if (feedbacks.length > 50) feedbacks.length = 50;
+    await chrome.storage.local.set({ snowWeFeedbacks: feedbacks });
+  } catch (_) {}
+
+  try {
+    const { gasSettings } = await chrome.storage.local.get(['gasSettings']);
+    const gasUrl = gasSettings?.url || gasSettings?.dbUrl;
+    const secret = gasSettings?.secret || 'snowwe2024';
+    if (gasUrl && gasSettings?.feedbackEnabled !== false) {
+      await chrome.runtime.sendMessage({
+        type: 'gasPost',
+        url: gasUrl,
+        payload: {
+          action: 'saveFeedback',
+          secret,
+          recruiter: gasSettings?.recruiter || '',
+          platform,
+          aiVerdict,
+          correction,
+          profileSummary,
+          ts,
+        }
+      });
+    }
+  } catch (_) {}
+}
+
+// 判定結果に「訂正」ボタンを表示する（ポップアップ内で完結・ページ遷移の影響を受けない）
+function renderFeedbackButtons(overall, profileSummary, platform) {
+  const el = $('screening-feedback');
+  if (!el) return;
+  const options = overall === 'OK'
+    ? [{ label: '❌ 実はNG', value: 'NG' }]
+    : overall === 'NG'
+    ? [{ label: '✅ 実はOK', value: 'OK' }]
+    : [{ label: '✅ OK', value: 'OK' }, { label: '❌ NG', value: 'NG' }];
+
+  el.style.display = 'flex';
+  el.style.gap = '6px';
+  el.innerHTML = '<span style="font-size:11px;color:#888780;align-self:center;">判定を訂正:</span>';
+  options.forEach(({ label, value }) => {
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    btn.style.cssText = 'font-size:11px;padding:4px 9px;border-radius:6px;border:1px solid #d4d4d4;background:#fff;cursor:pointer;';
+    btn.addEventListener('click', async () => {
+      el.innerHTML = '<span style="font-size:11px;color:#888780;">保存中...</span>';
+      await saveFeedback(profileSummary, overall, value, platform);
+      el.innerHTML = `<span style="font-size:11px;color:#4338CA;">↩ 訂正: ${value} を記録しました</span>`;
+    });
+    el.appendChild(btn);
+  });
+}
+
 // ============================================================
 // 初期化
 // ============================================================
@@ -1033,6 +1106,7 @@ async function runScreening() {
   setStatus('screening', 'loading', 'プロフィールを取得中...');
   $('screening-btn').disabled = true;
   $('screening-result').style.display = 'none';
+  $('screening-feedback').style.display = 'none';
 
   let tab;
   try {
@@ -1104,6 +1178,10 @@ async function runScreening() {
       reason: result.comment || '',
       profileSummary,
     }).catch(() => {});
+
+    // ポップアップ側にも訂正ボタンを表示（doda-x等、ページ遷移でオンページの
+    // バッジが消えて訂正できなくなる媒体でも、ここから確実に記録できるようにする）
+    renderFeedbackButtons(result.overall, profileSummary, platformFromHostname(profileData.hostname));
 
     const overall = result.overall;
     if (overall === 'OK') {
