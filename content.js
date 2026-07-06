@@ -4335,6 +4335,29 @@ async function initPositionIndicator() {
   };
   render(currentPos);
 
+  // ドロップダウンを開くタイミングに関わらず、最新一覧を定期的に裏側で同期しておく。
+  // 「開いた瞬間だけ取得」だと、開くタイミング次第で古いまま選択してしまう可能性があるため、
+  // 60秒おきにも更新し、最終同期時刻をドロップダウン内に表示して状態を可視化する。
+  let lastPositionSync = null;
+  const refreshPositions = () => {
+    try {
+      chrome.runtime.sendMessage({ type: 'getPositionList' }).then(res => {
+        console.log('[Snow-we] ポジション一覧バックグラウンド取得:', res?.positions?.length || 0, '件');
+        if (res?.positions?.length > 0) {
+          positions = res.positions;
+          lastPositionSync = new Date();
+          if (document.getElementById('snow-we-pos-dropdown')) renderItems(searchBox.value);
+          const syncLabel = document.getElementById('snow-we-pos-sync-label');
+          if (syncLabel) syncLabel.textContent = `最終同期: ${lastPositionSync.toLocaleTimeString('ja-JP')}`;
+        }
+      }).catch(e => console.warn('[Snow-we] ポジション一覧バックグラウンド取得失敗:', e.message));
+    } catch (_) {
+      showExtensionInvalidatedBanner();
+    }
+  };
+  refreshPositions();
+  setInterval(refreshPositions, 60000);
+
   indicator.addEventListener('click', (e) => {
     e.stopPropagation();
     const existingDrop = document.getElementById('snow-we-pos-dropdown');
@@ -4350,6 +4373,7 @@ async function initPositionIndicator() {
         console.log('[Snow-we] ポジション一覧バックグラウンド取得:', res?.positions?.length || 0, '件');
         if (res?.positions?.length > 0) {
           positions = res.positions;
+          lastPositionSync = new Date();
           if (document.getElementById('snow-we-pos-dropdown')) renderItems(searchBox.value);
         }
       }).catch(e => console.warn('[Snow-we] ポジション一覧バックグラウンド取得失敗:', e.message));
@@ -4376,6 +4400,13 @@ async function initPositionIndicator() {
       font-family:sans-serif;outline:none;border-radius:8px 8px 0 0;color:#1e293b;
     `;
     dropdown.appendChild(searchBox);
+
+    // 最終同期時刻（スプレッドシートの更新が反映されているか目視確認できるように表示）
+    const syncLabel = document.createElement('div');
+    syncLabel.id = 'snow-we-pos-sync-label';
+    syncLabel.style.cssText = 'padding:4px 12px;font-size:10px;color:#94a3b8;font-family:sans-serif;background:#f8fafc;border-bottom:1px solid #e2e8f0;';
+    syncLabel.textContent = lastPositionSync ? `最終同期: ${lastPositionSync.toLocaleTimeString('ja-JP')}` : '同期中...';
+    dropdown.appendChild(syncLabel);
 
     // AI提案ボタン
     const aiBtn = document.createElement('div');
