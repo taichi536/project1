@@ -124,6 +124,139 @@ async function recordScoutQueueEntry({ candidateId, platform, position, info, re
   }, 'candidate_id,platform');
 }
 
+async function updateScoutQueueStatus(candidateId, platform, patch) {
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/scout_queue?candidate_id=eq.${encodeURIComponent(candidateId)}&platform=eq.${encodeURIComponent(platform)}`;
+    await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify(patch),
+    });
+  } catch (e) {
+    console.warn('[Snow-we] scout_queue更新失敗:', e.message);
+  }
+}
+
+// 【ドライラン】実際にはスカウトを送信せず、送信フローのどのステップまで到達できるかを
+// ログにだけ出す。本番の自動送信ボタンクリック（スカウト作成→確認→確定→送信）は
+// 実際のDOM挙動をこのログで確認してから有効化する。
+async function dryRunAutoScoutSend(item) {
+  console.log(`[Snow-we][ドライラン] 送信対象: candidateId=${item.candidateId} platform=${getPlatform()} position=${item.position} company=${item.info?.company || ''} age=${item.info?.age || ''}`);
+  const cardStillInDom = document.body.contains(item.el);
+  console.log(`[Snow-we][ドライラン] カードDOM生存: ${cardStillInDom}`);
+  if (!cardStillInDom) {
+    console.warn('[Snow-we][ドライラン] カードがDOMから消えているため、実際の送信では候補者を再特定できません');
+    return { ok: false, reason: 'card_detached' };
+  }
+  console.log('[Snow-we][ドライラン] ここで実際は: スカウト作成ボタンをクリック→テンプレ標準文のまま→確認→確定→送信、の順にクリックする予定（未実装・クリックはしていません）');
+  return { ok: true, dryRun: true };
+}
+
+// AIが星をつけた候補者を、このページを離れる前にその場でレビューする画面。
+// 別タブ・別ポップアップにせず、候補者カードがまだDOM上にある間に完結させる
+// （後から候補者を探し直す必要がある設計は、RDS等の固定URLがない媒体で破綻するため）。
+async function showApprovalReviewPanel(items) {
+  const existing = document.getElementById('snow-we-approval-panel');
+  if (existing) existing.remove();
+
+  let positions = [];
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+    positions = res?.positions || [];
+  } catch (_) {}
+
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.id = 'snow-we-approval-panel';
+    overlay.style.cssText = `
+      position:fixed;top:0;right:0;bottom:0;width:360px;z-index:2147483647;
+      background:#fff;border-left:1px solid #e2e8f0;box-shadow:-4px 0 20px rgba(0,0,0,0.15);
+      font-family:sans-serif;display:flex;flex-direction:column;
+    `;
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:14px 16px;border-bottom:1px solid #e2e8f0;flex-shrink:0;';
+    header.innerHTML = `
+      <div style="font-size:14px;font-weight:700;color:#1e293b;">✅ 承認待ち（${items.length}件）</div>
+      <div style="font-size:11px;color:#64748b;margin-top:3px;line-height:1.5;">AIが星をつけた候補者です。ポジションを確認・修正し、承認または却下してください。（現在ドライランモード：実際の送信は行いません）</div>
+    `;
+    overlay.appendChild(header);
+
+    const list = document.createElement('div');
+    list.style.cssText = 'flex:1;overflow-y:auto;padding:10px;';
+    overlay.appendChild(list);
+
+    let remaining = items.length;
+    const footer = document.createElement('div');
+    footer.style.cssText = 'padding:10px 16px;border-top:1px solid #e2e8f0;flex-shrink:0;';
+    const doneBtn = document.createElement('button');
+    doneBtn.textContent = '閉じて次へ進む';
+    doneBtn.style.cssText = 'width:100%;padding:9px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;cursor:pointer;';
+    doneBtn.addEventListener('click', () => { overlay.remove(); resolve(); });
+    footer.appendChild(doneBtn);
+    overlay.appendChild(footer);
+
+    items.forEach(item => {
+      const card = document.createElement('div');
+      card.style.cssText = 'border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:8px;';
+      const metaParts = [item.info?.age, item.info?.company, item.info?.univ].filter(Boolean);
+      card.innerHTML = `
+        <div style="font-size:12px;color:#334155;margin-bottom:5px;">${escapeHtml(metaParts.join(' · ') || '情報なし')}</div>
+        ${item.reason ? `<div style="font-size:11px;color:#94a3b8;margin-bottom:6px;line-height:1.4;">🤖 ${escapeHtml(item.reason)}</div>` : ''}
+      `;
+      const select = document.createElement('select');
+      select.style.cssText = 'width:100%;padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-bottom:7px;';
+      const posOptions = positions.length > 0 ? positions : (item.position ? [item.position] : []);
+      posOptions.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p; opt.textContent = p;
+        if (p === item.position) opt.selected = true;
+        select.appendChild(opt);
+      });
+      card.appendChild(select);
+
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:6px;';
+      const approveBtn = document.createElement('button');
+      approveBtn.textContent = '✅ 承認';
+      approveBtn.style.cssText = 'flex:1;padding:7px;background:#d1fae5;color:#065f46;border:1px solid #34d399;border-radius:6px;font-size:12px;cursor:pointer;';
+      const rejectBtn = document.createElement('button');
+      rejectBtn.textContent = '❌ 却下';
+      rejectBtn.style.cssText = 'flex:1;padding:7px;background:#fee2e2;color:#991b1b;border:1px solid #f87171;border-radius:6px;font-size:12px;cursor:pointer;';
+
+      const finish = () => {
+        card.remove();
+        remaining--;
+        header.querySelector('div').textContent = `✅ 承認待ち（残り${remaining}件）`;
+      };
+
+      approveBtn.addEventListener('click', async () => {
+        approveBtn.disabled = true; rejectBtn.disabled = true;
+        item.position = select.value;
+        await updateScoutQueueStatus(item.candidateId, getPlatform(), { status: 'approved', position: select.value, reviewed_at: new Date().toISOString() });
+        await dryRunAutoScoutSend(item);
+        finish();
+      });
+      rejectBtn.addEventListener('click', async () => {
+        approveBtn.disabled = true; rejectBtn.disabled = true;
+        await updateScoutQueueStatus(item.candidateId, getPlatform(), { status: 'rejected', reviewed_at: new Date().toISOString() });
+        finish();
+      });
+
+      actions.appendChild(approveBtn);
+      actions.appendChild(rejectBtn);
+      card.appendChild(actions);
+      list.appendChild(card);
+    });
+
+    document.body.appendChild(overlay);
+  });
+}
+
 // ポジション要件のセッション内キャッシュ（GAS呼び出しを最小化）
 const _posReqCache = new Map();
 
@@ -1559,6 +1692,10 @@ ${candidateList}
 // 自動リスト追加モード
 // -------------------------------------------------------
 async function triggerAutoAdd() {
+  // このページで今回星をつけた候補者（レビューパネル表示用。DOM参照はページ内でのみ有効なため
+  // ページ単位でリセットし、次ページへ遷移する前にレビュー→送信を完結させる）
+  const _starredThisPage = [];
+
   // 外部からの重複起動を防ぐ（_batchIsRunning=true の再帰呼び出しは通過）
   if (!_batchIsRunning && _triggerAutoAddLock) {
     console.log('[Snow-we] triggerAutoAdd: 二重起動スキップ');
@@ -1814,14 +1951,16 @@ async function triggerAutoAdd() {
           addedCount++;
           if (candidateId) {
             scoutHistory[`listed_${candidateId}`] = { date: Date.now(), platform: getPlatform() };
+            const starredInfo = extractBasicInfo(el);
             recordScoutQueueEntry({
               candidateId,
               platform: getPlatform(),
               position: _batchPosition,
-              info: extractBasicInfo(el),
+              info: starredInfo,
               reason: judgeReason,
               verdict: overall,
             }).catch(() => {});
+            _starredThisPage.push({ candidateId, el, position: _batchPosition, info: starredInfo, reason: judgeReason });
           }
         }
       } catch (err) {
@@ -1833,6 +1972,12 @@ async function triggerAutoAdd() {
     pending.push(el); // 処理済みとして記録
     await saveAutoAddProgress({ added: addedCount, processed: totalProcessed, running: true, ts: Date.now(), verdicts: { ok: okCount, ng: ngCount, pending: pendingCount } });
     await sleep(500);
+  }
+
+  // 次ページへ移動する前に、このページで星をつけた候補者のレビュー（承認/ポジション修正/却下）を
+  // その場で完結させる。DOM参照はページ遷移すると失われるため、必ずここで処理する。
+  if (_starredThisPage.length > 0) {
+    await showApprovalReviewPanel(_starredThisPage);
   }
 
   // ビズリーチ：仮想スクロールで次バッチへ
