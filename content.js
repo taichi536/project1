@@ -103,6 +103,16 @@ async function supabaseUpsert(table, data, onConflict, resolution = 'ignore-dupl
 
 // AIが星をつけた候補者を承認待ちキューに記録する（承認/ポジション修正/却下はポップアップの
 // 承認待ちリスト画面で行う。星を押す処理自体はこれまで通りtriggerAutoAdd内で完結する）
+// RDSは候補者ごとの固定URLがないため、後から候補者を探し直すには「どのスカウトルームで
+// 見つけたか」が要る。星をつけた候補者は、そのルームの「検討中リスト」タブ（候補者一覧
+// 全体ではなく、既に追加済みの候補者だけに絞られた一覧）に入るため、そこに戻れるURLを
+// 導出して保存しておく。/scoutroom/{roomId}/searchandrecommend 等 → /scoutroom/{roomId}/pick
+function deriveRDSPickListUrl(href) {
+  const m = href.match(/\/scoutroom\/(\d+)\//);
+  if (!m) return '';
+  return `${location.origin}/client/scouting/scoutroom/${m[1]}/pick`;
+}
+
 async function recordScoutQueueEntry({ candidateId, platform, position, info, reason, verdict }) {
   if (!candidateId) return;
   let recruiterName = '';
@@ -110,6 +120,7 @@ async function recordScoutQueueEntry({ candidateId, platform, position, info, re
     const s = await chrome.storage.local.get(['recruiterName']);
     recruiterName = s.recruiterName || '';
   } catch (_) {}
+  const roomUrl = platform === 'rds' ? deriveRDSPickListUrl(location.href) : '';
   await supabaseUpsert('scout_queue', {
     candidate_id: candidateId,
     platform,
@@ -121,6 +132,8 @@ async function recordScoutQueueEntry({ candidateId, platform, position, info, re
     ai_reason: (reason || '').substring(0, 500),
     ai_verdict: verdict || '',
     status: 'pending_review',
+    source_url: location.href,
+    room_url: roomUrl,
   }, 'candidate_id,platform');
 }
 
