@@ -1084,14 +1084,16 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     gasSent: false,
   });
 
-  // ② GASへの送信（サブ・失敗してもローカル記録には影響しない）
+  // ② GASへの記録はバックグラウンドのバッチキューに積むだけ（サブ・失敗してもローカル記録には影響しない）。
+  // 以前はここで即座にPOSTしていたが、RDSの一括送信等で候補者が短時間に連続処理されると
+  // GAS側・拡張機能側の両方で書き込みが競合しやすかったため、background.js側で
+  // 数秒〜1分おきにまとめて1回のリクエストで送るバッチ方式に変更した
   ;(async () => {
     let r2 = {};
     try { r2 = await chrome.storage.local.get(['gasSettings', 'currentPosition', 'recruiterName']); } catch (_) {}
     const gas = r2.gasSettings || {};
     const recruiterForGas = gas.recruiter || r2.recruiterName || '';
-    const primaryGasUrl = gas.url || gas.dbUrl;
-    if (!primaryGasUrl || !recruiterForGas || gas.scoutRecordEnabled === false) return;
+    if ((!gas.url && !gas.dbUrl) || !recruiterForGas || gas.scoutRecordEnabled === false) return;
     const ageNum = (info.age || '').replace(/[歳才]/, '');
     const payload = {
       secret: gas.secret || 'snowwe2024',
@@ -1105,30 +1107,13 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
       ts: now,
       candidateId, // 記録が空欄になった場合にGAS側から自動修復するための紐付けキー
     };
-    console.log('[Snow-we] GAS送信payload:', JSON.stringify({ recruiter: payload.recruiter, position: payload.position, industry: payload.industry, media: payload.media, ts: payload.ts, age: payload.age, company: payload.company, univ: payload.univ }));
-    let sent = false;
-    const sendGas = async (url) => {
-      try {
-        const r = await chrome.runtime.sendMessage({ type: 'gasPost', url, payload });
-        if (!r?.ok) throw new Error('GAS returned ok:false');
-        console.log('[Snow-we] GAS送信成功:', url.substring(0, 60));
-        sent = true;
-      } catch (e) {
-        console.warn('[Snow-we] GAS送信失敗、リトライ:', e.message);
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        try {
-          const r2 = await chrome.runtime.sendMessage({ type: 'gasPost', url, payload });
-          if (r2?.ok) sent = true;
-          console.log('[Snow-we] GAS送信リトライ成功');
-        } catch (e2) {
-          console.warn('[Snow-we] GAS送信リトライも失敗:', e2.message);
-        }
-      }
-    };
-    await sendGas(primaryGasUrl);
-    if (gas.dbUrl && gas.dbUrl !== primaryGasUrl) await sendGas(gas.dbUrl);
-    // GAS送信成功時にフラグを更新
-    if (sent) await patchScoutHistory(candidateId, { gasSent: true });
+    console.log('[Snow-we] GAS記録キューに追加:', JSON.stringify({ recruiter: payload.recruiter, position: payload.position, industry: payload.industry, media: payload.media, ts: payload.ts, age: payload.age, company: payload.company, univ: payload.univ }));
+    try {
+      await chrome.runtime.sendMessage({ type: 'queueGasScout', payload });
+    } catch (e) {
+      if (!e.message?.includes('Extension context invalidated'))
+        console.warn('[Snow-we] GAS記録キューへの追加失敗:', e.message);
+    }
   })();
 
   // ③ Supabaseへの保存

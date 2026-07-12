@@ -150,62 +150,87 @@ chrome.alarms.get('snowWeUpdateCheck', (existing) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'snowWeUpdateCheck') checkForUpdate();
   if (alarm.name === 'snowWeAutoRun') startAutoRun();
-  if (alarm.name === 'snowWeAnomalyCheck') { retryUndeliveredScouts().then(checkAnomalies); }
+  if (alarm.name === 'snowWeAnomalyCheck') checkAnomalies();
+  if (alarm.name === 'snowWeGasQueueFlush') flushGasScoutQueue();
 });
 
-// ── 記録不備の自動リカバリ ──────────────────────────────────────────────
-// 検知して終わりにせず、可能な限りその場で自動的に直す。
-// ①GASに一度も届かなかった送信 → バックグラウンドで自動リトライ（成功するまで）
-// ②GASには届いたが必須項目が空欄で記録された送信 → ローカルの正しい値でGAS側の
-//   空欄セルだけを自動で埋める（fixField）
-// どちらも直せなかった分だけが、popupのバナー/バッジで人の確認を求める形になる。
-chrome.alarms.get('snowWeAnomalyCheck', (existing) => {
+// ── スカウト記録のバッチ送信キュー ──────────────────────────────────────
+// 以前は候補者を1件処理するたびに即座にGASへPOSTしていたが、RDSの一括送信等で
+// 候補者が短時間に連続処理されると、GAS側・拡張機能側の両方で書き込みが競合
+// しやすかった（このセッションで繰り返し見つかった不具合の根本原因）。
+// 個別リクエストを都度投げるのをやめ、いったんキューに積んでおいて数秒〜1分
+// おきにまとめて1回のリクエストで送る方式に変更。同時書き込みの発生回数
+// そのものを減らすことで、競合が起きる余地自体を小さくする。
+let _gasQueueChain = Promise.resolve();
+function withQueueLock(fn) {
+  const result = _gasQueueChain.then(fn, fn);
+  _gasQueueChain = result.catch(() => {});
+  return result;
+}
+
+async function enqueueGasScout(payload) {
+  return withQueueLock(async () => {
+    const { gasScoutQueue } = await chrome.storage.local.get(['gasScoutQueue']);
+    const queue = gasScoutQueue || [];
+    queue.push(payload);
+    await chrome.storage.local.set({ gasScoutQueue: queue });
+  });
+}
+
+// enqueueGasScoutと同じ直列化キュー(withQueueLock)を通すことで、
+// 「キューを読む→送信対象として空にする」処理と新規追加が競合しないようにしている
+let _quickFlushTimer = null;
+function scheduleQuickFlush() {
+  if (_quickFlushTimer) return;
+  _quickFlushTimer = setTimeout(() => {
+    _quickFlushTimer = null;
+    flushGasScoutQueue();
+  }, 4000); // 4秒デバウンス：連続する候補者処理をまとめて1回で送る
+}
+
+chrome.alarms.get('snowWeGasQueueFlush', (existing) => {
   if (!existing) {
-    chrome.alarms.create('snowWeAnomalyCheck', { delayInMinutes: 1, periodInMinutes: 15 });
+    // setTimeoutはサービスワーカーが途中で休止すると失われるため、
+    // 1分おきのアラームを取りこぼし時の保険にする
+    chrome.alarms.create('snowWeGasQueueFlush', { delayInMinutes: 1, periodInMinutes: 1 });
   }
 });
 
-// ① GAS未送信（通信失敗でリトライも尽きた）分を、ローカルに残っている正しい値で
-// バックグラウンドから自動的に再送信する。成功するまで15分おきに繰り返す。
-async function retryUndeliveredScouts() {
-  try {
-    const { gasSettings, scoutHistory } = await chrome.storage.local.get(['gasSettings', 'scoutHistory']);
-    const url = gasSettings?.url || gasSettings?.dbUrl;
-    const recruiter = gasSettings?.recruiter;
-    if (!url || !recruiter) return;
+async function flushGasScoutQueue() {
+  return withQueueLock(async () => {
+    const { gasSettings, gasScoutQueue } = await chrome.storage.local.get(['gasSettings', 'gasScoutQueue']);
+    const queue = gasScoutQueue || [];
+    if (queue.length === 0) return;
     const secret = gasSettings?.secret || 'snowwe2024';
-    // 対象の洗い出しはこのスナップショットで行うが、書き込みは1件ずつ直前に
-    // 読み直してからマージする（下のpatchScoutHistoryEntry）。ここで丸ごと
-    // 読んで最後に丸ごと書き戻す形にすると、リトライの通信待ちをしている間に
-    // content.js側が別候補者を新規記録した分が後勝ちで消えてしまう
-    const targets = Object.entries(scoutHistory || {})
-      .filter(([, h]) => h.gasSent === false && (h.retryCount || 0) < 8); // 8回(約2時間)失敗し続けたら諦めて人の確認に回す
+    const urls = [gasSettings?.url, gasSettings?.dbUrl].filter((u, i, arr) => u && arr.indexOf(u) === i);
+    if (urls.length === 0) return; // GAS未設定。次回のアラームで再試行
 
-    for (const [candidateId, h] of targets) {
-      const payload = {
-        secret, recruiter, candidateId,
-        company: h.company || '', age: String(h.age || '').replace(/[歳才]/, ''),
-        univ: h.univ || '', media: h.platform || '', position: h.position || '',
-        industry: h.industry || '', ts: h.date,
-      };
-      let patch;
-      try {
-        const res = await fetch(url, { method: 'POST', body: JSON.stringify(payload) });
-        const data = await res.json();
-        if (data.ok !== false) {
-          patch = { gasSent: true };
-          console.log('[Snow-we] 未送信スカウトを自動リトライで記録完了:', candidateId);
-        } else {
-          patch = { retryCount: (h.retryCount || 0) + 1 };
-        }
-      } catch (_) {
-        patch = { retryCount: (h.retryCount || 0) + 1 };
+    // 送信対象をこの場でキューから確保する。ネットワーク待ちの間に新しく
+    // 積まれた分は、空になった新しいキューに独立して溜まっていく
+    await chrome.storage.local.set({ gasScoutQueue: [] });
+
+    const body = JSON.stringify({ secret, action: 'recordScoutBatch', items: queue });
+    const results = await Promise.allSettled(urls.map(url => fetch(url, { method: 'POST', body }).then(r => r.json())));
+    const anySuccess = results.some(r => r.status === 'fulfilled' && r.value?.ok !== false);
+
+    if (anySuccess) {
+      for (const item of queue) {
+        if (item.candidateId) await patchScoutHistoryEntry(item.candidateId, { gasSent: true });
       }
-      await patchScoutHistoryEntry(candidateId, patch);
+      console.log(`[Snow-we] スカウト記録バッチ送信成功: ${queue.length}件`);
+    } else {
+      console.warn('[Snow-we] スカウト記録バッチ送信、全URLで失敗。キューに戻します');
+      const retried = queue.map(it => ({ ...it, _attempts: (it._attempts || 0) + 1 }));
+      const giveUp = retried.filter(it => it._attempts >= 8); // 8回(約8分〜)失敗し続けたら諦めて人の確認に回す
+      const keep = retried.filter(it => it._attempts < 8);
+      for (const it of giveUp) {
+        if (it.candidateId) await patchScoutHistoryEntry(it.candidateId, { gasSent: false, retryCount: 8 });
+      }
+      // このタイミングまでに新規追加された分と合流させて書き戻す（withQueueLock内なので安全）
+      const { gasScoutQueue: currentQueue } = await chrome.storage.local.get(['gasScoutQueue']);
+      await chrome.storage.local.set({ gasScoutQueue: [...keep, ...(currentQueue || [])] });
     }
-  } catch (_) {
-    // 次の定期実行で再試行
-  }
+  });
 }
 
 // scoutHistoryの1件だけを、書き込み直前に読み直してから安全に更新する
@@ -446,6 +471,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'startAutoRunNow') {
     _doStartAutoRun(msg.autoRunConfig);
     sendResponse({ ok: true });
+    return true;
+  }
+
+  // スカウト記録をバッチ送信キューに追加（content.jsの候補者処理から呼ばれる）
+  if (msg.type === 'queueGasScout') {
+    enqueueGasScout(msg.payload)
+      .then(() => { scheduleQuickFlush(); sendResponse({ ok: true }); })
+      .catch(() => sendResponse({ ok: false }));
     return true;
   }
 

@@ -351,7 +351,14 @@ function doPost(e) {
       }
     }
 
-    // ── スカウト記録 ──
+    // ── スカウト記録のバッチ送信（拡張機能側がキューにまとめて1回で送ってくる） ──
+    if (data.action === 'recordScoutBatch') {
+      const items = Array.isArray(data.items) ? data.items : [];
+      const results = recordScoutBatch(ss, items);
+      return json({ ok: true, count: results.length });
+    }
+
+    // ── スカウト記録（単発。互換のため残してある） ──
     const scoutResult = recordScout(ss, data);
     return json({ ok: true, sheet: scoutResult?.sheet, row: scoutResult?.row });
 
@@ -368,6 +375,30 @@ function recordScout(ss, data) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000); // 最大30秒待つ。取得できなければ例外を投げてdoPostのcatchに任せる
   try {
+    return recordScoutOne(ss, data);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ── バッチ版：拡張機能側がまとめて送ってきた複数件を、1回のロック取得内で
+// 順番に処理する。以前は候補者ごとに個別リクエスト→個別ロック取得だったが、
+// それだと短時間に候補者が連続処理された時にロック待ちや書き込み競合が
+// 起きやすかった。1回のロックで複数件をまとめて処理することで、そもそも
+// 競合が発生する機会自体を減らす。
+function recordScoutBatch(ss, items) {
+  if (!items || items.length === 0) return [];
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return items.map(data => recordScoutOne(ss, data));
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ── 実際の書き込み処理本体（呼び出し元でロックを取得済みであること） ──
+function recordScoutOne(ss, data) {
     const ts      = data.ts ? new Date(data.ts) : new Date();
     const media   = MEDIA_LABEL[data.media] || data.media || '';
     const ageVal  = parseInt(data.age) || '';
@@ -418,9 +449,6 @@ function recordScout(ss, data) {
     verifyAndAlertMissingFields(dbSheet, lastRow, data);
 
     return { sheet: SHEET_DB, row: lastRow };
-  } finally {
-    lock.releaseLock();
-  }
 }
 
 // ── 記録直後の自己検証：本来値が入るはずの必須列が空欄なら即Slack通知 ──
