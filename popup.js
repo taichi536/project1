@@ -191,9 +191,37 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   await loadSettings();
+
+  // 記録不備アラート（Slack等の通知は使わず、popupを開いた時にだけ静かに知らせる）
+  renderAnomalyBanner();
+  chrome.runtime.sendMessage({ type: 'refreshAnomalies' }).then(() => renderAnomalyBanner()).catch(() => {});
   } catch (e) {
     console.error('[Snow-we] popup初期化エラー:', e);
   }
+});
+
+// ============================================================
+// 記録不備アラート（担当者・会社名・ポジション名が空欄で記録されたケース）
+// Slackのような即時プッシュ通知はうるさくなりがちなので採用せず、
+// popupを開いた自然なタイミングでだけ、GAS側の検出結果を表示する。
+// ============================================================
+async function renderAnomalyBanner() {
+  const { recordAnomalies } = await chrome.storage.local.get(['recordAnomalies']).catch(() => ({}));
+  const items = recordAnomalies?.items || [];
+  const banner = $('anomaly-banner');
+  const text = $('anomaly-banner-text');
+  if (!banner || !text) return;
+  if (items.length === 0) { banner.style.display = 'none'; return; }
+  const preview = items.slice(0, 3)
+    .map(a => `・${a.recruiter || '不明'} / ${a.company || '不明'} / ${a.missing}`).join('\n');
+  text.textContent = `⚠️ スカウト記録に不備が${items.length}件あります\n${preview}` +
+    (items.length > 3 ? `\n...他${items.length - 3}件` : '');
+  banner.style.display = 'block';
+}
+
+$('anomaly-ack-btn')?.addEventListener('click', async () => {
+  await chrome.runtime.sendMessage({ type: 'ackAnomalies' }).catch(() => {});
+  renderAnomalyBanner();
 });
 
 // ============================================================

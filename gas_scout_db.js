@@ -14,6 +14,7 @@ const SHEET_POSITIONS  = 'ポジション';
 const SHEET_CONDITIONS = 'コンサル別条件';
 const SHEET_TEMPLATE   = '原本';
 const SHEET_INDUSTRY   = '🏭 業界マスタ';
+const SHEET_ANOMALY    = '記録エラーログ';
 
 const STATUS_LIST = ['未返信', '返信あり', '面談設定', '書類選考', '一次面接', '最終面接', '内定', '辞退', '見送り'];
 
@@ -272,6 +273,41 @@ function doPost(e) {
       return json({ ok: true, records });
     }
 
+    // ── 記録不備一覧取得（拡張機能のpopupがバッジ表示のために定期取得） ──
+    if (data.action === 'getAnomalies') {
+      const anSheet = ss.getSheetByName(SHEET_ANOMALY);
+      if (!anSheet) return json({ ok: true, anomalies: [] });
+      const rows = anSheet.getDataRange().getValues();
+      const anomalies = rows.slice(1)
+        .map((r, i) => ({
+          rowNum: i + 2,
+          ts: r[0] ? new Date(r[0]).getTime() : 0,
+          recruiter: String(r[1] || ''),
+          company: String(r[2] || ''),
+          missing: String(r[3] || ''),
+          sheet: String(r[4] || ''),
+          ackd: !!r[6],
+        }))
+        .filter(a => !a.ackd)
+        .sort((a, b) => b.ts - a.ts);
+      return json({ ok: true, anomalies });
+    }
+
+    // ── 記録不備を確認済みにする ──
+    if (data.action === 'ackAnomalies') {
+      const anSheet = ss.getSheetByName(SHEET_ANOMALY);
+      if (anSheet) {
+        const lastRow = anSheet.getLastRow();
+        if (lastRow >= 2) {
+          const now = new Date();
+          const flags = anSheet.getRange(2, 7, lastRow - 1, 1).getValues()
+            .map(r => [r[0] ? r[0] : now]);
+          anSheet.getRange(2, 7, lastRow - 1, 1).setValues(flags);
+        }
+      }
+      return json({ ok: true });
+    }
+
     // ── スカウト記録 ──
     const scoutResult = recordScout(ss, data);
     return json({ ok: true, sheet: scoutResult?.sheet, row: scoutResult?.row });
@@ -354,16 +390,28 @@ function verifyAndAlertMissingFields(dbSheet, row, data) {
     const prevNote = String(noteCell.getValue() || '');
     noteCell.setValue((prevNote ? prevNote + ' / ' : '') + '⚠️自動記録時に空欄検出: ' + problems.join('、'));
 
-    postToSlack(
-      '⚠️ *スカウト記録に不備*\n' +
-      problems.join('、') + ' が空欄で記録されました（' + SHEET_DB + ' ' + row + '行目）\n' +
-      '担当者: ' + (data.recruiter || '（空）') + '\n' +
-      '会社名: ' + (data.company || '（空）') + '\n' +
-      '媒体: ' + (MEDIA_LABEL[data.media] || data.media || '（空）')
-    );
+    logAnomaly(dbSheet.getParent(), {
+      recruiter: data.recruiter, company: data.company,
+      missing: problems.join('、'), sheet: SHEET_DB, row,
+    });
   } catch (err) {
     Logger.log('verifyAndAlertMissingFields エラー: ' + err.message);
   }
+}
+
+// ── 記録不備ログ：Slackのようなプッシュ通知は使わず、拡張機能側が
+// 開いたタイミング（popup表示時）で拾いに来る「記録エラーログ」シートに残す ──
+function logAnomaly(ss, info) {
+  try {
+    let sheet = ss.getSheetByName(SHEET_ANOMALY);
+    if (!sheet) {
+      sheet = ss.insertSheet(SHEET_ANOMALY);
+      sheet.getRange(1, 1, 1, 7).setValues([['検出日時', '担当者', '会社名', '欠落項目', 'シート', '行', '確認済み']])
+        .setBackground('#DC2626').setFontColor('#ffffff').setFontWeight('bold');
+      sheet.setFrozenRows(1);
+    }
+    sheet.appendRow([new Date(), info.recruiter || '', info.company || '', info.missing || '', info.sheet || '', info.row || '', '']);
+  } catch (_) {}
 }
 
 // ── 日付別シートへの書き込み ─────────────────────────────────
@@ -372,15 +420,11 @@ function writeToDailySheet(ss, data, ts, media, ageVal, industry) {
   const startCol  = findMemberCol(recruiter);
   if (!startCol) {
     Logger.log('メンバー未登録: "' + recruiter + '" / 登録済み: ' + Object.keys(MEMBER_MAP).join(', '));
-    // ログだけだと誰も気づけないため、日付シートへの記録が丸ごとスキップされたことを即通知する
-    try {
-      postToSlack(
-        '⚠️ *日付シートへの記録スキップ*\n' +
-        '担当者「' + (recruiter || '（空欄）') + '」がメンバー一覧に見つからず、日付別シートへの記録をスキップしました。\n' +
-        '（スカウト管理DBへの記録は別途行われています）\n' +
-        '会社名: ' + (data.company || '（空）')
-      );
-    } catch (_) {}
+    // ログだけだと誰も気づけないため、日付シートへの記録が丸ごとスキップされたことを記録エラーログに残す
+    logAnomaly(ss, {
+      recruiter, company: data.company,
+      missing: '日付シート記録スキップ(担当者未登録)', sheet: SHEET_TEMPLATE, row: '',
+    });
     return;
   }
 

@@ -145,7 +145,41 @@ chrome.alarms.get('snowWeUpdateCheck', (existing) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'snowWeUpdateCheck') checkForUpdate();
   if (alarm.name === 'snowWeAutoRun') startAutoRun();
+  if (alarm.name === 'snowWeAnomalyCheck') checkAnomalies();
 });
+
+// ── 記録不備チェック（担当者・会社名・ポジション名が空欄で記録された件のGAS検出結果を拾う）──
+// Slack通知は使わず、拡張機能アイコンのバッジで静かに知らせる方式にしている
+chrome.alarms.get('snowWeAnomalyCheck', (existing) => {
+  if (!existing) {
+    chrome.alarms.create('snowWeAnomalyCheck', { delayInMinutes: 1, periodInMinutes: 15 });
+  }
+});
+
+async function checkAnomalies() {
+  try {
+    const { gasSettings } = await chrome.storage.local.get(['gasSettings']);
+    const url = gasSettings?.url || gasSettings?.dbUrl;
+    const secret = gasSettings?.secret || 'snowwe2024';
+    if (!url) return;
+    const res = await fetch(url, { method: 'POST', body: JSON.stringify({ secret, action: 'getAnomalies' }) });
+    const data = await res.json();
+    const anomalies = data.ok ? (data.anomalies || []) : [];
+    await chrome.storage.local.set({ recordAnomalies: { items: anomalies, checkedAt: Date.now() } });
+    updateAnomalyBadge(anomalies.length);
+  } catch (_) {
+    // ネットワーク不可時は無視（次の定期チェックで再試行）
+  }
+}
+
+function updateAnomalyBadge(count) {
+  if (count > 0) {
+    chrome.action.setBadgeText({ text: String(Math.min(count, 99)) });
+    chrome.action.setBadgeBackgroundColor({ color: '#DC2626' });
+  } else {
+    chrome.action.setBadgeText({ text: '' });
+  }
+}
 
 // ── 夜間自動実行（並列スロット対応） ──────────────────────────────────────────
 // slotId → {slotId, tabId, windowId, urlQueue, urlIndex, maxPages}
@@ -299,6 +333,29 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'startAutoRunNow') {
     _doStartAutoRun(msg.autoRunConfig);
     sendResponse({ ok: true });
+    return true;
+  }
+
+  // 記録不備の再チェック（popup表示時に呼ばれる）
+  if (msg.type === 'refreshAnomalies') {
+    checkAnomalies().then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  // 記録不備を確認済みにする
+  if (msg.type === 'ackAnomalies') {
+    chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {
+      const url = gasSettings?.url || gasSettings?.dbUrl;
+      const secret = gasSettings?.secret || 'snowwe2024';
+      if (!url) { sendResponse({ ok: false }); return; }
+      fetch(url, { method: 'POST', body: JSON.stringify({ secret, action: 'ackAnomalies' }) })
+        .then(() => {
+          chrome.storage.local.set({ recordAnomalies: { items: [], checkedAt: Date.now() } });
+          updateAnomalyBadge(0);
+          sendResponse({ ok: true });
+        })
+        .catch(() => sendResponse({ ok: false }));
+    });
     return true;
   }
 
