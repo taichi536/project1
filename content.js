@@ -6,6 +6,19 @@
 const _INSTANCE_ID = String(Date.now());
 document.documentElement.setAttribute('data-snow-we-id', _INSTANCE_ID);
 
+// 現在選択中のポジション名を同期的に参照できるようキャッシュしておく。
+// 「スカウト」ボタン押下時にフォールバック用ポジションを非同期(chrome.storage読み込み後)に
+// 追記する作りだと、RDSの一括送信等で候補者が高速に連続処理された場合、次の候補者の
+// 処理が始まってから追記が完了して間に合わない・別候補者のpendingScoutに書き込まれる、
+// という不具合があったため、常に最新値をメモリ上に保持し同期的に読めるようにする
+let _cachedCurrentPosition = '';
+chrome.storage.local.get(['currentPosition']).then(r => { _cachedCurrentPosition = r.currentPosition || ''; }).catch(() => {});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.currentPosition) {
+    _cachedCurrentPosition = changes.currentPosition.newValue || '';
+  }
+});
+
 // Chrome の Extension context invalidated は try-catch をすり抜けて
 // グローバルの unhandledrejection として発火することがある → 全体で抑制
 window.addEventListener('unhandledrejection', event => {
@@ -1393,26 +1406,15 @@ document.addEventListener('click', e => {
       console.log('[Snow-we] 1回目クリック candidateId:', id);
       console.log('[Snow-we] カードテキスト行:', (card.innerText || '').split('\n').map(l=>l.trim()).filter(Boolean).slice(0,10));
       if (id) {
+        // フォールバック用ポジションは、以前は非同期でchrome.storageから読み込んでから
+        // 追記していたが、RDSの一括送信等で候補者が高速に連続処理されると、次の候補者の
+        // 処理が始まってから追記が完了して間に合わない（別候補者に書き込まれる／記録され
+        // ない）ことがあったため、同期的に読めるキャッシュ値を使い、pendingScout保存と
+        // 同時に確定させる
         sessionStorage.setItem('pendingScout', JSON.stringify({
-          id, info: extractBasicInfo(card), ts: Date.now()
+          id, info: extractBasicInfo(card), ts: Date.now(), fallbackPosition: _cachedCurrentPosition
         }));
-        console.log('[Snow-we] pendingScout を sessionStorage に保存しました');
-        // スカウトボタン押下時のポジション名をフォールバック用に保存（照合失敗時も正しいポジションを記録するため）
-        (async () => {
-          try {
-            const { currentPosition } = await chrome.storage.local.get(['currentPosition']);
-            if (currentPosition) {
-              const raw2 = sessionStorage.getItem('pendingScout');
-              if (raw2) {
-                const p2 = JSON.parse(raw2);
-                if (!p2.fallbackPosition) {
-                  p2.fallbackPosition = currentPosition;
-                  sessionStorage.setItem('pendingScout', JSON.stringify(p2));
-                }
-              }
-            }
-          } catch (_) {}
-        })();
+        console.log('[Snow-we] pendingScout を sessionStorage に保存しました (fallbackPosition:', _cachedCurrentPosition || 'なし', ')');
       } else {
         console.log('[Snow-we] candidateId が取得できなかったため保存スキップ');
       }
