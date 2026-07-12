@@ -1648,6 +1648,47 @@ async function updateScoutQueueEntry(id, patch) {
   if (!res.ok) throw new Error(await res.text());
 }
 
+// 承認待ちレビュー中に候補者を何件も「検討中リストを開く」で確認していくと、部屋（room_url）が
+// 違うたびに新しいタブが増え続けてタブが埋まってしまうという指摘があった。レビュー専用の
+// タブを1つだけ使い回すようにする：同じ部屋ならメッセージで探索し直すだけ、違う部屋なら
+// そのタブごと新しいURLへ遷移させる（実ページ遷移になるのでcontent.js側のload時トリガーが
+// 正しく働く）。タブIDはpopupを開き直しても引き継げるようchrome.storage.localに保存する。
+async function snowweOpenOrReuseFindTab(roomUrl, targetUrl, find) {
+  const stored = await chrome.storage.local.get(['snowweFindTabId']);
+  let existing = null;
+  if (stored.snowweFindTabId) {
+    try {
+      existing = await chrome.tabs.get(stored.snowweFindTabId);
+    } catch (_) {
+      existing = null; // タブが閉じられていた
+    }
+  }
+
+  if (existing) {
+    const sameRoom = existing.url && existing.url.split('#')[0] === roomUrl;
+    if (sameRoom) {
+      // 同じ部屋の別候補者：URLのhashだけ書き換えてもSPAの同一ページ内遷移になり
+      // ページロードが発生しない（content.js側のトリガーが再実行されない）ため、
+      // メッセージ経由で直接探索をやり直す
+      if (find) {
+        chrome.tabs.sendMessage(existing.id, { action: 'snowweFindCandidate', params: JSON.parse(find) }, () => {
+          void chrome.runtime.lastError; // 応答が無くても無視（ページ未読み込み等）
+        });
+      }
+    } else {
+      // 違う部屋：タブごと新しいURLへ遷移させる（実ページ遷移なのでcontent.js側の
+      // load時トリガーがhashを読み取って自動的に探索する）
+      chrome.tabs.update(existing.id, { url: targetUrl }).catch(() => {});
+    }
+    // ここでactive:trueにはしない。PR #18で対策したのと同じ理由（タブがアクティブになった
+    // 瞬間にポップアップが自動的に閉じる）で承認待ちリストの続きを見失う事故が再発するため
+    return;
+  }
+
+  const newTab = await chrome.tabs.create({ url: targetUrl, active: false });
+  await chrome.storage.local.set({ snowweFindTabId: newTab.id });
+}
+
 async function renderApprovalQueue() {
   const listEl = $('approval-list');
   const countEl = $('approval-count-label');
@@ -1730,27 +1771,8 @@ async function renderApprovalQueue() {
       roomLinkBtn.addEventListener('click', async () => {
         const roomUrl = roomLinkBtn.dataset.roomUrl;
         const find = roomLinkBtn.dataset.find || '';
-        // 同じスカウトルーム（room_url）に複数の候補者がいる場合、毎回新しいタブを開くと
-        // タブが際限なく増えてしまう。既に同じroom_urlのタブが開いていれば、それを使い回して
-        // メッセージ経由で該当候補者の自動探索だけをやり直す（新規タブは作らない）
-        let existing;
-        try {
-          const tabs = await chrome.tabs.query({});
-          existing = tabs.find((t) => t.url && t.url.split('#')[0] === roomUrl);
-        } catch (_) {}
-        if (existing) {
-          // ここでactive:trueにしてしまうと、PR #18で対策したのと同じ理由
-          // （タブがアクティブになった瞬間にポップアップが自動的に閉じる）で
-          // 承認待ちリストの続きを見失う事故が再発するため、既存タブもactive:falseのままにする
-          if (find) {
-            chrome.tabs.sendMessage(existing.id, { action: 'snowweFindCandidate', params: JSON.parse(find) }, () => {
-              void chrome.runtime.lastError; // 応答が無くても無視（ページ未読み込み等）
-            });
-          }
-          return;
-        }
         const url = find ? `${roomUrl}#snowweFind=${encodeURIComponent(find)}` : roomUrl;
-        chrome.tabs.create({ url, active: false });
+        await snowweOpenOrReuseFindTab(roomUrl, url, find);
       });
     }
     card.querySelector('[data-action="approve"]').addEventListener('click', async (e) => {
