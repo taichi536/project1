@@ -158,17 +158,35 @@ chrome.alarms.get('snowWeAnomalyCheck', (existing) => {
 
 async function checkAnomalies() {
   try {
-    const { gasSettings } = await chrome.storage.local.get(['gasSettings']);
+    const { gasSettings, scoutHistory } = await chrome.storage.local.get(['gasSettings', 'scoutHistory']);
     const url = gasSettings?.url || gasSettings?.dbUrl;
     const secret = gasSettings?.secret || 'snowwe2024';
-    if (!url) return;
-    const res = await fetch(url, { method: 'POST', body: JSON.stringify({ secret, action: 'getAnomalies' }) });
-    const data = await res.json();
-    const anomalies = data.ok ? (data.anomalies || []) : [];
+
+    // ① GAS側で検知した「届いたが必須項目が空欄だった」ケース
+    let serverAnomalies = [];
+    if (url) {
+      try {
+        const res = await fetch(url, { method: 'POST', body: JSON.stringify({ secret, action: 'getAnomalies' }) });
+        const data = await res.json();
+        if (data.ok) serverAnomalies = data.anomalies || [];
+      } catch (_) {
+        // ネットワーク不可時は無視（次の定期チェックで再試行）
+      }
+    }
+
+    // ② クライアント側で「GASに一度も届かなかった」ケース（通信失敗でリトライも失敗）
+    // GAS側の記録エラーログは「届いたが空欄だった」ケースしか検知できないため、
+    // こちらはローカルの送信履歴(scoutHistory)を見て別枠で拾う
+    const tenMinAgo = Date.now() - 10 * 60 * 1000;
+    const undelivered = Object.values(scoutHistory || {})
+      .filter(h => h.gasSent === false && h.date && h.date < tenMinAgo)
+      .map(h => ({ ts: h.date, recruiter: '', company: h.company || '', missing: 'GAS未送信(通信失敗)', sheet: '' }));
+
+    const anomalies = [...serverAnomalies, ...undelivered].sort((a, b) => b.ts - a.ts);
     await chrome.storage.local.set({ recordAnomalies: { items: anomalies, checkedAt: Date.now() } });
     updateAnomalyBadge(anomalies.length);
   } catch (_) {
-    // ネットワーク不可時は無視（次の定期チェックで再試行）
+    // 想定外エラー時は無視（次の定期チェックで再試行）
   }
 }
 
