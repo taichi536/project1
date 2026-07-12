@@ -2511,7 +2511,16 @@ async function getFullProfile(cardEl, fallbackText) {
         const full2 = removeNonProfileSections(extractMainText(findRDSDetailPanel(), 5000));
         if (full2.length > 200) return full2;
       }
+      // タブの問題ではなく、単に詳細パネルの描画がまだ間に合っていないだけの
+      // ケースが一定数あった（連続自動処理時、実測でおよそ2割前後）。
+      // その場合カード要約(短文)のみでAI判定することになり、職歴の詳細や
+      // 過去の在籍企業などの情報が欠落したまま判定される＝判定精度が落ちる。
+      // 諦める前にもう一度だけ待って再取得する。
+      await sleep(1200);
+      const full3 = removeNonProfileSections(extractMainText(findRDSDetailPanel(), 5000));
+      if (full3.length > 200) return full3;
     }
+    console.warn(`[Snow-we] 詳細プロフィール取得に失敗。カード要約(${fallbackText.trim().length}文字)のみでAI判定します。判定精度が落ちる可能性があります`);
     return fallbackText.substring(0, 900);
   }
 
