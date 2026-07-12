@@ -1678,12 +1678,19 @@ async function renderApprovalQueue() {
     const optionsHtml = posOptions.map(p =>
       `<option value="${escapeHtml(p)}"${p === row.position ? ' selected' : ''}>${escapeHtml(p)}</option>`
     ).join('');
+    // プルダウンは幅の都合で長いポジション名が省略されて見えなくなることがあるため、
+    // 選択中のポジション名を上に全文表示する（プルダウンを変更すると更新される）
+    const roomLinkHtml = row.room_url
+      ? `<a class="approval-card-room-link" href="${escapeHtml(row.room_url)}" target="_blank" rel="noopener">🔗 検討中リストを開く（本人を探して確認）</a>`
+      : '';
     return `<div class="approval-card" data-id="${row.id}">
       <div class="approval-card-top">
         <span class="approval-card-platform">${escapeHtml(platformLabel)}</span>
         <span class="approval-card-meta">${escapeHtml(metaParts.join(' · ') || '情報なし')}</span>
       </div>
       ${row.ai_reason ? `<div class="approval-card-reason">🤖 ${escapeHtml(row.ai_reason)}</div>` : ''}
+      ${roomLinkHtml}
+      <div class="approval-card-position-label">送信ポジション: ${escapeHtml(row.position || '（未設定）')}</div>
       <select class="approval-position-select">${optionsHtml || '<option value="">（ポジション一覧未取得）</option>'}</select>
       <div class="approval-card-actions">
         <button class="approve-btn" data-action="approve">✅ 承認</button>
@@ -1695,6 +1702,10 @@ async function renderApprovalQueue() {
   listEl.querySelectorAll('.approval-card').forEach(card => {
     const id = card.dataset.id;
     const select = card.querySelector('.approval-position-select');
+    const positionLabel = card.querySelector('.approval-card-position-label');
+    select.addEventListener('change', () => {
+      positionLabel.textContent = `送信ポジション: ${select.value || '（未設定）'}`;
+    });
     card.querySelector('[data-action="approve"]').addEventListener('click', async (e) => {
       const btn = e.currentTarget;
       btn.disabled = true;
