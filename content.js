@@ -2385,7 +2385,7 @@ async function triggerAutoAdd() {
     try {
       sessionStorage.setItem('snowWeAutoAdd', JSON.stringify({
         resume: true, added: addedCount, processed: totalProcessed,
-        autoRun: _isAutoRunMode ? { maxPages: _autoRunMaxPages, pageCount: _autoRunPageCount } : null,
+        autoRun: _isAutoRunMode ? { maxPages: _autoRunMaxPages, pageCount: _autoRunPageCount, slotId: _autoRunSlotId } : null,
       }));
     } catch (_) {}
 
@@ -4221,6 +4221,17 @@ function findNextPageButton() {
   return null;
 }
 
+// 夜間自動実行は複数スロット（複数タブ/ウィンドウ）が同時並行で動くことがあり、
+// chrome.storage.localはタブ間で共有されるため、単一の'autoAddProgress'キーを
+// 全スロットで使い回すとお互いの進捗を上書きし合ってしまう
+// （片方のスロットの完了書き込みが、まだ実行中の別スロットの状態を消してしまい、
+// checkForUpdate()の実行中バッチ判定を誤らせ、動いている最中に拡張機能が
+// リロードされてバッチが中断する、という実害につながる）。
+// スロットごとに別キーへ保存することで衝突を避ける。
+function autoAddProgressKey() {
+  return _isAutoRunMode ? `autoAddProgress_slot${_autoRunSlotId}` : 'autoAddProgress';
+}
+
 // 自動追加の進捗をストレージに保存
 async function saveAutoAddProgress(data) {
   if (!data.running) {
@@ -4236,7 +4247,7 @@ async function saveAutoAddProgress(data) {
     try { sessionStorage.setItem('snowWeBatchCounters', JSON.stringify({ added: data.added, processed: data.processed || 0, ok: data.verdicts?.ok || 0, ng: data.verdicts?.ng || 0, pending: data.verdicts?.pending || 0 })); } catch (_) {}
   }
   try {
-    await chrome.storage.local.set({ autoAddProgress: data });
+    await chrome.storage.local.set({ [autoAddProgressKey()]: data });
   } catch (e) {
     // Extension context invalidated（拡張機能再読み込み時）は無視
     if (!e.message?.includes('Extension context invalidated')) console.warn('[Snow-we] saveAutoAddProgress error:', e.message);
@@ -4246,8 +4257,9 @@ async function saveAutoAddProgress(data) {
 // 自動追加の進捗をストレージから読み込む
 async function loadAutoAddProgress() {
   try {
-    const r = await chrome.storage.local.get(['autoAddProgress']);
-    return r.autoAddProgress || {};
+    const key = autoAddProgressKey();
+    const r = await chrome.storage.local.get([key]);
+    return r[key] || {};
   } catch (e) {
     return {};
   }
@@ -5060,6 +5072,11 @@ window.addEventListener('load', () => {
           _isAutoRunMode = true;
           _autoRunMaxPages = resume.autoRun.maxPages || 2;
           _autoRunPageCount = resume.autoRun.pageCount || 0;
+          // ページ遷移でスクリプトが再注入されるとモジュール変数は初期値(0)に戻るため、
+          // どのスロットの続きかをsessionStorage経由で復元する。これを忘れると
+          // 全スロットがslot0のprogressキーに書き込むようになり、複数スロット
+          // 並列実行時に進捗を上書きし合う（このコメントの上にある衝突対策が無意味になる）
+          _autoRunSlotId = resume.autoRun.slotId ?? 0;
         }
         // 再開時は進捗を running:true で復元してから triggerAutoAdd を呼ぶ
         // ← これをしないと isFreshStart=true になり最初からやり直しになる

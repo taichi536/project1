@@ -120,9 +120,14 @@ async function checkForUpdate() {
     if (remote.version && remote.version !== current) {
       // バッチ実行中は強制リロードを延期（コンテンツスクリプトが破棄されてバッチが止まるのを防ぐ）
       // ただし30分以上前のバッチは異常終了とみなして延期しない（更新が永久にブロックされるのを防ぐ）
-      const stored = await chrome.storage.local.get(['autoAddProgress']);
-      const prog = stored.autoAddProgress;
-      const isRecentBatch = prog?.running && prog?.ts && (Date.now() - prog.ts) < 30 * 60 * 1000;
+      // 夜間自動実行は最大3スロット並列で動くため、進捗はスロットごとに別キーに保存されている
+      // （content.jsのautoAddProgressKey()参照）。どれか1つでも実行中ならリロードを延期する。
+      const progressKeys = ['autoAddProgress', 'autoAddProgress_slot0', 'autoAddProgress_slot1', 'autoAddProgress_slot2'];
+      const stored = await chrome.storage.local.get(progressKeys);
+      const isRecentBatch = progressKeys.some(k => {
+        const prog = stored[k];
+        return prog?.running && prog?.ts && (Date.now() - prog.ts) < 30 * 60 * 1000;
+      });
       if (isRecentBatch) {
         console.log(`[Snow-we] バッチ実行中のため更新を延期: ${current} → ${remote.version}`);
         return;
