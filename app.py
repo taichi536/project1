@@ -1782,7 +1782,7 @@ elif page == "🔬 バックテスト":
     st.title("🔬 バックテスト")
     st.markdown("過去データで売買戦略の有効性を検証します")
 
-    bt_tab_single, bt_tab_batch, bt_tab_momentum, bt_tab_multi, bt_tab_crypto = st.tabs(["📈 単一銘柄", "📊 一括バックテスト", "🚀 モメンタム戦略", "🌍 マルチアセット", "🪙 暗号資産"])
+    bt_tab_single, bt_tab_batch, bt_tab_momentum, bt_tab_multi, bt_tab_crypto, bt_tab_optimizer = st.tabs(["📈 単一銘柄", "📊 一括バックテスト", "🚀 モメンタム戦略", "🌍 マルチアセット", "🪙 暗号資産", "🔬 最適化"])
 
     # ── 共通パラメータ（両タブで使う）──────────────────────────────────────
     with st.expander("⚙️ バックテスト設定（期間・戦略・資金）", expanded=False):
@@ -2370,6 +2370,172 @@ elif page == "🔬 バックテスト":
                                    legend=dict(orientation="h", y=-0.2))
                 st.plotly_chart(fig2, use_container_width=True)
                 st.info("💡 FXは税率20%（申告分離課税）で暗号資産より有利。レバレッジなし想定。")
+
+    # ── ウォークフォワード最適化タブ ──────────────────────────────────────────
+    with bt_tab_optimizer:
+        st.markdown("### 🔬 ウォークフォワード最適化")
+        st.caption(
+            "マルチアセット・モメンタム戦略のパラメータを**訓練期間**で最適化し、"
+            "**テスト期間（未来データ）**でアウトオブサンプル検証します。"
+        )
+
+        with st.expander("📖 仕組みの説明", expanded=False):
+            st.markdown("""
+**ウォークフォワードとは？**
+
+| ステップ | 内容 |
+|---------|------|
+| 1. 訓練 | 過去N年のデータでグリッドサーチ → 最良パラメータを発見 |
+| 2. テスト | 続くM年の未来データで、その最良パラメータを評価 |
+| 3. 繰り返し | 時間窓をずらして全期間をカバー |
+| 4. 比較 | 最適化 vs 固定パラメータ(12ヶ月/1銘柄) を比較 |
+
+**最適化するパラメータ**
+- `lookback_months`: モメンタム計算期間（3・6・9・12・18ヶ月）
+- `top_n`: 保有銘柄数（1〜3）
+- `skip_days`: 直近スキップ（0・21日）
+
+**過学習比率**：OOSシャープ ÷ 訓練シャープ。1.0に近いほど汎化性が高い。
+""")
+
+        oc1, oc2, oc3, oc4 = st.columns(4)
+        opt_start = oc1.text_input("開始日", value="2015-01-01", key="opt_start")
+        opt_end = oc2.text_input("終了日", value="2025-12-31", key="opt_end")
+        opt_train = oc3.selectbox("訓練期間（年）", [2, 3, 4, 5], index=1, key="opt_train")
+        opt_test = oc4.selectbox("テスト期間（年）", [1, 2], index=0, key="opt_test")
+
+        with st.expander("⚙️ パラメータグリッド（カスタム）", expanded=False):
+            pg1, pg2, pg3 = st.columns(3)
+            custom_lookbacks = pg1.multiselect(
+                "lookback_months", [3, 6, 9, 12, 18, 24],
+                default=[3, 6, 9, 12, 18], key="opt_lb"
+            )
+            custom_topn = pg2.multiselect(
+                "top_n", [1, 2, 3], default=[1, 2, 3], key="opt_topn"
+            )
+            custom_skip = pg3.multiselect(
+                "skip_days", [0, 21], default=[0, 21], key="opt_skip"
+            )
+
+        if st.button("▶ 最適化実行", key="run_optimizer", type="primary"):
+            if not custom_lookbacks or not custom_topn or not custom_skip:
+                st.error("パラメータグリッドを1つ以上選択してください")
+            else:
+                param_grid = {
+                    "lookback_months": custom_lookbacks,
+                    "top_n": custom_topn,
+                    "skip_days": custom_skip,
+                }
+                total_combos = len(custom_lookbacks) * len(custom_topn) * len(custom_skip)
+                st.info(f"組み合わせ数: {total_combos} × 複数時間窓 で評価します")
+
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+
+                def _update_progress(wi, total, train_start, test_end):
+                    pct = int((wi + 1) / max(total, 1) * 100)
+                    progress_bar.progress(min(pct, 100))
+                    status_text.caption(
+                        f"窓 {wi+1}/{total} — テスト終了: {test_end.strftime('%Y/%m')}"
+                    )
+
+                from modules.optimizer import fetch_and_optimize
+                with st.spinner("データ取得・最適化中（数分かかる場合があります）..."):
+                    try:
+                        result = fetch_and_optimize(
+                            start=opt_start,
+                            end=opt_end,
+                            train_years=opt_train,
+                            test_years=opt_test,
+                            param_grid=param_grid,
+                            progress_callback=_update_progress,
+                        )
+                    except Exception as e:
+                        result = {"error": str(e)}
+
+                progress_bar.empty()
+                status_text.empty()
+
+                if "error" in result:
+                    st.error(result["error"])
+                else:
+                    summary = result["summary"]
+                    oos_eq = result["oos_equity"]
+                    fixed_eq = result["fixed_equity"]
+                    windows_df = result["windows"]
+
+                    # サマリー指標
+                    st.markdown("#### 📊 最適化サマリー")
+                    sc1, sc2, sc3, sc4, sc5 = st.columns(5)
+                    sc1.metric("時間窓数", summary["時間窓数"])
+                    sc2.metric("平均OOSシャープ", summary["平均OOSシャープ"])
+                    sc3.metric("平均訓練Sharpe", summary["平均訓練Sharpe"])
+                    sc4.metric("過学習比率", summary["過学習比率"],
+                               help="OOS ÷ 訓練。1.0に近いほど汎化性高い")
+                    sc5.metric("最終OOS資産（円）",
+                               f"¥{summary['最終OOS資産']:,.0f}",
+                               delta=f"固定: ¥{summary['最終固定資産']:,.0f}")
+
+                    st.info(
+                        "💡 過学習比率 > 0.7 なら実用的。"
+                        "< 0.5 だと訓練期間のパラメータが本番では機能しにくい傾向があります。"
+                    )
+
+                    # 時間窓別テーブル
+                    st.markdown("#### 📋 時間窓別ベストパラメータ")
+                    style_df = windows_df.copy()
+                    style_df["OOSシャープ"] = style_df["OOSシャープ"].apply(
+                        lambda x: f"{'🟢' if x > 0.5 else ('🟡' if x > 0 else '🔴')} {x:.3f}"
+                    )
+                    st.dataframe(style_df, hide_index=True, use_container_width=True)
+
+                    # OOS資産推移チャート
+                    if not oos_eq.empty:
+                        st.markdown("#### 📈 OOS資産推移（最適化 vs 固定パラメータ）")
+                        import plotly.graph_objects as go
+                        fig_opt = go.Figure()
+                        fig_opt.add_trace(go.Scatter(
+                            x=oos_eq.index, y=oos_eq.values,
+                            name="最適化パラメータ",
+                            line=dict(color="#00b4d8", width=2),
+                        ))
+                        if not fixed_eq.empty:
+                            fig_opt.add_trace(go.Scatter(
+                                x=fixed_eq.index, y=fixed_eq.values,
+                                name="固定パラメータ(12m/1銘柄)",
+                                line=dict(color="#aaaaaa", width=2, dash="dot"),
+                            ))
+                        fig_opt.update_layout(
+                            height=420,
+                            margin=dict(l=0, r=0, t=20, b=0),
+                            legend=dict(orientation="h", y=-0.2),
+                            yaxis_title="資産（円）",
+                        )
+                        st.plotly_chart(fig_opt, use_container_width=True)
+
+                    # 最多採用パラメータ
+                    bph = result.get("best_params_history", [])
+                    if bph:
+                        st.markdown("#### 🏆 最多採用パラメータ")
+                        import collections
+                        lb_count = collections.Counter(p["lookback_months"] for p in bph)
+                        tn_count = collections.Counter(p["top_n"] for p in bph)
+                        sk_count = collections.Counter(p["skip_days"] for p in bph)
+                        bc1, bc2, bc3 = st.columns(3)
+                        top_lb = lb_count.most_common(1)[0]
+                        top_tn = tn_count.most_common(1)[0]
+                        top_sk = sk_count.most_common(1)[0]
+                        bc1.metric("lookback_months", f"{top_lb[0]}ヶ月",
+                                   delta=f"{top_lb[1]}/{len(bph)}回採用")
+                        bc2.metric("top_n", f"{top_tn[0]}銘柄",
+                                   delta=f"{top_tn[1]}/{len(bph)}回採用")
+                        bc3.metric("skip_days", f"{top_sk[0]}日",
+                                   delta=f"{top_sk[1]}/{len(bph)}回採用")
+
+                        st.success(
+                            f"推奨パラメータ: lookback={top_lb[0]}ヶ月 / top_n={top_tn[0]}銘柄 / skip={top_sk[0]}日 — "
+                            "マルチアセットタブでこの値を試してください。"
+                        )
 
 
 # ─── ポートフォリオ最適化 ─────────────────────────────────────────────────────
