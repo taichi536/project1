@@ -2318,6 +2318,58 @@ elif page == "🔬 バックテスト":
 
                 st.info("💡 税金（最大55%）を考慮すると、取引回数が少ない戦略ほど実質リターンが高くなります。")
 
+        st.divider()
+        st.markdown("### 💱 FX 戦略比較バックテスト")
+        st.caption("USD/JPY等で買い持ち・MAフィルター・RSI逆張り・MACDクロスを比較します。税率20%（申告分離課税）。")
+
+        fx1, fx2, fx3 = st.columns(3)
+        fx_pair = fx1.selectbox("通貨ペア", ["USDJPY=X", "EURJPY=X", "GBPJPY=X"], key="fx_pair")
+        fx_period = fx2.selectbox("期間", ["3y", "5y", "10y", "カスタム"], index=1, key="fx_period")
+        fx_cash = fx3.number_input("初期資金（円）", value=1_000_000, step=100_000, key="fx_cash")
+
+        fx_start = None
+        fx_end = None
+        if fx_period == "カスタム":
+            fc1, fc2 = st.columns(2)
+            fx_start = fc1.text_input("開始日", value="2019-01-01", key="fx_start")
+            fx_end = fc2.text_input("終了日", value="2024-12-31", key="fx_end")
+
+        if st.button("▶ FXバックテスト実行", key="run_fx_bt"):
+            from modules.backtest import run_fx_backtest
+            with st.spinner("バックテスト実行中..."):
+                fx_result = run_fx_backtest(
+                    initial_cash=fx_cash,
+                    pair=fx_pair,
+                    period=fx_period if fx_period != "カスタム" else "10y",
+                    start_date=fx_start,
+                    end_date=fx_end,
+                )
+
+            if "error" in fx_result:
+                st.error(fx_result["error"])
+            else:
+                st.markdown("#### 📊 戦略比較")
+                m_df = fx_result["metrics"].copy()
+                m_df["総リターン(%)"] = m_df["総リターン(%)"].apply(lambda x: f"{x:+.1f}%")
+                m_df["最大ドローダウン(%)"] = m_df["最大ドローダウン(%)"].apply(lambda x: f"{x:.1f}%")
+                m_df["シャープレシオ"] = m_df["シャープレシオ"].apply(lambda x: f"{x:.2f}")
+                st.dataframe(m_df, hide_index=True, use_container_width=True)
+
+                st.markdown("#### 📈 資産推移（円）")
+                import plotly.graph_objects as go
+                pf = fx_result["portfolio"].reset_index()
+                fig2 = go.Figure()
+                colors = ["#aaaaaa", "#00b4d8", "#f77f00", "#06d6a0"]
+                for i, col in enumerate([c for c in pf.columns if c not in ("index", "Date", "Datetime")]):
+                    fig2.add_trace(go.Scatter(
+                        x=pf.iloc[:, 0], y=pf[col], name=col,
+                        line=dict(color=colors[i % len(colors)], width=2)
+                    ))
+                fig2.update_layout(height=380, margin=dict(l=0, r=0, t=20, b=0),
+                                   legend=dict(orientation="h", y=-0.2))
+                st.plotly_chart(fig2, use_container_width=True)
+                st.info("💡 FXは税率20%（申告分離課税）で暗号資産より有利。レバレッジなし想定。")
+
 
 # ─── ポートフォリオ最適化 ─────────────────────────────────────────────────────
 elif page == "📐 ポートフォリオ":

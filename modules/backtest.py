@@ -1178,3 +1178,139 @@ def run_crypto_backtest(
         "portfolio": portfolio_df,
         "metrics": result_df,
     }
+
+
+def run_fx_backtest(
+    initial_cash: float = 1_000_000,
+    pair: str = "USDJPY=X",
+    period: str = "5y",
+    start_date: str = None,
+    end_date: str = None,
+) -> dict:
+    """FX戦略バックテスト比較
+
+    戦略:
+    1. 買い持ち（ドル買い円売り）
+    2. 200日MAフィルター（トレンドフォロー）
+    3. RSI逆張り（20/80閾値）
+    4. MACD クロス
+    """
+    import yfinance as yf
+
+    try:
+        if start_date and end_date:
+            df = yf.download(pair, start=start_date, end=end_date,
+                             interval="1d", auto_adjust=True, progress=False)
+        else:
+            df = yf.download(pair, period=period, interval="1d",
+                             auto_adjust=True, progress=False)
+        if df is None or df.empty:
+            return {"error": "データ取得失敗"}
+        close = df["Close"].squeeze().dropna()
+    except Exception as e:
+        return {"error": str(e)}
+
+    results = {}
+
+    # ── 戦略1: 買い持ち
+    bh_units = initial_cash / float(close.iloc[0])
+    results["買い持ち（円→ドル）"] = close * bh_units
+
+    # ── RSI計算
+    def calc_rsi(s, period=14):
+        delta = s.diff()
+        gain = delta.clip(lower=0).rolling(period).mean()
+        loss = (-delta.clip(upper=0)).rolling(period).mean()
+        rs = gain / loss.replace(0, np.nan)
+        return 100 - 100 / (1 + rs)
+
+    # ── MACD計算
+    def calc_macd_hist(s):
+        ema12 = s.ewm(span=12, adjust=False).mean()
+        ema26 = s.ewm(span=26, adjust=False).mean()
+        macd = ema12 - ema26
+        signal = macd.ewm(span=9, adjust=False).mean()
+        return macd - signal
+
+    ma200 = close.rolling(200).mean()
+    rsi = calc_rsi(close)
+    hist = calc_macd_hist(close)
+
+    fee = 0.0002  # スプレッド0.02%（ドル円 0.2銭想定）
+
+    def simulate(signal_series):
+        cash = initial_cash
+        units = 0.0
+        vals = []
+        for i in range(len(close)):
+            price = float(close.iloc[i])
+            sig = signal_series.iloc[i]
+            if sig == 1 and units == 0 and cash > 0:
+                units = cash * (1 - fee) / price
+                cash = 0.0
+            elif sig == -1 and units > 0:
+                cash = units * price * (1 - fee)
+                units = 0.0
+            vals.append(cash + units * price)
+        return pd.Series(vals, index=close.index)
+
+    # ── 戦略2: 200日MAフィルター
+    ma_signal = pd.Series(0, index=close.index)
+    for i in range(1, len(close)):
+        if pd.isna(ma200.iloc[i]):
+            continue
+        if close.iloc[i] > ma200.iloc[i] and (i == 0 or close.iloc[i-1] <= ma200.iloc[i-1]):
+            ma_signal.iloc[i] = 1
+        elif close.iloc[i] < ma200.iloc[i] and (i == 0 or close.iloc[i-1] >= ma200.iloc[i-1]):
+            ma_signal.iloc[i] = -1
+    results["200日MAトレンドフォロー"] = simulate(ma_signal)
+
+    # ── 戦略3: RSI逆張り（30/70）
+    rsi_signal = pd.Series(0, index=close.index)
+    for i in range(1, len(close)):
+        if pd.isna(rsi.iloc[i]):
+            continue
+        if rsi.iloc[i] < 30 and rsi.iloc[i-1] >= 30:
+            rsi_signal.iloc[i] = 1
+        elif rsi.iloc[i] > 70 and rsi.iloc[i-1] <= 70:
+            rsi_signal.iloc[i] = -1
+    results["RSI逆張り(30/70)"] = simulate(rsi_signal)
+
+    # ── 戦略4: MACDクロス
+    macd_signal = pd.Series(0, index=close.index)
+    for i in range(1, len(close)):
+        if pd.isna(hist.iloc[i]):
+            continue
+        if hist.iloc[i] > 0 and hist.iloc[i-1] <= 0:
+            macd_signal.iloc[i] = 1
+        elif hist.iloc[i] < 0 and hist.iloc[i-1] >= 0:
+            macd_signal.iloc[i] = -1
+    results["MACDクロス"] = simulate(macd_signal)
+
+    # ── 指標計算
+    metrics = {}
+    for name, series in results.items():
+        series = series.dropna()
+        if len(series) < 2:
+            continue
+        total_ret = (series.iloc[-1] / series.iloc[0] - 1) * 100
+        daily_ret = series.pct_change().dropna()
+        sharpe = (daily_ret.mean() / daily_ret.std() * (252 ** 0.5)) if daily_ret.std() > 0 else 0
+        rolling_max = series.cummax()
+        max_dd = ((series - rolling_max) / rolling_max * 100).min()
+        metrics[name] = {
+            "総リターン(%)": round(total_ret, 1),
+            "最大ドローダウン(%)": round(max_dd, 1),
+            "シャープレシオ": round(sharpe, 2),
+        }
+
+    result_df = pd.DataFrame(metrics).T.reset_index().rename(columns={"index": "戦略"})
+    portfolio_df = pd.DataFrame(
+        {k: v / v.iloc[0] * initial_cash for k, v in results.items()}
+    )
+
+    return {
+        "portfolio": portfolio_df,
+        "metrics": result_df,
+        "pair": pair,
+    }
