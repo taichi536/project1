@@ -1680,8 +1680,13 @@ async function renderApprovalQueue() {
     ).join('');
     // プルダウンは幅の都合で長いポジション名が省略されて見えなくなることがあるため、
     // 選択中のポジション名を上に全文表示する（プルダウンを変更すると更新される）
+    //
+    // 通常の<a target="_blank">はタブがアクティブになった瞬間にポップアップが自動的に
+    // 閉じてしまい、承認待ちリストの続きを見失う原因になっていた。バックグラウンドタブ
+    // として開く(chrome.tabs.create({active:false}))ことで、ポップアップを開いたまま
+    // 確認できるようにする
     const roomLinkHtml = row.room_url
-      ? `<a class="approval-card-room-link" href="${escapeHtml(row.room_url)}" target="_blank" rel="noopener">🔗 検討中リストを開く（本人を探して確認）</a>`
+      ? `<button type="button" class="approval-card-room-link" data-room-url="${escapeHtml(row.room_url)}">🔗 検討中リストを開く（本人を探して確認）</button>`
       : '';
     return `<div class="approval-card" data-id="${row.id}">
       <div class="approval-card-top">
@@ -1706,6 +1711,12 @@ async function renderApprovalQueue() {
     select.addEventListener('change', () => {
       positionLabel.textContent = `送信ポジション: ${select.value || '（未設定）'}`;
     });
+    const roomLinkBtn = card.querySelector('.approval-card-room-link');
+    if (roomLinkBtn) {
+      roomLinkBtn.addEventListener('click', () => {
+        chrome.tabs.create({ url: roomLinkBtn.dataset.roomUrl, active: false });
+      });
+    }
     card.querySelector('[data-action="approve"]').addEventListener('click', async (e) => {
       const btn = e.currentTarget;
       btn.disabled = true;
