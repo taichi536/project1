@@ -1091,6 +1091,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
       position: positionName || r2.currentPosition || '',
       industry,
       ts: now,
+      candidateId, // 記録が空欄になった場合にGAS側から自動修復するための紐付けキー
     };
     console.log('[Snow-we] GAS送信payload:', JSON.stringify({ recruiter: payload.recruiter, position: payload.position, industry: payload.industry, media: payload.media, ts: payload.ts, age: payload.age, company: payload.company, univ: payload.univ }));
     let sent = false;

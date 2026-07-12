@@ -287,6 +287,7 @@ function doPost(e) {
           missing: String(r[3] || ''),
           sheet: String(r[4] || ''),
           ackd: !!r[6],
+          candidateId: String(r[7] || ''),
         }))
         .filter(a => !a.ackd)
         .sort((a, b) => b.ts - a.ts);
@@ -306,6 +307,48 @@ function doPost(e) {
         }
       }
       return json({ ok: true });
+    }
+
+    // ── 記録不備の自動修復：拡張機能側がローカルに持っている正しい値で
+    // スカウト管理DBの空欄セルだけを埋める（既に値がある列は上書きしない）──
+    if (data.action === 'fixField') {
+      const candidateId = data.candidateId || '';
+      if (!candidateId) return json({ ok: false, error: 'no_candidate_id' });
+      const dbSheet = ss.getSheetByName(SHEET_DB);
+      if (!dbSheet) return json({ ok: false, error: 'no_db_sheet' });
+
+      const lock = LockService.getScriptLock();
+      lock.waitLock(15000);
+      try {
+        const rows = dbSheet.getDataRange().getValues();
+        let targetRow = -1;
+        for (let i = rows.length - 1; i >= 1; i--) {
+          if (String(rows[i][11] || '') === candidateId) { targetRow = i + 1; break; }
+        }
+        if (targetRow === -1) return json({ ok: false, error: 'row_not_found' });
+
+        const rowVals = rows[targetRow - 1];
+        const fields = data.fields || {};
+        let fixed = false;
+        if (fields.recruiter && !rowVals[1]) { dbSheet.getRange(targetRow, 2).setValue(fields.recruiter); fixed = true; }
+        if (fields.company && !rowVals[3])   { dbSheet.getRange(targetRow, 4).setValue(fields.company);   fixed = true; }
+        if (fields.position && !rowVals[5])  { dbSheet.getRange(targetRow, 6).setValue(fields.position);  fixed = true; }
+        if (!fixed) return json({ ok: false, error: 'nothing_to_fix' });
+
+        // 修復できた分は記録エラーログ側も確認済みにする
+        const anSheet = ss.getSheetByName(SHEET_ANOMALY);
+        if (anSheet) {
+          const anRows = anSheet.getDataRange().getValues();
+          for (let i = 1; i < anRows.length; i++) {
+            if (String(anRows[i][7] || '') === candidateId && !anRows[i][6]) {
+              anSheet.getRange(i + 1, 7).setValue(new Date());
+            }
+          }
+        }
+        return json({ ok: true, row: targetRow });
+      } finally {
+        lock.releaseLock();
+      }
     }
 
     // ── スカウト記録 ──
@@ -343,13 +386,18 @@ function recordScout(ss, data) {
     let dbSheet = ss.getSheetByName(SHEET_DB);
     if (!dbSheet) {
       dbSheet = ss.insertSheet(SHEET_DB);
-      const headers = ['送信日時', '担当者', '年齢', '会社名', '大学', 'ポジション名', '媒体', 'ステータス', '返信日', '面談日', 'メモ'];
+      const headers = ['送信日時', '担当者', '年齢', '会社名', '大学', 'ポジション名', '媒体', 'ステータス', '返信日', '面談日', 'メモ', '候補者ID'];
       dbSheet.getRange(1, 1, 1, headers.length).setValues([headers])
         .setBackground('#4338CA').setFontColor('#ffffff').setFontWeight('bold');
       dbSheet.setFrozenRows(1);
     }
+    // 既存シート（候補者ID列がまだ無い）にも後付けでヘッダーを補う
+    if (!dbSheet.getRange(1, 12).getValue()) {
+      dbSheet.getRange(1, 12).setValue('候補者ID')
+        .setBackground('#4338CA').setFontColor('#ffffff').setFontWeight('bold');
+    }
     dbSheet.appendRow([ts, data.recruiter || '', ageVal, data.company || '',
-      data.univ || '', data.position || '', media, '未返信', '', '', '']);
+      data.univ || '', data.position || '', media, '未返信', '', '', '', data.candidateId || '']);
     const lastRow = dbSheet.getLastRow();
     // DB送信日時も日時フォーマットに設定
     dbSheet.getRange(lastRow, 1).setNumberFormat('yyyy/MM/dd HH:mm');
@@ -393,6 +441,7 @@ function verifyAndAlertMissingFields(dbSheet, row, data) {
     logAnomaly(dbSheet.getParent(), {
       recruiter: data.recruiter, company: data.company,
       missing: problems.join('、'), sheet: SHEET_DB, row,
+      candidateId: data.candidateId || '',
     });
   } catch (err) {
     Logger.log('verifyAndAlertMissingFields エラー: ' + err.message);
@@ -400,17 +449,19 @@ function verifyAndAlertMissingFields(dbSheet, row, data) {
 }
 
 // ── 記録不備ログ：Slackのようなプッシュ通知は使わず、拡張機能側が
-// 開いたタイミング（popup表示時）で拾いに来る「記録エラーログ」シートに残す ──
+// 開いたタイミング（popup表示時）で拾いに来る「記録エラーログ」シートに残す。
+// candidateIdを一緒に残しておくことで、拡張機能側がローカルに保持している
+// 正しい値を使って自動修復（fixField）できるようにしている。
 function logAnomaly(ss, info) {
   try {
     let sheet = ss.getSheetByName(SHEET_ANOMALY);
     if (!sheet) {
       sheet = ss.insertSheet(SHEET_ANOMALY);
-      sheet.getRange(1, 1, 1, 7).setValues([['検出日時', '担当者', '会社名', '欠落項目', 'シート', '行', '確認済み']])
+      sheet.getRange(1, 1, 1, 8).setValues([['検出日時', '担当者', '会社名', '欠落項目', 'シート', '行', '確認済み', '候補者ID']])
         .setBackground('#DC2626').setFontColor('#ffffff').setFontWeight('bold');
       sheet.setFrozenRows(1);
     }
-    sheet.appendRow([new Date(), info.recruiter || '', info.company || '', info.missing || '', info.sheet || '', info.row || '', '']);
+    sheet.appendRow([new Date(), info.recruiter || '', info.company || '', info.missing || '', info.sheet || '', info.row || '', '', info.candidateId || '']);
   } catch (_) {}
 }
 
@@ -424,6 +475,7 @@ function writeToDailySheet(ss, data, ts, media, ageVal, industry) {
     logAnomaly(ss, {
       recruiter, company: data.company,
       missing: '日付シート記録スキップ(担当者未登録)', sheet: SHEET_TEMPLATE, row: '',
+      candidateId: data.candidateId || '',
     });
     return;
   }

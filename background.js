@@ -145,16 +145,91 @@ chrome.alarms.get('snowWeUpdateCheck', (existing) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'snowWeUpdateCheck') checkForUpdate();
   if (alarm.name === 'snowWeAutoRun') startAutoRun();
-  if (alarm.name === 'snowWeAnomalyCheck') checkAnomalies();
+  if (alarm.name === 'snowWeAnomalyCheck') { retryUndeliveredScouts().then(checkAnomalies); }
 });
 
-// ── 記録不備チェック（担当者・会社名・ポジション名が空欄で記録された件のGAS検出結果を拾う）──
-// Slack通知は使わず、拡張機能アイコンのバッジで静かに知らせる方式にしている
+// ── 記録不備の自動リカバリ ──────────────────────────────────────────────
+// 検知して終わりにせず、可能な限りその場で自動的に直す。
+// ①GASに一度も届かなかった送信 → バックグラウンドで自動リトライ（成功するまで）
+// ②GASには届いたが必須項目が空欄で記録された送信 → ローカルの正しい値でGAS側の
+//   空欄セルだけを自動で埋める（fixField）
+// どちらも直せなかった分だけが、popupのバナー/バッジで人の確認を求める形になる。
 chrome.alarms.get('snowWeAnomalyCheck', (existing) => {
   if (!existing) {
     chrome.alarms.create('snowWeAnomalyCheck', { delayInMinutes: 1, periodInMinutes: 15 });
   }
 });
+
+// ① GAS未送信（通信失敗でリトライも尽きた）分を、ローカルに残っている正しい値で
+// バックグラウンドから自動的に再送信する。成功するまで15分おきに繰り返す。
+async function retryUndeliveredScouts() {
+  try {
+    const { gasSettings, scoutHistory } = await chrome.storage.local.get(['gasSettings', 'scoutHistory']);
+    const url = gasSettings?.url || gasSettings?.dbUrl;
+    const recruiter = gasSettings?.recruiter;
+    if (!url || !recruiter) return;
+    const secret = gasSettings?.secret || 'snowwe2024';
+    const history = scoutHistory || {};
+    let changed = false;
+
+    for (const [candidateId, h] of Object.entries(history)) {
+      if (h.gasSent !== false) continue;
+      if ((h.retryCount || 0) >= 8) continue; // 8回（約2時間）失敗し続けたら諦めて人の確認に回す
+      const payload = {
+        secret, recruiter, candidateId,
+        company: h.company || '', age: String(h.age || '').replace(/[歳才]/, ''),
+        univ: h.univ || '', media: h.platform || '', position: h.position || '',
+        industry: h.industry || '', ts: h.date,
+      };
+      try {
+        const res = await fetch(url, { method: 'POST', body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (data.ok !== false) {
+          history[candidateId] = { ...h, gasSent: true };
+          console.log('[Snow-we] 未送信スカウトを自動リトライで記録完了:', candidateId);
+        } else {
+          history[candidateId] = { ...h, retryCount: (h.retryCount || 0) + 1 };
+        }
+      } catch (_) {
+        history[candidateId] = { ...h, retryCount: (h.retryCount || 0) + 1 };
+      }
+      changed = true;
+    }
+    if (changed) await chrome.storage.local.set({ scoutHistory: history });
+  } catch (_) {
+    // 次の定期実行で再試行
+  }
+}
+
+// ② GAS側が検知した「空欄で記録された」件について、ローカルにある正しい値で
+// GAS側の空欄セルを自動で埋める（fixField）。ローカルに対応データが無い、
+// または部分的にしか直せない場合だけ、人の確認が必要な残件として返す。
+async function autoRepairAnomalies(url, secret, serverAnomalies, scoutHistory) {
+  const remaining = [];
+  const { gasSettings } = await chrome.storage.local.get(['gasSettings']);
+  for (const a of serverAnomalies) {
+    const h = a.candidateId ? (scoutHistory || {})[a.candidateId] : null;
+    const fields = {};
+    if (h) {
+      if (a.missing.includes('担当者') && gasSettings?.recruiter) fields.recruiter = gasSettings.recruiter;
+      if (a.missing.includes('会社名') && h.company) fields.company = h.company;
+      if (a.missing.includes('ポジション名') && h.position) fields.position = h.position;
+    }
+    if (!a.candidateId || Object.keys(fields).length === 0) { remaining.push(a); continue; }
+    try {
+      const res = await fetch(url, { method: 'POST', body: JSON.stringify({ secret, action: 'fixField', candidateId: a.candidateId, fields }) });
+      const data = await res.json();
+      if (data.ok) {
+        console.log('[Snow-we] 記録不備を自動修復:', a.candidateId, fields);
+      } else {
+        remaining.push(a);
+      }
+    } catch (_) {
+      remaining.push(a);
+    }
+  }
+  return remaining;
+}
 
 async function checkAnomalies() {
   try {
@@ -162,7 +237,7 @@ async function checkAnomalies() {
     const url = gasSettings?.url || gasSettings?.dbUrl;
     const secret = gasSettings?.secret || 'snowwe2024';
 
-    // ① GAS側で検知した「届いたが必須項目が空欄だった」ケース
+    // ① GAS側で検知した「届いたが必須項目が空欄だった」ケース → 自動修復を試みる
     let serverAnomalies = [];
     if (url) {
       try {
@@ -172,15 +247,16 @@ async function checkAnomalies() {
       } catch (_) {
         // ネットワーク不可時は無視（次の定期チェックで再試行）
       }
+      if (serverAnomalies.length > 0) {
+        serverAnomalies = await autoRepairAnomalies(url, secret, serverAnomalies, scoutHistory);
+      }
     }
 
-    // ② クライアント側で「GASに一度も届かなかった」ケース（通信失敗でリトライも失敗）
-    // GAS側の記録エラーログは「届いたが空欄だった」ケースしか検知できないため、
-    // こちらはローカルの送信履歴(scoutHistory)を見て別枠で拾う
+    // ② クライアント側で「GASに一度も届かなかった」ケース（自動リトライがまだ成功していないもの）
     const tenMinAgo = Date.now() - 10 * 60 * 1000;
     const undelivered = Object.values(scoutHistory || {})
-      .filter(h => h.gasSent === false && h.date && h.date < tenMinAgo)
-      .map(h => ({ ts: h.date, recruiter: '', company: h.company || '', missing: 'GAS未送信(通信失敗)', sheet: '' }));
+      .filter(h => h.gasSent === false && h.date && h.date < tenMinAgo && (h.retryCount || 0) >= 8)
+      .map(h => ({ ts: h.date, recruiter: '', company: h.company || '', missing: 'GAS未送信(自動リトライ失敗)', sheet: '' }));
 
     const anomalies = [...serverAnomalies, ...undelivered].sort((a, b) => b.ts - a.ts);
     await chrome.storage.local.set({ recordAnomalies: { items: anomalies, checkedAt: Date.now() } });
