@@ -5700,6 +5700,16 @@ function extractProfile() {
 // -------------------------------------------------------
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // async処理を含むハンドラはIIFEでラップ
+  // 承認待ちポップアップから、同じスカウトルーム（room_url）を既に開いているタブが
+  // あった場合に、新しいタブを増やさずそのタブへ直接メッセージで探索を依頼するために使う
+  // （URLのhash書き換えだけではSPAの同一ページ内遷移になり、ページロードが発生せず
+  // content.js側のトリガーが再実行されないため、メッセージ経由で直接呼び出す）
+  if (request.action === 'snowweFindCandidate') {
+    if (getPlatform() === 'rds' && request.params?.company) {
+      snowweFindAndHighlightCandidate(request.params);
+    }
+    return false;
+  }
   if (request.action === 'getBatchCandidates') {
     (async () => {
       try {

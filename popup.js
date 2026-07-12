@@ -1727,11 +1727,29 @@ async function renderApprovalQueue() {
     });
     const roomLinkBtn = card.querySelector('.approval-card-room-link');
     if (roomLinkBtn) {
-      roomLinkBtn.addEventListener('click', () => {
+      roomLinkBtn.addEventListener('click', async () => {
+        const roomUrl = roomLinkBtn.dataset.roomUrl;
         const find = roomLinkBtn.dataset.find || '';
-        const url = find
-          ? `${roomLinkBtn.dataset.roomUrl}#snowweFind=${encodeURIComponent(find)}`
-          : roomLinkBtn.dataset.roomUrl;
+        // 同じスカウトルーム（room_url）に複数の候補者がいる場合、毎回新しいタブを開くと
+        // タブが際限なく増えてしまう。既に同じroom_urlのタブが開いていれば、それを使い回して
+        // メッセージ経由で該当候補者の自動探索だけをやり直す（新規タブは作らない）
+        let existing;
+        try {
+          const tabs = await chrome.tabs.query({});
+          existing = tabs.find((t) => t.url && t.url.split('#')[0] === roomUrl);
+        } catch (_) {}
+        if (existing) {
+          // ここでactive:trueにしてしまうと、PR #18で対策したのと同じ理由
+          // （タブがアクティブになった瞬間にポップアップが自動的に閉じる）で
+          // 承認待ちリストの続きを見失う事故が再発するため、既存タブもactive:falseのままにする
+          if (find) {
+            chrome.tabs.sendMessage(existing.id, { action: 'snowweFindCandidate', params: JSON.parse(find) }, () => {
+              void chrome.runtime.lastError; // 応答が無くても無視（ページ未読み込み等）
+            });
+          }
+          return;
+        }
+        const url = find ? `${roomUrl}#snowweFind=${encodeURIComponent(find)}` : roomUrl;
         chrome.tabs.create({ url, active: false });
       });
     }
