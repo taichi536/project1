@@ -326,9 +326,43 @@ function recordScout(ss, data) {
     // ポジション名列にドロップダウン設定
     applyPositionDropdown(ss, dbSheet, lastRow, 6);
 
+    // ── 書き込み確認：原因を問わず「入るはずの値が実際に空欄で書き込まれた」ケースを
+    // その場で検出し、行を黄色くハイライト＋Slackで即通知する。
+    // クライアント側の非同期レース・GAS側の書き込み漏れ等、原因が何であっても
+    // ここで一元的に検知できるようにし、後から手動でスプレッドシートを見て気づく
+    // （＝気づかず放置される）事態を防ぐための安全網。
+    verifyAndAlertMissingFields(dbSheet, lastRow, data);
+
     return { sheet: SHEET_DB, row: lastRow };
   } finally {
     lock.releaseLock();
+  }
+}
+
+// ── 記録直後の自己検証：本来値が入るはずの必須列が空欄なら即Slack通知 ──
+function verifyAndAlertMissingFields(dbSheet, row, data) {
+  try {
+    const written = dbSheet.getRange(row, 1, 1, 7).getValues()[0]; // 送信日時,担当者,年齢,会社名,大学,ポジション名,媒体
+    const problems = [];
+    if (!written[1]) problems.push('担当者');
+    if (!written[3]) problems.push('会社名');
+    if (!written[5]) problems.push('ポジション名');
+    if (problems.length === 0) return;
+
+    dbSheet.getRange(row, 1, 1, 11).setBackground('#FEF3C7'); // 薄黄色でハイライト
+    const noteCell = dbSheet.getRange(row, 11);
+    const prevNote = String(noteCell.getValue() || '');
+    noteCell.setValue((prevNote ? prevNote + ' / ' : '') + '⚠️自動記録時に空欄検出: ' + problems.join('、'));
+
+    postToSlack(
+      '⚠️ *スカウト記録に不備*\n' +
+      problems.join('、') + ' が空欄で記録されました（' + SHEET_DB + ' ' + row + '行目）\n' +
+      '担当者: ' + (data.recruiter || '（空）') + '\n' +
+      '会社名: ' + (data.company || '（空）') + '\n' +
+      '媒体: ' + (MEDIA_LABEL[data.media] || data.media || '（空）')
+    );
+  } catch (err) {
+    Logger.log('verifyAndAlertMissingFields エラー: ' + err.message);
   }
 }
 
@@ -338,6 +372,15 @@ function writeToDailySheet(ss, data, ts, media, ageVal, industry) {
   const startCol  = findMemberCol(recruiter);
   if (!startCol) {
     Logger.log('メンバー未登録: "' + recruiter + '" / 登録済み: ' + Object.keys(MEMBER_MAP).join(', '));
+    // ログだけだと誰も気づけないため、日付シートへの記録が丸ごとスキップされたことを即通知する
+    try {
+      postToSlack(
+        '⚠️ *日付シートへの記録スキップ*\n' +
+        '担当者「' + (recruiter || '（空欄）') + '」がメンバー一覧に見つからず、日付別シートへの記録をスキップしました。\n' +
+        '（スカウト管理DBへの記録は別途行われています）\n' +
+        '会社名: ' + (data.company || '（空）')
+      );
+    } catch (_) {}
     return;
   }
 
