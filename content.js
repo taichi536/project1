@@ -168,235 +168,10 @@ async function updateScoutQueueStatus(candidateId, platform, patch) {
   }
 }
 
-// スカウト送信フローのボタン判定（document.addEventListener('click', ...)の
-// 観測側と全く同じ文言判定を共有する。ここで実際にクリックした場合も同じ観測側リスナーが
-// 反応してpendingScout保存・ポジション照合・recordScoutSent（GAS/Supabase記録）まで
-// 従来通り自動で行われるため、記録処理をここで重複実装する必要はない）
-const isScoutTriggerText   = t => t === 'スカウト' || t.includes('スカウトを送る') || t.includes('スカウトする') || t.includes('スカウトを作成');
-const isTemplateConfirmText = t => t === '確定';
-const isConfirmStepText     = t => t === '確認';
-const isSendStepText        = t => t === '送信' || t === '送信する';
-
-// テンプレート名・ポジション名を比較用に正規化する（AC）/BC(等の部門プレフィックス、
-// 全角括弧・ダッシュの表記ゆれを吸収する。既存の確定ボタン観測ロジックと同じ正規化方針）
-function normalizePositionForMatch(s) {
-  return String(s || '')
-    .replace(/^[A-Za-z]+[）)]\s*/u, '')
-    .replace(/[（]/g, '(').replace(/[）]/g, ')')
-    .replace(/　/g, ' ').replace(/\s*[-－–—]\s*/g, '-')
-    .trim().toLowerCase();
-}
-
-// テンプレート名から比較用の「核」となる文字列を取り出す（AC）/BC(等のプレフィックスと
-// 末尾の部門コードを除いた中心部分。RDSのテンプレート一覧の検索窓はこの部分での
-// 部分一致検索に強いため、ここで絞り込んでから該当行を探す）
-function extractPositionCore(position) {
-  return normalizePositionForMatch(position)
-    .replace(/\s*-[a-z]{2,10}$/i, '') // 末尾の "-tec" "-bus" 等の部門コードを除去
-    .trim();
-}
-
-// 一覧（現在DOM上にあるラジオ行）から、指定ポジション名に一致する行を探してクリックする
-function findAndClickMatchingRadio(position) {
-  const radios = Array.from(document.querySelectorAll('input[type="radio"]'));
-  if (radios.length === 0) return 'no_radios';
-  const normTarget = normalizePositionForMatch(position);
-  const rowTexts = [];
-  for (const radio of radios) {
-    const row = radio.closest('tr, [role="row"]') || radio.closest('li, [class*="row"], [class*="item"]');
-    if (!row) continue;
-    let rowText = '';
-    for (const cell of row.querySelectorAll('td, [role="cell"], div, span, p')) {
-      if (cell.querySelector('input, button')) continue;
-      const t = (cell.textContent || '').trim();
-      if (t.length > 3 && t.length < 120) { rowText = t; break; }
-    }
-    if (!rowText) continue;
-    rowTexts.push(rowText);
-    if (normalizePositionForMatch(rowText) === normTarget) {
-      if (!radio.checked) radio.click();
-      console.log('[Snow-we][自動送信] テンプレート選択:', rowText);
-      return true;
-    }
-  }
-  console.warn('[Snow-we][自動送信] テンプレート一覧に一致する行が見当たりません。候補行:', rowTexts.slice(0, 20));
-  return false;
-}
-
-// RDS等のテンプレート選択モーダル（ラジオボタン一覧）から、指定ポジション名に一致する
-// 行を探してクリックする。一致する行が見つからない場合は誤送信を避けるためfalseを返す
-// （呼び出し側は「確定」に進まず中断する）
-async function selectTemplateRadioForPosition(position) {
-  if (!position) return false;
-
-  // モーダル自体が現れるまで待つ（テンプレート名検索欄、またはモーダルの見出しを目印にする。
-  // 自動クリックでは手動操作時より表示が遅れることがあるため長めに待つ）
-  const deadline1 = Date.now() + 15000;
-  let searchInput = null;
-  let modalSeen = false;
-  while (Date.now() < deadline1) {
-    searchInput = document.querySelector('input[placeholder="テンプレート名を入力する"]');
-    if (searchInput) break;
-    if (!modalSeen) {
-      const heading = Array.from(document.querySelectorAll('h1,h2,h3,div,span'))
-        .find(el => (el.innerText || '').trim() === 'スカウトテンプレート選択');
-      if (heading) { modalSeen = true; console.log('[Snow-we][自動送信] モーダルの見出しは検出（検索欄はまだ）'); }
-    }
-    await sleep(300);
-  }
-  if (!searchInput) {
-    console.warn(`[Snow-we][自動送信] テンプレート選択モーダルが現れませんでした（見出し検出:${modalSeen}）:`, position);
-    return false;
-  }
-
-  // 「設定画面で登録したテンプレート」タブがあれば切り替える（マスタ一覧のポジション名と
-  // 対応するのはこちらのタブのため）
-  const masterTab = Array.from(document.querySelectorAll('button, [role="tab"], a, li'))
-    .find(el => (el.innerText || '').trim() === '設定画面で登録したテンプレート');
-  if (masterTab) { masterTab.click(); await sleep(500); }
-
-  // 94件全部をスクロールして探すのではなく、検索窓にポジション名の核部分を入力して絞り込む
-  const core = extractPositionCore(position);
-  if (core.length >= 4 && searchInput) {
-    searchInput.focus();
-    searchInput.value = core;
-    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-    searchInput.dispatchEvent(new Event('change', { bubbles: true }));
-    await sleep(200);
-    const searchBtn = Array.from(document.querySelectorAll('button')).find(b => (b.innerText || '').trim() === '検索');
-    if (searchBtn) { searchBtn.click(); await sleep(800); }
-  }
-
-  // 検索結果（絞り込み後）のラジオ一覧から一致行を探す。見つからなければ最大12秒ポーリングする
-  // （絞り込み結果の読み込みに時間がかかる場合に対応）
-  const deadline2 = Date.now() + 12000;
-  while (Date.now() < deadline2) {
-    const result = findAndClickMatchingRadio(position);
-    if (result === true) { await sleep(300); return true; }
-    if (result === 'no_radios') { await sleep(300); continue; }
-    // 一致なし（ラジオはあるが該当行がない）→ これ以上待っても変わらないため打ち切り
-    return false;
-  }
-  console.warn('[Snow-we][自動送信] テンプレート一覧の読み込みがタイムアウトしました:', position);
-  return false;
-}
-
-// 指定した条件に一致するボタンが現れるまでポーリングする（最大timeoutMs）
-async function waitForButton(matchFn, timeoutMs = 8000, pollMs = 300) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const found = Array.from(document.querySelectorAll('button, a, [role="button"]'))
-      .find(b => { const t = (b.innerText || '').trim(); return t && matchFn(t); });
-    if (found) return found;
-    await sleep(pollMs);
-  }
-  return null;
-}
-
-// 実際にスカウト送信フローをクリックで進める（本文はテンプレ標準文のまま。
-// パーソナライズ生成はしない）。想定外のステップで止まった場合は安全側に倒し、
-// 「送信」ボタンが確実に見つかった場合以外は絶対にクリックしない。
-async function executeAutoScoutSend(item) {
-  const cardEl = item.el;
-  console.log(`[Snow-we][自動送信] 開始 candidateId=${item.candidateId} position=${item.position}`);
-  if (!document.body.contains(cardEl)) {
-    console.warn('[Snow-we][自動送信] カードがDOMから消えているため中断:', item.candidateId);
-    return { ok: false, reason: 'card_detached' };
-  }
-
-  // ① カード内のスカウト作成ボタンをクリック
-  const scoutBtn = Array.from(cardEl.querySelectorAll('button, a, [role="button"]'))
-    .find(b => isScoutTriggerText((b.innerText || '').trim()));
-  if (!scoutBtn) {
-    console.warn('[Snow-we][自動送信] スカウトボタンが見つからないため中断:', item.candidateId);
-    return { ok: false, reason: 'scout_button_not_found' };
-  }
-  scoutBtn.scrollIntoView({ block: 'center' });
-  await sleep(300);
-  console.log(`[Snow-we][自動送信] スカウトボタン詳細: tag=${scoutBtn.tagName} class="${(scoutBtn.className || '').toString().slice(0, 80)}" text="${(scoutBtn.innerText || '').trim()}"`);
-
-  // Reactで作られたUIは単純な.click()だけでは反応しないことがある
-  // （doda-xの星ボタンで実際に必要だったのと同じ理由）。モーダルの兆候が出るまで、
-  // PointerEvent→ネイティブclick→MouseEventシーケンスの順に段階的に試す
-  const opts = { bubbles: true, cancelable: true, view: window };
-  const modalAppeared = () =>
-    !!document.querySelector('input[placeholder="テンプレート名を入力する"]') ||
-    Array.from(document.querySelectorAll('h1,h2,h3,div,span')).some(el => (el.innerText || '').trim() === 'スカウトテンプレート選択');
-
-  try { scoutBtn.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, isPrimary: true })); } catch (_) {}
-  try { scoutBtn.dispatchEvent(new PointerEvent('pointerup',   { ...opts, pointerId: 1, isPrimary: true })); } catch (_) {}
-  scoutBtn.dispatchEvent(new MouseEvent('click', opts));
-  console.log('[Snow-we][自動送信] スカウトボタンをクリックしました(pointer+click)');
-  await sleep(600);
-
-  if (!modalAppeared()) {
-    console.log('[Snow-we][自動送信] モーダルの兆候なし。native .click()で再試行');
-    scoutBtn.click();
-    await sleep(600);
-  }
-  if (!modalAppeared()) {
-    console.log('[Snow-we][自動送信] モーダルの兆候なし。mousedown/mouseupシーケンスで再試行');
-    scoutBtn.dispatchEvent(new MouseEvent('mousedown', opts));
-    scoutBtn.dispatchEvent(new MouseEvent('mouseup',   opts));
-    scoutBtn.dispatchEvent(new MouseEvent('click',     opts));
-    await sleep(600);
-  }
-  console.log('[Snow-we][自動送信] クリック手順完了。モーダル兆候:', modalAppeared());
-
-  // ② テンプレート選択モーダルで、承認パネルで確定したポジションのラジオボタンを選択する。
-  // これをしないと「その時点でたまたま選ばれていたテンプレート」のまま送信されてしまい、
-  // 承認パネルでのポジション確認・修正が実際の送信内容に反映されない
-  const templateSelected = await selectTemplateRadioForPosition(item.position);
-  if (!templateSelected) {
-    console.warn('[Snow-we][自動送信] 対象ポジションのテンプレートを選択できず中断（誤ったポジションで送信するのを避けるため）:', item.candidateId, item.position);
-    return { ok: false, reason: 'template_radio_not_found' };
-  }
-
-  // ③④ テンプレート確定〜確認：実際の画面では「求人票を変更しますか？」等、
-  // 「確定」「確認」ラベルの確認ダイアログが複数回連続することがあるため、
-  // 「送信」が現れるまで「確定」「確認」ボタンを繰り返しクリックする。
-  // 無限ループにならないよう最大回数・最大時間で打ち切る
-  const maxSteps = 6;
-  const overallDeadline = Date.now() + 20000;
-  for (let step = 0; step < maxSteps; step++) {
-    if (Date.now() > overallDeadline) {
-      console.warn('[Snow-we][自動送信] 確定/確認ステップが長引きすぎたため中断（送信はしていません）:', item.candidateId);
-      return { ok: false, reason: 'confirm_steps_timeout' };
-    }
-    // 「送信」が既に現れていれば確定/確認ループを抜けて最終ステップへ
-    const alreadySendable = Array.from(document.querySelectorAll('button, a, [role="button"]'))
-      .find(b => { const t = (b.innerText || '').trim(); return t && isSendStepText(t); });
-    if (alreadySendable) break;
-
-    const stepBtn = await waitForButton(t => isTemplateConfirmText(t) || isConfirmStepText(t), 4000);
-    if (!stepBtn) break; // これ以上「確定/確認」が現れない → 送信ボタン待ちへ
-    await sleep(500);
-    const label = (stepBtn.innerText || '').trim();
-    stepBtn.click();
-    console.log(`[Snow-we][自動送信] 「${label}」をクリックしました (${step + 1}回目)`);
-    await sleep(500);
-  }
-
-  // ⑤ 送信（実際にメッセージが送信される最終ステップ）
-  const sendBtn = await waitForButton(isSendStepText);
-  if (!sendBtn) {
-    console.warn('[Snow-we][自動送信] 「送信」ボタンが現れず中断（送信はしていません）:', item.candidateId);
-    return { ok: false, reason: 'send_not_found' };
-  }
-  await sleep(500);
-  sendBtn.click();
-  console.log('[Snow-we][自動送信] 「送信」をクリックしました。候補者ID:', item.candidateId);
-  await sleep(800);
-  return { ok: true };
-}
-
-// 承認パネルで複数件を素早く承認された場合に送信フローが同時に重ならないよう直列化する
-let _autoSendQueue = Promise.resolve();
-function enqueueAutoScoutSend(item) {
-  const run = _autoSendQueue.then(() => executeAutoScoutSend(item));
-  _autoSendQueue = run.catch(() => {});
-  return run;
-}
+// 実際のスカウト送信（スカウトボタン→テンプレート選択→確定→送信）は拡張機能内では
+// 行わない。RDSのReact UIに対する自動クリックが不安定だったため、承認後の送信は
+// 別プロセスのPlaywright RPA（scout_queueのstatus='approved'を拾って送信する）に
+// 委譲している。ここでは承認時にscout_queueのステータスを更新するだけでよい。
 
 // AIが星をつけた候補者を、このページを離れる前にその場でレビューする画面。
 // 別タブ・別ポップアップにせず、候補者カードがまだDOM上にある間に完結させる
@@ -415,7 +190,7 @@ async function showApprovalReviewPanel(items) {
     const overlay = document.createElement('div');
     overlay.id = 'snow-we-approval-panel';
     overlay.style.cssText = `
-      position:fixed;top:0;right:0;bottom:0;width:360px;z-index:2147483647;
+      position:fixed;top:0;right:0;bottom:0;width:420px;z-index:2147483647;
       background:#fff;border-left:1px solid #e2e8f0;box-shadow:-4px 0 20px rgba(0,0,0,0.15);
       font-family:sans-serif;display:flex;flex-direction:column;
     `;
@@ -423,9 +198,30 @@ async function showApprovalReviewPanel(items) {
     header.style.cssText = 'padding:14px 16px;border-bottom:1px solid #e2e8f0;flex-shrink:0;';
     header.innerHTML = `
       <div style="font-size:14px;font-weight:700;color:#1e293b;">✅ 承認待ち（${items.length}件）</div>
-      <div style="font-size:11px;color:#64748b;margin-top:3px;line-height:1.5;">AIが星をつけた候補者です。ポジションを確認・修正し、承認するとテンプレート標準文のままスカウトが自動送信されます（本文のパーソナライズ生成はしません）。</div>
+      <div style="font-size:11px;color:#64748b;margin-top:3px;line-height:1.5;">AIが星をつけた候補者です。ポジションを確認・修正して承認してください（承認後の実際のスカウト送信は別のRPAが行います。この画面では送信されません）。</div>
     `;
     overlay.appendChild(header);
+
+    // 「候補者の詳細プロフィールを開く」を押すと、隠れてしまわないよう承認パネル自体を
+    // 一時的に隠す。この小さな復帰用ボタンで承認パネルに戻れるようにする
+    function showReturnToReviewButton() {
+      const existingReturn = document.getElementById('snow-we-return-to-review');
+      if (existingReturn) existingReturn.remove();
+      const returnBtn = document.createElement('button');
+      returnBtn.id = 'snow-we-return-to-review';
+      returnBtn.textContent = '📋 承認パネルに戻る';
+      returnBtn.style.cssText = `
+        position:fixed;bottom:20px;right:20px;z-index:2147483647;
+        padding:10px 16px;background:#4f46e5;color:#fff;border:none;border-radius:8px;
+        font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.25);
+        font-family:sans-serif;
+      `;
+      returnBtn.addEventListener('click', () => {
+        overlay.style.display = 'flex';
+        returnBtn.remove();
+      });
+      document.body.appendChild(returnBtn);
+    }
 
     const list = document.createElement('div');
     list.style.cssText = 'flex:1;overflow-y:auto;padding:10px;';
@@ -450,29 +246,51 @@ async function showApprovalReviewPanel(items) {
         ${item.reason ? `<div style="font-size:11px;color:#94a3b8;margin-bottom:6px;line-height:1.4;">🤖 ${escapeHtml(item.reason)}</div>` : ''}
       `;
       // 年齢・会社名・大学とAI理由だけではポジション判断の材料として薄いため、
-      // 実際の候補者カード（本来の経歴情報）へその場でスクロール・ハイライトできるようにする
+      // 本来の詳細プロフィール（職務経歴等）を開けるようにする。AI判定時の
+      // getFullProfile()と同じ「カードクリック→詳細パネルでレジュメタブに切り替え」を
+      // 流用する（実績のある処理のため、新たに不安定な自動化を作らずに済む）
       const viewBtn = document.createElement('button');
-      viewBtn.textContent = '🔍 候補者を見る';
+      viewBtn.textContent = '🔍 候補者の詳細プロフィールを開く';
       viewBtn.style.cssText = 'width:100%;padding:6px;margin-bottom:7px;background:#eff6ff;color:#1e40af;border:1px solid #93c5fd;border-radius:6px;font-size:11px;cursor:pointer;';
-      viewBtn.addEventListener('click', () => {
+      viewBtn.addEventListener('click', async () => {
         if (!document.body.contains(item.el)) { alert('候補者のカードがページ上に見つかりません（スクロール等で表示が変わった可能性があります）'); return; }
         item.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        const prevOutline = item.el.style.outline;
-        const prevOffset = item.el.style.outlineOffset;
-        item.el.style.outline = '3px solid #6366f1';
-        item.el.style.outlineOffset = '2px';
-        setTimeout(() => { item.el.style.outline = prevOutline; item.el.style.outlineOffset = prevOffset; }, 3000);
+        if (getPlatform() === 'rds') {
+          // 承認パネルは最前面(最大z-index)固定のため、開いた詳細パネルがその下に
+          // 隠れてしまう。一時的に承認パネルを隠し、「戻る」ボタンで再表示する
+          overlay.style.display = 'none';
+          item.el.click();
+          await sleep(1500);
+          await tryClickRDSResumeTab();
+          showReturnToReviewButton();
+        } else {
+          const prevOutline = item.el.style.outline;
+          const prevOffset = item.el.style.outlineOffset;
+          item.el.style.outline = '3px solid #6366f1';
+          item.el.style.outlineOffset = '2px';
+          setTimeout(() => { item.el.style.outline = prevOutline; item.el.style.outlineOffset = prevOffset; }, 3000);
+        }
       });
       card.appendChild(viewBtn);
+
+      // ドロップダウン自体は幅の都合で長いポジション名が省略されて見えることがあるため、
+      // 現在選択中のポジション名を上に全文表示しておく（選択を変えるたびに更新する）
+      const posLabel = document.createElement('div');
+      posLabel.style.cssText = 'font-size:11px;color:#334155;margin-bottom:4px;line-height:1.4;word-break:break-word;';
+      posLabel.textContent = `送信ポジション: ${item.position || '（未設定）'}`;
+      card.appendChild(posLabel);
 
       const select = document.createElement('select');
       select.style.cssText = 'width:100%;padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-bottom:7px;';
       const posOptions = positions.length > 0 ? positions : (item.position ? [item.position] : []);
       posOptions.forEach(p => {
         const opt = document.createElement('option');
-        opt.value = p; opt.textContent = p;
+        opt.value = p; opt.textContent = p; opt.title = p;
         if (p === item.position) opt.selected = true;
         select.appendChild(opt);
+      });
+      select.addEventListener('change', () => {
+        posLabel.textContent = `送信ポジション: ${select.value || '（未設定）'}`;
       });
       card.appendChild(select);
 
@@ -493,21 +311,14 @@ async function showApprovalReviewPanel(items) {
 
       approveBtn.addEventListener('click', async () => {
         approveBtn.disabled = true; rejectBtn.disabled = true;
-        approveBtn.textContent = '⏳ 送信中...';
+        approveBtn.textContent = '⏳ 承認中...';
         item.position = select.value;
+        // 実際のスカウト送信は拡張機能内では行わない（Playwright RPA側の役割）。
+        // ここでの自動送信クリックはRDSのReact UIに対して不安定だったため廃止し、
+        // 承認はscout_queueのステータス更新のみに専念する。
         await updateScoutQueueStatus(item.candidateId, getPlatform(), { status: 'approved', position: select.value, reviewed_at: new Date().toISOString() });
-        const result = await enqueueAutoScoutSend(item);
-        if (result.ok) {
-          await updateScoutQueueStatus(item.candidateId, getPlatform(), { status: 'sent', sent_at: new Date().toISOString() });
-          finish();
-        } else {
-          await updateScoutQueueStatus(item.candidateId, getPlatform(), { status: 'send_failed', ai_reason: `送信失敗: ${result.reason}` });
-          console.warn('[Snow-we][自動送信] 失敗のため要手動確認:', item.candidateId, result.reason);
-          approveBtn.textContent = '⚠️ 送信失敗（手動確認要）';
-          approveBtn.style.background = '#fef3c7';
-          approveBtn.style.color = '#92400e';
-          approveBtn.style.borderColor = '#fbbf24';
-        }
+        approveBtn.textContent = '✅ 承認済み（送信はRPAが実行）';
+        finish();
       });
       rejectBtn.addEventListener('click', async () => {
         approveBtn.disabled = true; rejectBtn.disabled = true;
