@@ -1557,7 +1557,10 @@ function snowweFindCandidateButton({ strictVariants, core, wantAge, wantUniv }) 
     textMatches = textMatches.filter((el) => !textMatches.some((other) => other !== el && other.contains(el)));
     if (textMatches.length === 0) return null;
 
-    const resolvedMap = new Map(); // button -> 収束した祖先要素
+    // button -> { ancestor: 収束した祖先要素, start: 会社名+年齢を含んでいた元の(候補者情報側の)要素 }
+    // startは右カラムのスカウトボタンとは別の左カラム（候補者情報）側の要素なので、
+    // 誤ってスカウトボタンを押してしまうことなく「候補者詳細を開く」クリック対象として使える
+    const resolvedMap = new Map();
     for (const start of textMatches) {
       let ancestor = start;
       for (let depth = 0; ancestor && depth < 15; ancestor = ancestor.parentElement, depth++) {
@@ -1565,7 +1568,7 @@ function snowweFindCandidateButton({ strictVariants, core, wantAge, wantUniv }) 
           (b) => snowweFindIsScoutTrigger((b.innerText || '').trim()) && snowweFindIsVisible(b)
         );
         if (buttonsHere.length === 1) {
-          if (!resolvedMap.has(buttonsHere[0])) resolvedMap.set(buttonsHere[0], ancestor);
+          if (!resolvedMap.has(buttonsHere[0])) resolvedMap.set(buttonsHere[0], { ancestor, start });
           break;
         }
         if (buttonsHere.length > 1) break;
@@ -1573,10 +1576,12 @@ function snowweFindCandidateButton({ strictVariants, core, wantAge, wantUniv }) 
     }
     let candidates = Array.from(resolvedMap.entries());
     if (wantUniv && candidates.length > 1) {
-      const narrowed = candidates.filter(([, ancestor]) => (ancestor.innerText || '').includes(wantUniv));
+      const narrowed = candidates.filter(([, v]) => (v.ancestor.innerText || '').includes(wantUniv));
       if (narrowed.length >= 1) candidates = narrowed;
     }
-    return candidates.length === 1 ? candidates[0][0] : null;
+    return candidates.length === 1
+      ? { btn: candidates[0][0], ancestor: candidates[0][1].ancestor, start: candidates[0][1].start }
+      : null;
   }
 
   // まず法人格表記込みのフルの会社名（前株/後株どちらの表記も試す）で厳密一致、
@@ -1612,8 +1617,9 @@ async function snowweFindAndHighlightCandidate({ company, age, univ }) {
 
   const deadline = Date.now() + 20000; // 20秒まで自動探索（それ以上は人手で探してもらう）
   for (;;) {
-    const btn = snowweFindCandidateButton({ strictVariants, core, wantAge, wantUniv });
-    if (btn) {
+    const found = snowweFindCandidateButton({ strictVariants, core, wantAge, wantUniv });
+    if (found) {
+      const { btn, start } = found;
       btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
       let highlightTarget = btn;
       for (let i = 0; i < 4 && highlightTarget.parentElement; i++) highlightTarget = highlightTarget.parentElement;
@@ -1623,6 +1629,16 @@ async function snowweFindAndHighlightCandidate({ company, age, univ }) {
         highlightTarget.style.outline = '';
         highlightTarget.style.outlineOffset = '';
       }, 8000);
+
+      // 候補者詳細（レジュメ）画面まで自動で開く。startは会社名+年齢を含んでいた
+      // 候補者情報側の要素（スカウトボタンとは別カラム）なので、これをクリックしても
+      // 誤ってスカウト送信フローに入ることはない。getFullProfile()と同じ手法
+      // （カードクリック→詳細パネルでレジュメタブに切り替え）を流用する。
+      try {
+        start.click();
+        await new Promise((r) => setTimeout(r, 1200));
+        await tryClickRDSResumeTab();
+      } catch (_) {}
       return true;
     }
     if (Date.now() >= deadline) return false;
