@@ -1710,7 +1710,8 @@ async function recordApiCost(model, usage) {
 // Claude APIを呼び出す（content.js内から直接）
 async function callBatchScreeningAPI(apiKey, cards, criteria, posReq = '', feedbacks = [], positionName = '', companyCriteria = '') {
   const criteriaLines = buildCriteriaText(criteria, getPlatform());
-  const posSection = posReq ? `\n【応募ポジション：${positionName}（参考情報。必須スキル等との適合度はNG判定の根拠にしないこと）】\n${posReq.slice(0, 800)}\n` : '';
+  // 応募ポジションの職務内容はOK/NG判定に使わない（judgeSingleCandidateと同じ理由。
+  // 選択中のポジション次第で同じ候補者の判定結果が変わってしまうのを避けるため）
   const companySection = companyCriteria ? `\n【会社別採用基準（共通基準より優先）】\n${companyCriteria.slice(0, 800)}\n` : '';
   const fbSection = feedbacks.length > 0
     ? '\n【過去の訂正例】\n' + feedbacks.slice(0, 5).map(f =>
@@ -1728,7 +1729,6 @@ async function callBatchScreeningAPI(apiKey, cards, criteria, posReq = '', feedb
 ${companySection}
 以下の【選定基準】に照らして、各候補者を判定してください。
 カード情報は概要のみのため、読み取れない項目は「情報なし」として扱ってください。
-${posSection}
 【選定基準】
 ${criteriaLines}${fbSection}
 【候補者一覧】
@@ -3539,8 +3539,14 @@ async function judgeSingleCandidate(apiKey, profileText, criteria) {
   let _posStored = {};
   try { _posStored = await chrome.storage.local.get(['currentPosition']); } catch (_) {}
   const { currentPosition } = _posStored;
-  const { requirements: posReq, companyCriteria } = await fetchPositionRequirements(currentPosition || '');
-  const posSection     = posReq        ? `\n【応募ポジションの職務内容（参考情報。必須スキル・求める人物像と候補者の経歴との適合度はNG判定の根拠にしないこと。OK/NG判定は【選定基準】に記載の基準のみで行う）】\n${posReq}\n`           : '';
+  // requirements（応募ポジションの職務内容）はOK/NG判定の材料にしないでほしいという
+  // 意図で「参考情報」として渡していたが、AIがこれを見て「職務経験がポジションと
+  // 合わない」という理由でNGにする事例が実際に多発した。この判定はどのポジションが
+  // 選択されているか（担当者や作業タイミングによって変わる）に依存すべきではない
+  // （同じ候補者が、選択中のポジション次第でOKになったりNGになったりしてしまう）ため、
+  // 判定プロンプトからは応募ポジションの職務内容そのものを渡さないようにした。
+  // 会社別採用基準（companyCriteria）は選定基準そのものとして正式に扱うものなので引き続き渡す。
+  const { companyCriteria } = await fetchPositionRequirements(currentPosition || '');
   const companySection = companyCriteria ? `\n【会社別採用基準（共通基準より優先）】\n${companyCriteria}\n` : '';
 
   // 過去の訂正フィードバックをfew-shot examplesとして組み込む
@@ -3596,8 +3602,8 @@ async function judgeSingleCandidate(apiKey, profileText, criteria) {
   const prompt = `転職エージェントの一次選定アシスタントです。
 ${companySection}
 【選定基準】
-${criteriaLines}${posSection}${fewShotSection}
-【重要：職種分類の注意】候補者の職種分類（ITエンジニア系/文系職）は、候補者自身の現在・直近の職種で判断すること。【応募ポジションの職務内容】が文系・ビジネス職であっても、候補者の実際の職種がITエンジニア・技術職であれば「ITエンジニア系」として分類すること。ポジション内容は候補者の職種分類に影響しない。
+${criteriaLines}${fewShotSection}
+【重要：職種分類の注意】候補者の職種分類（ITエンジニア系/文系職）は、候補者自身の現在・直近の職種のみで判断すること。
 ${ageNote}${thresholdNote}
 【候補者情報】
 ${profileText}
@@ -3605,7 +3611,10 @@ ${profileText}
 JSON1行のみで出力（rを先に書いてからoを確定し、最後にcで確信度0-100を付けること。rは判定理由を50字以内で、qはNG判定の根拠となる【候補者情報】本文からの引用を20字以内でそのまま書き写すこと。OK判定の場合qは空文字でよい）:
 {"r":"理由","o":"OK","c":90,"q":""} または {"r":"理由","o":"NG","c":85,"q":"候補者情報本文からの引用"} または {"r":"理由","o":"要確認","c":45,"q":""}
 ※cは判定の確信度（0〜100の整数）。基準に明確に合致/不合致なら80以上、判断が難しければ60未満。
-※qはNGの場合のみ必須。【候補者情報】に実際に書かれている文字列をそのまま抜き出すこと。要約・言い換え・推測・応募ポジション欄からの引用は不可。`;
+※qはNGの場合のみ必須。【候補者情報】に実際に書かれている文字列をそのまま抜き出すこと。要約・言い換え・推測は不可。
+【最終確認・厳守事項】JSON出力の前に必ず以下を確認すること：
+・年収基準は上記【この候補者に適用する年収基準】に示した金額のみを使うこと。46歳以上向けの特別ルールは、候補者が実際に46歳以上の場合にのみ適用し、それ未満の年齢の候補者には一切言及しないこと。
+・OK/NG判定は【選定基準】に列挙された条件のみで行うこと。候補者の実務経験が特定の職務内容に合っているかどうかは、このタスクの判定材料に含まれていない。`;
 
   const data = await claudeFetch(apiKey, {
     model: 'claude-haiku-4-5-20251001',
