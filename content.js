@@ -198,9 +198,30 @@ async function showApprovalReviewPanel(items) {
     header.style.cssText = 'padding:14px 16px;border-bottom:1px solid #e2e8f0;flex-shrink:0;';
     header.innerHTML = `
       <div style="font-size:14px;font-weight:700;color:#1e293b;">✅ 承認待ち（${items.length}件）</div>
-      <div style="font-size:11px;color:#64748b;margin-top:3px;line-height:1.5;">AIが星をつけた候補者です。ポジションを確認・修正し、承認するとテンプレート標準文のままスカウトが自動送信されます（本文のパーソナライズ生成はしません）。</div>
+      <div style="font-size:11px;color:#64748b;margin-top:3px;line-height:1.5;">AIが星をつけた候補者です。ポジションを確認・修正して承認してください（承認後の実際のスカウト送信は別のRPAが行います。この画面では送信されません）。</div>
     `;
     overlay.appendChild(header);
+
+    // 「候補者の詳細プロフィールを開く」を押すと、隠れてしまわないよう承認パネル自体を
+    // 一時的に隠す。この小さな復帰用ボタンで承認パネルに戻れるようにする
+    function showReturnToReviewButton() {
+      const existingReturn = document.getElementById('snow-we-return-to-review');
+      if (existingReturn) existingReturn.remove();
+      const returnBtn = document.createElement('button');
+      returnBtn.id = 'snow-we-return-to-review';
+      returnBtn.textContent = '📋 承認パネルに戻る';
+      returnBtn.style.cssText = `
+        position:fixed;bottom:20px;right:20px;z-index:2147483647;
+        padding:10px 16px;background:#4f46e5;color:#fff;border:none;border-radius:8px;
+        font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.25);
+        font-family:sans-serif;
+      `;
+      returnBtn.addEventListener('click', () => {
+        overlay.style.display = 'flex';
+        returnBtn.remove();
+      });
+      document.body.appendChild(returnBtn);
+    }
 
     const list = document.createElement('div');
     list.style.cssText = 'flex:1;overflow-y:auto;padding:10px;';
@@ -225,18 +246,30 @@ async function showApprovalReviewPanel(items) {
         ${item.reason ? `<div style="font-size:11px;color:#94a3b8;margin-bottom:6px;line-height:1.4;">🤖 ${escapeHtml(item.reason)}</div>` : ''}
       `;
       // 年齢・会社名・大学とAI理由だけではポジション判断の材料として薄いため、
-      // 実際の候補者カード（本来の経歴情報）へその場でスクロール・ハイライトできるようにする
+      // 本来の詳細プロフィール（職務経歴等）を開けるようにする。AI判定時の
+      // getFullProfile()と同じ「カードクリック→詳細パネルでレジュメタブに切り替え」を
+      // 流用する（実績のある処理のため、新たに不安定な自動化を作らずに済む）
       const viewBtn = document.createElement('button');
-      viewBtn.textContent = '🔍 候補者を見る';
+      viewBtn.textContent = '🔍 候補者の詳細プロフィールを開く';
       viewBtn.style.cssText = 'width:100%;padding:6px;margin-bottom:7px;background:#eff6ff;color:#1e40af;border:1px solid #93c5fd;border-radius:6px;font-size:11px;cursor:pointer;';
-      viewBtn.addEventListener('click', () => {
+      viewBtn.addEventListener('click', async () => {
         if (!document.body.contains(item.el)) { alert('候補者のカードがページ上に見つかりません（スクロール等で表示が変わった可能性があります）'); return; }
         item.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        const prevOutline = item.el.style.outline;
-        const prevOffset = item.el.style.outlineOffset;
-        item.el.style.outline = '3px solid #6366f1';
-        item.el.style.outlineOffset = '2px';
-        setTimeout(() => { item.el.style.outline = prevOutline; item.el.style.outlineOffset = prevOffset; }, 3000);
+        if (getPlatform() === 'rds') {
+          // 承認パネルは最前面(最大z-index)固定のため、開いた詳細パネルがその下に
+          // 隠れてしまう。一時的に承認パネルを隠し、「戻る」ボタンで再表示する
+          overlay.style.display = 'none';
+          item.el.click();
+          await sleep(1500);
+          await tryClickRDSResumeTab();
+          showReturnToReviewButton();
+        } else {
+          const prevOutline = item.el.style.outline;
+          const prevOffset = item.el.style.outlineOffset;
+          item.el.style.outline = '3px solid #6366f1';
+          item.el.style.outlineOffset = '2px';
+          setTimeout(() => { item.el.style.outline = prevOutline; item.el.style.outlineOffset = prevOffset; }, 3000);
+        }
       });
       card.appendChild(viewBtn);
 
