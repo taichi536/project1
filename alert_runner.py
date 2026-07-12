@@ -945,6 +945,7 @@ def run_multi_asset_rebalance(dry_run: bool = False):
         "J-REIT":    "1343.T",
         "米国債":    "1482.T",
         "先進国債":  "2511.T",
+        "ドル円":    "USDJPY=X",
     }
     TOP_N = 1
     LOOKBACK = 252

@@ -2200,6 +2200,7 @@ elif page == "🔬 バックテスト":
 | NEXT FUNDS J-REIT | 不動産 | 1343.T |
 | iShares 米国債7-10年 | 米国債 | 1482.T |
 | NEXT FUNDS 先進国債券 | 先進国債 | 2511.T |
+| USD/JPY | ドル円（FXまたは外貨MMF） | USDJPY=X |
 """)
 
         mc1, mc2, mc3, mc4 = st.columns(4)
