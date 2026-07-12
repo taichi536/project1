@@ -963,6 +963,12 @@ function scoutStatus(history, candidateId) {
 }
 
 // カードから候補者の一意IDを取得（プロフィールURL を優先）
+// 「最終ログイン日」「更新日」等の日付は、候補者が再ログイン/プロフィール更新する
+// たびに値が変わる。カードテキストのフィンガープリントにこの手の行を含めてしまうと、
+// 同一人物が別IDとして扱われ、重複記録や自動修復（candidateId紐付け）が効かなくなる
+// 原因になるため、フィンガープリント計算からは除外する
+const stripVolatileLines = lines => lines.filter(l => !/\d{4}[\/年]\d{1,2}[\/月]\d{1,2}/.test(l));
+
 function getCandidateId(cardEl) {
   // AMBI: hidden input.js_sid から候補者ID取得
   if (getPlatform() === 'ambi') {
@@ -973,7 +979,7 @@ function getCandidateId(cardEl) {
     if (m) return `ambi_${m[1]}`;
     // 最終フォールバック: カードテキストハッシュ（先頭5行だと共通属性の候補者同士が
     // 衝突しやすいため10行まで広げる。RDSで発覚した同種の問題への対応と同じ）
-    const lines = (cardEl.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
+    const lines = stripVolatileLines((cardEl.innerText || '').split('\n').map(l => l.trim()).filter(Boolean));
     const fp = lines.slice(0, 10).join('|');
     if (fp.length > 10) return `ambi_h${simpleHash(fp)}`;
     return null;
@@ -994,7 +1000,7 @@ function getCandidateId(cardEl) {
       el = el.parentElement;
     }
     // フォールバック：カードテキストのフィンガープリント
-    const fpLines = (cardEl.innerText || '').split('\n').map(l => l.trim()).filter(l => l.length > 3);
+    const fpLines = stripVolatileLines((cardEl.innerText || '').split('\n').map(l => l.trim()).filter(l => l.length > 3));
     const fp = fpLines.slice(0, 8).join('|');
     if (fp.length > 20) return `bizreach_fp_${simpleHash(fp)}`;
     return null;
@@ -1021,9 +1027,14 @@ function getCandidateId(cardEl) {
   // 会社名・大学名が出てくる前の先頭5行だけだと同じ属性の別候補者が同一ハッシュに衝突し、
   // 一方が「処理済み」として無言でスキップされる（バッジが一切つかない）原因になっていた。
   // 会社名等の識別性の高い情報を含むよう先頭10行まで広げて衝突を減らす。
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const lines = stripVolatileLines(text.split('\n').map(l => l.trim()).filter(Boolean));
   const fingerprint = lines.slice(0, 10).join('|');
-  if (fingerprint.length > 10) return `${getPlatform()}_h${simpleHash(fingerprint)}`;
+  if (fingerprint.length > 10) {
+    // ハッシュフォールバックは「会員ID等の安定したIDが取れなかった」ケースであり、
+    // 表示内容が変わると同一人物でも別IDになりうる。頻度を把握できるよう記録しておく
+    console.warn(`[Snow-we] candidateId: 安定ID取得失敗、ハッシュにフォールバック platform=${getPlatform()}`);
+    return `${getPlatform()}_h${simpleHash(fingerprint)}`;
+  }
 
   return null;
 }
