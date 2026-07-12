@@ -1046,6 +1046,22 @@ async function getScoutHistory() {
   }
 }
 
+// scoutHistory（1オブジェクトに全候補者ぶんまとめて入っている）の1件だけを更新する。
+// 「読む→書き換える→丸ごと書き戻す」を素朴にやると、その間に別の候補者の記録が
+// 割り込んできた場合に後勝ちで消えてしまう（このプロジェクトで何度も踏んだ地雷と
+// 同じ形）。書き込み直前に読み直してから該当キーだけをマージすることで、
+// 競合の窓を最小化する。
+async function patchScoutHistory(candidateId, patch) {
+  try {
+    const latest = await getScoutHistory();
+    latest[candidateId] = { ...(latest[candidateId] || {}), ...patch };
+    await chrome.storage.local.set({ [SCOUT_KEY]: latest });
+  } catch (e) {
+    if (!e.message?.includes('Extension context invalidated'))
+      console.warn('[Snow-we] patchScoutHistory error:', e.message);
+  }
+}
+
 async function recordScoutSent(candidateId, info, templateName, templateRaw = '', fallbackPosition = '') {
   if (!candidateId) return;
   const now = Date.now();
@@ -1054,8 +1070,9 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
   const industry = gicsAutoClassify(info.company || '');
 
   // ① ローカル記録（メイン・必ず保存）
-  const history = await getScoutHistory();
-  history[candidateId] = {
+  // RDSの一括送信等で複数候補者が短時間に連続処理される場合があるため、
+  // 該当候補者の1件だけをpatchScoutHistoryで安全に更新する
+  await patchScoutHistory(candidateId, {
     date: now,
     platform,
     name: info.name || '',
@@ -1065,12 +1082,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     position: positionName,
     industry,
     gasSent: false,
-  };
-  try {
-    await chrome.storage.local.set({ [SCOUT_KEY]: history });
-  } catch (e) {
-    if (!e.message?.includes('Extension context invalidated')) console.warn('[Snow-we] recordScoutSent storage error:', e.message);
-  }
+  });
 
   // ② GASへの送信（サブ・失敗してもローカル記録には影響しない）
   ;(async () => {
@@ -1116,15 +1128,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     await sendGas(primaryGasUrl);
     if (gas.dbUrl && gas.dbUrl !== primaryGasUrl) await sendGas(gas.dbUrl);
     // GAS送信成功時にフラグを更新
-    if (sent) {
-      try {
-        const h = await getScoutHistory();
-        if (h[candidateId]) {
-          h[candidateId].gasSent = true;
-          await chrome.storage.local.set({ [SCOUT_KEY]: h });
-        }
-      } catch (_) {}
-    }
+    if (sent) await patchScoutHistory(candidateId, { gasSent: true });
   })();
 
   // ③ Supabaseへの保存

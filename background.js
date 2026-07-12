@@ -169,36 +169,50 @@ async function retryUndeliveredScouts() {
     const recruiter = gasSettings?.recruiter;
     if (!url || !recruiter) return;
     const secret = gasSettings?.secret || 'snowwe2024';
-    const history = scoutHistory || {};
-    let changed = false;
+    // 対象の洗い出しはこのスナップショットで行うが、書き込みは1件ずつ直前に
+    // 読み直してからマージする（下のpatchScoutHistoryEntry）。ここで丸ごと
+    // 読んで最後に丸ごと書き戻す形にすると、リトライの通信待ちをしている間に
+    // content.js側が別候補者を新規記録した分が後勝ちで消えてしまう
+    const targets = Object.entries(scoutHistory || {})
+      .filter(([, h]) => h.gasSent === false && (h.retryCount || 0) < 8); // 8回(約2時間)失敗し続けたら諦めて人の確認に回す
 
-    for (const [candidateId, h] of Object.entries(history)) {
-      if (h.gasSent !== false) continue;
-      if ((h.retryCount || 0) >= 8) continue; // 8回（約2時間）失敗し続けたら諦めて人の確認に回す
+    for (const [candidateId, h] of targets) {
       const payload = {
         secret, recruiter, candidateId,
         company: h.company || '', age: String(h.age || '').replace(/[歳才]/, ''),
         univ: h.univ || '', media: h.platform || '', position: h.position || '',
         industry: h.industry || '', ts: h.date,
       };
+      let patch;
       try {
         const res = await fetch(url, { method: 'POST', body: JSON.stringify(payload) });
         const data = await res.json();
         if (data.ok !== false) {
-          history[candidateId] = { ...h, gasSent: true };
+          patch = { gasSent: true };
           console.log('[Snow-we] 未送信スカウトを自動リトライで記録完了:', candidateId);
         } else {
-          history[candidateId] = { ...h, retryCount: (h.retryCount || 0) + 1 };
+          patch = { retryCount: (h.retryCount || 0) + 1 };
         }
       } catch (_) {
-        history[candidateId] = { ...h, retryCount: (h.retryCount || 0) + 1 };
+        patch = { retryCount: (h.retryCount || 0) + 1 };
       }
-      changed = true;
+      await patchScoutHistoryEntry(candidateId, patch);
     }
-    if (changed) await chrome.storage.local.set({ scoutHistory: history });
   } catch (_) {
     // 次の定期実行で再試行
   }
+}
+
+// scoutHistoryの1件だけを、書き込み直前に読み直してから安全に更新する
+// （content.js側の同名ヘルパーと同じ考え方。詳細はそちらのコメント参照）
+async function patchScoutHistoryEntry(candidateId, patch) {
+  try {
+    const { scoutHistory } = await chrome.storage.local.get(['scoutHistory']);
+    const latest = scoutHistory || {};
+    if (!latest[candidateId]) return; // 既に削除・変更されている場合は上書きしない
+    latest[candidateId] = { ...latest[candidateId], ...patch };
+    await chrome.storage.local.set({ scoutHistory: latest });
+  } catch (_) {}
 }
 
 // ② GAS側が検知した「空欄で記録された」件について、ローカルにある正しい値で
