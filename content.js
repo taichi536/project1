@@ -126,7 +126,7 @@ function deriveRDSPickListUrl(href) {
   return `${location.origin}/client/scouting/scoutroom/${m[1]}/pick`;
 }
 
-async function recordScoutQueueEntry({ candidateId, platform, position, info, reason, verdict }) {
+async function recordScoutQueueEntry({ candidateId, platform, position, info, reason, verdict, fullProfile }) {
   if (!candidateId) return;
   let recruiterName = '';
   try {
@@ -144,6 +144,10 @@ async function recordScoutQueueEntry({ candidateId, platform, position, info, re
     univ: info?.univ || '',
     ai_reason: (reason || '').substring(0, 500),
     ai_verdict: verdict || '',
+    // AI判定に使ったフルプロフィール(getFullProfile())を保存しておく。承認待ちレビュー時に
+    // 短いAI要約だけでは判断材料が足りないという課題があったため、承認パネル側で
+    // 「詳細を見る」として展開表示できるようにする（RDSに行かなくても中身が見える）
+    full_profile: (fullProfile || '').substring(0, 3000),
     status: 'pending_review',
     source_url: location.href,
     room_url: roomUrl,
@@ -1490,6 +1494,183 @@ document.addEventListener('click', e => {
 }, true);
 
 // -------------------------------------------------------
+// 承認待ちレビュー時、検討中リストページで対象候補者を自動で探してハイライトする
+// -------------------------------------------------------
+// スカウト送信RPA（taichi536/scout, src/rds/findCandidateCard.js）で実機検証済みの
+// マッチングロジック（法人格つきフル会社名優先＋短いコアへのフォールバック、大学名での
+// タイブレーク、祖先階層探索でのボタン特定、レスポンシブ重複レイアウトの除外）をそのまま
+// 移植したもの。RPAは自動送信のためにこれを使うが、ここでは「本人らしきカードを見つけて
+// 画面をスクロール・ハイライトするだけ」で、クリック等の操作は一切行わない
+// （実際の送信可否判断・操作は必ず人が行う。送信そのものはRPAが別途担当する）。
+const SNOWWE_FIND_SCOUT_EXACT = ['スカウト'];
+const SNOWWE_FIND_SCOUT_INCLUDE = ['スカウトを送る', 'スカウトする', 'スカウトを作成'];
+const SNOWWE_FIND_MAX_CARD_TEXT_LENGTH = 1500;
+
+function snowweFindExtractCompanyCore(s) {
+  const core = String(s || '')
+    .replace(/株式会社/g, '')
+    .replace(/[（(]株[）)]/g, '')
+    .replace(/\s/g, '')
+    .trim();
+  return core.length >= 2 ? core : String(s || '').trim();
+}
+
+function snowweFindCompanyMatchVariants(company) {
+  const raw = String(company || '').trim();
+  const core = snowweFindExtractCompanyCore(company);
+  const variants = new Set();
+  if (raw) variants.add(raw);
+  if (core && core !== raw) {
+    variants.add(`株式会社${core}`);
+    variants.add(`${core}株式会社`);
+    variants.add(`（株）${core}`);
+    variants.add(`${core}（株）`);
+    variants.add(`(株)${core}`);
+    variants.add(`${core}(株)`);
+  }
+  return { strictVariants: Array.from(variants), core };
+}
+
+function snowweFindIsVisible(el) {
+  if (el.offsetParent === null) return false;
+  const style = window.getComputedStyle(el);
+  return style.visibility !== 'hidden' && style.display !== 'none';
+}
+
+function snowweFindIsScoutTrigger(t) {
+  if (SNOWWE_FIND_SCOUT_EXACT.includes(t)) return true;
+  return SNOWWE_FIND_SCOUT_INCLUDE.some((s) => t.includes(s));
+}
+
+function snowweFindCandidateButton({ strictVariants, core, wantAge, wantUniv }) {
+  function runPass(matchesCompany) {
+    let textMatches = Array.from(
+      document.querySelectorAll('div, li, article, section, label, tr, form, fieldset, p, span')
+    ).filter((el) => {
+      const t = el.innerText || '';
+      if (t.length > SNOWWE_FIND_MAX_CARD_TEXT_LENGTH) return false;
+      if (!matchesCompany(t)) return false;
+      if (wantAge && !t.includes(`${wantAge}歳`)) return false;
+      if (!snowweFindIsVisible(el)) return false;
+      return true;
+    });
+    textMatches = textMatches.filter((el) => !textMatches.some((other) => other !== el && other.contains(el)));
+    if (textMatches.length === 0) return null;
+
+    // button -> { ancestor: 収束した祖先要素, start: 会社名+年齢を含んでいた元の(候補者情報側の)要素 }
+    // startは右カラムのスカウトボタンとは別の左カラム（候補者情報）側の要素なので、
+    // 誤ってスカウトボタンを押してしまうことなく「候補者詳細を開く」クリック対象として使える
+    const resolvedMap = new Map();
+    for (const start of textMatches) {
+      let ancestor = start;
+      for (let depth = 0; ancestor && depth < 15; ancestor = ancestor.parentElement, depth++) {
+        const buttonsHere = Array.from(ancestor.querySelectorAll('button, a, [role="button"]')).filter(
+          (b) => snowweFindIsScoutTrigger((b.innerText || '').trim()) && snowweFindIsVisible(b)
+        );
+        if (buttonsHere.length === 1) {
+          if (!resolvedMap.has(buttonsHere[0])) resolvedMap.set(buttonsHere[0], { ancestor, start });
+          break;
+        }
+        if (buttonsHere.length > 1) break;
+      }
+    }
+    let candidates = Array.from(resolvedMap.entries());
+    if (wantUniv && candidates.length > 1) {
+      const narrowed = candidates.filter(([, v]) => (v.ancestor.innerText || '').includes(wantUniv));
+      if (narrowed.length >= 1) candidates = narrowed;
+    }
+    return candidates.length === 1
+      ? { btn: candidates[0][0], ancestor: candidates[0][1].ancestor, start: candidates[0][1].start }
+      : null;
+  }
+
+  // まず法人格表記込みのフルの会社名（前株/後株どちらの表記も試す）で厳密一致、
+  // 見つからなければ短いコアでの緩い一致にフォールバック
+  return runPass((t) => strictVariants.some((v) => t.includes(v))) || runPass((t) => t.includes(core));
+}
+
+async function snowweFindScrollForLoadMore() {
+  window.scrollTo(0, document.documentElement.scrollHeight);
+  const scrollable = Array.from(document.querySelectorAll('*')).find(
+    (el) => el.scrollHeight > el.clientHeight + 50 && el.clientHeight > 300
+  );
+  if (scrollable) scrollable.scrollTop = scrollable.scrollHeight;
+  await new Promise((r) => setTimeout(r, 200));
+
+  const loadMoreEl = Array.from(document.querySelectorAll('button, a, [role="button"], div, span')).find((el) => {
+    const t = (el.innerText || el.textContent || '').trim();
+    return t === 'さらに読み込む' || t.includes('さらに読み込む');
+  });
+  if (!loadMoreEl) return;
+  try {
+    loadMoreEl.scrollIntoView({ block: 'center' });
+    loadMoreEl.click();
+  } catch (_) {}
+  await new Promise((r) => setTimeout(r, 500));
+}
+
+async function snowweFindAndHighlightCandidate({ company, age, univ }) {
+  const { strictVariants, core } = snowweFindCompanyMatchVariants(company);
+  if (!core) return false;
+  const wantAge = String(age || '').replace(/[^0-9]/g, '');
+  const wantUniv = String(univ || '').trim();
+
+  const deadline = Date.now() + 20000; // 20秒まで自動探索（それ以上は人手で探してもらう）
+  for (;;) {
+    const found = snowweFindCandidateButton({ strictVariants, core, wantAge, wantUniv });
+    if (found) {
+      const { btn, start } = found;
+      btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      let highlightTarget = btn;
+      for (let i = 0; i < 4 && highlightTarget.parentElement; i++) highlightTarget = highlightTarget.parentElement;
+      highlightTarget.style.outline = '4px solid #f97316';
+      highlightTarget.style.outlineOffset = '3px';
+      setTimeout(() => {
+        highlightTarget.style.outline = '';
+        highlightTarget.style.outlineOffset = '';
+      }, 8000);
+
+      // 候補者詳細（レジュメ）画面まで自動で開く。startは会社名+年齢を含んでいた
+      // 候補者情報側の要素（スカウトボタンとは別カラム）なので、これをクリックしても
+      // 誤ってスカウト送信フローに入ることはない。getFullProfile()と同じ手法
+      // （カードクリック→詳細パネルでレジュメタブに切り替え）を流用する。
+      try {
+        start.click();
+        await new Promise((r) => setTimeout(r, 1200));
+        await tryClickRDSResumeTab();
+      } catch (_) {}
+      return true;
+    }
+    if (Date.now() >= deadline) return false;
+    await snowweFindScrollForLoadMore();
+  }
+}
+
+// URLの#snowweFind=...に会社名/年齢/大学名が埋め込まれていたら、検討中リストページ上で
+// 自動的に本人のカードまでスクロール・ハイライトする（承認待ちポップアップの
+// 「🔗 検討中リストを開く」から呼ばれる。手動で探す手間をなくすための機能で、
+// クリック等の操作は一切行わない＝実際の送信は必ずRPA側が別途行う）
+function snowweInitAutoFindFromUrlHash() {
+  const m = location.hash.match(/snowweFind=([^&]+)/);
+  if (!m) return;
+  let params;
+  try {
+    params = JSON.parse(decodeURIComponent(m[1]));
+  } catch (_) {
+    return;
+  }
+  history.replaceState(null, '', location.pathname + location.search);
+  if (getPlatform() !== 'rds' || !params.company) return;
+  setTimeout(() => {
+    snowweFindAndHighlightCandidate(params).then((found) => {
+      if (!found) {
+        console.warn('[Snow-we] 自動での本人特定に失敗しました。手動で会社名・年齢を頼りに探してください:', params);
+      }
+    });
+  }, 1500); // ページ側の一覧描画を待つ
+}
+
+// -------------------------------------------------------
 // 「さらに読み込む」ボタンを押して全候補者をDOMに展開
 // -------------------------------------------------------
 async function loadAllCandidatesIntoDOM() {
@@ -2045,6 +2226,7 @@ async function triggerAutoAdd() {
               info: starredInfo,
               reason: judgeReason,
               verdict: overall,
+              fullProfile: profileText,
             }).catch(() => {});
             _starredThisPage.push({ candidateId, el, position: _batchPosition, info: starredInfo, reason: judgeReason });
           }
@@ -4896,6 +5078,7 @@ window.addEventListener('load', () => {
     injectStyles();
     initPositionIndicator();
     initDetailPanelObserver();
+    snowweInitAutoFindFromUrlHash();
     try {
       const raw = sessionStorage.getItem('snowWeAutoAdd');
       if (!raw) {

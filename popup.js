@@ -1685,8 +1685,21 @@ async function renderApprovalQueue() {
     // 閉じてしまい、承認待ちリストの続きを見失う原因になっていた。バックグラウンドタブ
     // として開く(chrome.tabs.create({active:false}))ことで、ポップアップを開いたまま
     // 確認できるようにする
+    // content.js側に本人特定用の会社名・年齢・大学名を渡し、検討中リストページを開いた
+    // 瞬間に自動でスクロール・ハイライトしてもらう（今までは人が一覧を目でスクロールして
+    // 探す必要があり手間だった）。会社名が無ければ自動特定できないため付けない。
+    const findParams = row.company ? JSON.stringify({ company: row.company, age: row.age || '', univ: row.univ || '' }) : '';
     const roomLinkHtml = row.room_url
-      ? `<button type="button" class="approval-card-room-link" data-room-url="${escapeHtml(row.room_url)}">🔗 検討中リストを開く（本人を探して確認）</button>`
+      ? `<button type="button" class="approval-card-room-link" data-room-url="${escapeHtml(row.room_url)}" data-find="${escapeHtml(findParams)}">🔗 検討中リストを開く（自動で本人まで移動）</button>`
+      : '';
+    // AI判定時に取得済みのフルプロフィール(full_profile)がある場合、短いAI要約だけでは
+    // 判断材料が足りないという課題への対応として、RDSに行かなくても中身を確認できるよう
+    // クリックで展開できるようにする（古いデータにはこの列が無いので、無ければ非表示）
+    const profileDetailHtml = row.full_profile
+      ? `<details class="approval-card-profile-detail">
+          <summary>📄 詳細プロフィールを見る</summary>
+          <div class="approval-card-profile-text">${escapeHtml(row.full_profile)}</div>
+        </details>`
       : '';
     return `<div class="approval-card" data-id="${row.id}">
       <div class="approval-card-top">
@@ -1694,6 +1707,7 @@ async function renderApprovalQueue() {
         <span class="approval-card-meta">${escapeHtml(metaParts.join(' · ') || '情報なし')}</span>
       </div>
       ${row.ai_reason ? `<div class="approval-card-reason">🤖 ${escapeHtml(row.ai_reason)}</div>` : ''}
+      ${profileDetailHtml}
       ${roomLinkHtml}
       <div class="approval-card-position-label">送信ポジション: ${escapeHtml(row.position || '（未設定）')}</div>
       <select class="approval-position-select">${optionsHtml || '<option value="">（ポジション一覧未取得）</option>'}</select>
@@ -1714,7 +1728,11 @@ async function renderApprovalQueue() {
     const roomLinkBtn = card.querySelector('.approval-card-room-link');
     if (roomLinkBtn) {
       roomLinkBtn.addEventListener('click', () => {
-        chrome.tabs.create({ url: roomLinkBtn.dataset.roomUrl, active: false });
+        const find = roomLinkBtn.dataset.find || '';
+        const url = find
+          ? `${roomLinkBtn.dataset.roomUrl}#snowweFind=${encodeURIComponent(find)}`
+          : roomLinkBtn.dataset.roomUrl;
+        chrome.tabs.create({ url, active: false });
       });
     }
     card.querySelector('[data-action="approve"]').addEventListener('click', async (e) => {
