@@ -2319,6 +2319,11 @@ async function triggerAutoAdd() {
       sessionStorage.removeItem(BATCH_SESSION_KEY);
       showAutoStatus(`🤖 完了！ ✅${addedCount}人を検討リストに追加 (全${totalProcessed}人中)`, 8000);
       await saveAutoAddProgress({ running: false });
+      // 夜間自動実行中は「このURL(箱)は完了」を背景スクリプトに通知しないと、
+      // 次のURLへ進まずこのタブが放置され、他プラットフォームと違って
+      // 「同じ箱を最初からやり直す」不具合の原因になっていた
+      if (_isAutoRunMode && _isAutoRunMode !== 'list-inner') { chrome.runtime.sendMessage({ type: 'autoRunComplete', slotId: _autoRunSlotId }).catch(() => {}); }
+      _isAutoRunMode = false;
       return;
     }
 
@@ -2334,6 +2339,8 @@ async function triggerAutoAdd() {
     sessionStorage.removeItem(BATCH_SESSION_KEY);
     showAutoStatus(`🤖 完了！ ✅${addedCount}人を検討リストに追加 (全${totalProcessed}人中)`, 8000);
     await saveAutoAddProgress({ running: false });
+    if (_isAutoRunMode && _isAutoRunMode !== 'list-inner') { chrome.runtime.sendMessage({ type: 'autoRunComplete', slotId: _autoRunSlotId }).catch(() => {}); }
+    _isAutoRunMode = false;
     return;
   }
 
