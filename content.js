@@ -3618,7 +3618,21 @@ JSON1行のみで出力（rを先に書いてからoを確定し、最後にcで
   // 独自解釈と混同した等）場合は根拠のない判定とみなし、要確認へ格下げする。
   if (verdict === 'NG') {
     const normalize = s => s.replace(/\s+/g, '');
-    const grounded = quote && quote.length >= 3 && normalize(profileText).includes(normalize(quote));
+    const normProfile = normalize(profileText);
+    let grounded = false;
+    if (quote && quote.length >= 3) {
+      if (normProfile.includes(normalize(quote))) {
+        grounded = true;
+      } else {
+        // AIの引用が「職種タグ／年齢／年収」等、候補者情報のあちこちに離れて
+        // 書かれている複数の事実を改行区切りで並べただけのケースがあり、
+        // 個々の事実はすべて実在するのに文字列として連続していないという理由だけで
+        // 「根拠なし」と誤判定され、正しいNG判定まで要確認に格下げされていた
+        // （実際のログで多発）。断片ごとに実在確認し、全断片が見つかれば根拠ありとする。
+        const fragments = quote.split(/\n+/).map(f => f.trim()).filter(f => f.length >= 2);
+        grounded = fragments.length > 0 && fragments.every(f => normProfile.includes(normalize(f)));
+      }
+    }
     if (!grounded) {
       console.warn('[Snow-we] NG判定の根拠引用が候補者情報に見当たらない → 要確認に修正:', JSON.stringify(quote), '/', reason);
       verdict = '要確認';
@@ -4223,7 +4237,7 @@ function buildCriteriaText(criteria, platform) {
   lines.push(`- 46歳以上で文系職（コンサル・営業・マーケ・経営企画・人事・金融営業・システム営業・IT営業等）かつ財務・経理・FP&A・CFO・財務戦略等の職歴が一切ない場合は即NG（年収が高くても）`);
   lines.push(`- ★重要★ 「財務・経理・FP&A職歴あり」の定義: 財務部・経理部・FP&A部門・Treasury・経営管理部（財務担当）等で実際に財務経理業務を担当した経験があること。以下はNG対象外外の例外にはならない：サステナビリティ/ESG担当として経理的な仕組みを設計した、非財務情報開示（SSBJ・TCFD等）を担当した、カーボン会計・GHG会計の仕組みを作った、経理部門と連携しただけ`);
   lines.push(`- 46歳以上でIT・理系・技術職（ソフトウェアエンジニア・インフラ・クラウド・SE・データサイエンティスト・データアナリスト・DXコンサル・PMO・研究職・建築設計・土木・機械設計・電気設計・製造技術・生産技術・品質管理等のIT以外の理工系技術職を含む）は即NG`);
-  lines.push(`- 医師・医者・歯科医・歯科医師・薬剤師等の医療資格職が主なキャリアの場合は即NG`);
+  lines.push(`- 医師・医者・歯科医・歯科医師・薬剤師等、国家資格を保有し臨床診療・調剤等の資格必須業務に実際に従事している場合のみ即NG。製薬会社・医療機器メーカー等での薬事/法規対応・MR・臨床開発・研究開発・品質管理・その他医薬品専門職等、医薬品/医療業界に勤務しているだけで上記の医療資格そのものは保有・行使していない一般のビジネス職・技術職は、この条件には該当しない（この条件だけを理由にNGにしない。他の基準は通常通り適用する）`);
   lines.push(`- 大学教授・准教授・講師・助教等のアカデミア（学術職）が主なキャリアの場合は即NG`);
   lines.push(`- 弁護士・法律事務所勤務が主なキャリアの場合は即NG`);
   lines.push(`- 記者・ジャーナリスト（新聞・テレビ・雑誌等のメディア記者）が主なキャリアの場合は即NG`);
