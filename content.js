@@ -5350,30 +5350,38 @@ function findDodaxDetailPanel() {
   const viewportWidth = window.innerWidth;
   const candidates = [];
   const keywords = ['職務経歴', '転職意向', '転職を', '職歴', '業務内容', '学歴', '年収'];
-  // スカウト作成フォーム（差出人・宛先・テンプレート選択・件名等）には「職務経歴書」
-  // という添付ラベルがあり、これが「職務経歴」キーワードに誤ってヒットして候補者
-  // プロフィールと誤認識されることがあった（実際にパーソナライズ文生成でスカウト
-  // フォームの文言が抽出される不具合として発覚）。フォーム特有の文言を含む要素は
-  // 候補から除外する
-  const composeFormMarkers = ['差出人', '宛先', 'を挿入', 'テンプレートを呼び出す'];
+  // 候補者プロフィールと誤認識されやすい2種類の非プロフィール要素を除外する：
+  // ①スカウト作成フォーム（差出人・宛先・テンプレート選択・件名等。「職務経歴書」
+  //   という添付ラベルが「職務経歴」キーワードに誤ってヒットしていた）
+  // ②候補者検索結果の絞り込みフィルター欄（「候補者検索結果」「一括スカウト送信」等。
+  //   「経験社数」「年収」等の項目名がキーワードに誤ってヒットしていた）
+  const nonProfileMarkers = ['差出人', '宛先', 'を挿入', 'テンプレートを呼び出す', '候補者検索結果', 'ポジティブアクション', '一括スカウト送信'];
+  // 「スカウトを作成」ボタン押下後は、候補者プロフィールが画面左側・スカウト作成
+  // フォームが右側に並ぶレイアウトになるページがあり（通常の一覧→詳細パネルの
+  // ページとは逆）、右側限定で探すと候補者プロフィールを取りこぼしていた。
+  // 左右どちらでもよいことにし、代わりに画面幅いっぱいの巨大なコンテナ（候補者
+  // 一覧全体等）を除外することで、正しい範囲だけを拾うようにする。
   document.querySelectorAll('div, section, article, aside, main').forEach(el => {
     const rect = el.getBoundingClientRect();
     const t = (el.innerText || '').trim();
-    if (composeFormMarkers.some(m => t.includes(m))) return;
-    if (rect.left > viewportWidth * 0.35 && rect.width > 200 && t.length > 100 && t.length < 30000) {
-      const hasKeyword = keywords.some(kw => t.includes(kw));
-      if (hasKeyword) candidates.push({ el, score: t.length, left: Math.round(rect.left) });
+    if (nonProfileMarkers.some(m => t.includes(m))) return;
+    if (rect.width > 200 && rect.width < viewportWidth * 0.7 && t.length > 100 && t.length < 30000) {
+      // 一致した種類の数を優先スコアに加える。候補者一覧全体のような大きい
+      // コンテナは文字数は多くても一致キーワードの種類は偏りやすいため、
+      // 単純な文字数だけで選ぶと候補者一覧側に負けてしまうことがある
+      const matchCount = keywords.filter(kw => t.includes(kw)).length;
+      if (matchCount > 0) candidates.push({ el, score: t.length + matchCount * 2000, left: Math.round(rect.left) });
     }
   });
   console.log('[Snow-we] findDodaxDetailPanel: 候補数=' + candidates.length,
     candidates.slice(0, 3).map(c => `left=${c.left} len=${c.score}`).join(', '));
   if (candidates.length === 0) {
-    // キーワードなしでも右側パネルを探す（ローディング中対策）
+    // キーワードなしでも候補者情報らしきパネルを探す（ローディング中対策）
     document.querySelectorAll('div, section, aside').forEach(el => {
       const rect = el.getBoundingClientRect();
       const t = (el.innerText || '').trim();
-      if (composeFormMarkers.some(m => t.includes(m))) return;
-      if (rect.left > viewportWidth * 0.5 && rect.width > 200 && t.length > 50) {
+      if (nonProfileMarkers.some(m => t.includes(m))) return;
+      if (rect.width > 200 && rect.width < viewportWidth * 0.7 && t.length > 50) {
         candidates.push({ el, score: t.length, left: Math.round(rect.left) });
       }
     });
