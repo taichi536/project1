@@ -5350,9 +5350,16 @@ function findDodaxDetailPanel() {
   const viewportWidth = window.innerWidth;
   const candidates = [];
   const keywords = ['職務経歴', '転職意向', '転職を', '職歴', '業務内容', '学歴', '年収'];
+  // スカウト作成フォーム（差出人・宛先・テンプレート選択・件名等）には「職務経歴書」
+  // という添付ラベルがあり、これが「職務経歴」キーワードに誤ってヒットして候補者
+  // プロフィールと誤認識されることがあった（実際にパーソナライズ文生成でスカウト
+  // フォームの文言が抽出される不具合として発覚）。フォーム特有の文言を含む要素は
+  // 候補から除外する
+  const composeFormMarkers = ['差出人', '宛先', 'を挿入', 'テンプレートを呼び出す'];
   document.querySelectorAll('div, section, article, aside, main').forEach(el => {
     const rect = el.getBoundingClientRect();
     const t = (el.innerText || '').trim();
+    if (composeFormMarkers.some(m => t.includes(m))) return;
     if (rect.left > viewportWidth * 0.35 && rect.width > 200 && t.length > 100 && t.length < 30000) {
       const hasKeyword = keywords.some(kw => t.includes(kw));
       if (hasKeyword) candidates.push({ el, score: t.length, left: Math.round(rect.left) });
@@ -5365,6 +5372,7 @@ function findDodaxDetailPanel() {
     document.querySelectorAll('div, section, aside').forEach(el => {
       const rect = el.getBoundingClientRect();
       const t = (el.innerText || '').trim();
+      if (composeFormMarkers.some(m => t.includes(m))) return;
       if (rect.left > viewportWidth * 0.5 && rect.width > 200 && t.length > 50) {
         candidates.push({ el, score: t.length, left: Math.round(rect.left) });
       }
