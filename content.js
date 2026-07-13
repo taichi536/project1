@@ -1103,6 +1103,11 @@ function extractBasicInfo(cardEl) {
   } else if (getPlatform() === 'rds') {
     const idx = lines.findIndex(l => l === '現職' || l === '前職');
     const companyRe = /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,|ホールディングス|グループ|銀行|証券|保険|大学|病院/;
+    // companyRe は「◯◯大学病院」等の会社名も拾えるよう「大学」「病院」を含むが、
+    // 候補者自身の学歴欄（「◯◯大学院 修了」等）も同じキーワードに誤ってヒットし
+    // 会社名として拾われてしまう不具合が doda-X 側で実際に発生したため、同じ形の
+    // 危険箇所であるRDS側にも予防的に卒業・修了行の除外を入れる
+    const isEduLine = l => /卒業|修了|在学|入学/.test(l);
     if (idx >= 0) {
       // 現職/前職の前後5行から会社名を探す。「会社名／職種」形式の行（／を含む）は
       // 職種名だけの単独行より確実に会社名を含むため優先する。優先度を分けずに
@@ -1115,6 +1120,7 @@ function extractBasicInfo(cardEl) {
         if (i === idx) continue;
         const line = lines[i];
         if (!line || line.length < 2) continue;
+        if (isEduLine(line)) continue;
         const dist = Math.abs(i - idx);
         if (line.includes('／') && line.length > 4) {
           if (dist < bestSlashDist) { bestSlashDist = dist; bestSlashLine = line; }
@@ -1127,27 +1133,33 @@ function extractBasicInfo(cardEl) {
     }
     if (!company) {
       // フォールバック：ページ全体で会社名キーワードを含む行
-      company = lines.find(l => companyRe.test(l))?.split(/[／/]/)[0].trim() || '';
+      company = lines.find(l => !isEduLine(l) && companyRe.test(l))?.split(/[／/]/)[0].trim() || '';
     }
   } else if (getPlatform() === 'dodax') {
     // doda-X: 「現職」「在籍」の近くか、会社名キーワードを含む行を優先
     const companyRe2 = /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,|ホールディングス|グループ|銀行|証券|保険|大学|病院/;
+    // companyRe2は「◯◯大学病院」のような会社名も拾えるよう「大学」「病院」を含むが、
+    // 候補者自身の学歴欄（「◯◯大学院 修了」「◯◯大学 卒業」等）も同じキーワードに
+    // 誤ってヒットし、会社名として拾われてしまう不具合があった（実際に発生を確認）。
+    // 卒業・修了等の学歴特有の語を含む行は会社名候補から除外する
+    const isEduLine = l => /卒業|修了|在学|入学/.test(l);
     const idx2 = lines.findIndex(l => l === '現職' || l.includes('在籍'));
     if (idx2 >= 0) {
       for (let i = Math.max(0, idx2 - 3); i < Math.min(lines.length, idx2 + 3); i++) {
         if (i === idx2) continue;
+        if (isEduLine(lines[i])) continue;
         if (companyRe2.test(lines[i]) || (lines[i].includes('／') && lines[i].length > 4)) {
           company = lines[i].split(/[／/]/)[0].trim(); break;
         }
       }
     }
-    if (!company) company = lines.find(l => companyRe2.test(l))?.split(/[／/]/)[0].trim() || '';
+    if (!company) company = lines.find(l => !isEduLine(l) && companyRe2.test(l))?.split(/[／/]/)[0].trim() || '';
     // doda-Xは詳細パネルからも会社名を取得試み
     if (!company) {
       const p = findDodaxDetailPanel();
       if (p) {
         const pLines = (p.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
-        company = pLines.find(l => companyRe2.test(l))?.split(/[／/]/)[0].trim() || '';
+        company = pLines.find(l => !isEduLine(l) && companyRe2.test(l))?.split(/[／/]/)[0].trim() || '';
       }
     }
   } else {
