@@ -1321,7 +1321,11 @@ document.addEventListener('click', e => {
     (async () => {
       try {
         const pending = JSON.parse(raw);
-        if (pending.templateName) return;
+        // 同じテンプレートでの重複検知（同一クリックでハンドラが二重発火するケース）はスキップするが、
+        // 一度「確定」した後にテンプレートを選び直して再度「確定」した場合は、新しい選択で上書きする
+        // （以前はtemplateNameが一度セットされると以降は一切更新されず、最初に選んだテンプレートが
+        // 送信時までそのまま使われてしまっていた）
+        if (pending.templateRaw === tmplName) return;
 
         // AC）/ BC( で始まるテンプレート名はポジション名そのもの（スプレッドシートのドロップダウンと同形式）
         if (/^[AB]C[）(]/.test(tmplName)) {
