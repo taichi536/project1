@@ -1154,6 +1154,18 @@ function extractBasicInfo(cardEl) {
       }
     }
     if (!company) company = lines.find(l => !isEduLine(l) && companyRe2.test(l))?.split(/[／/]/)[0].trim() || '';
+    // 会社名に「株式会社」等の判定キーワードを含まない場合（例:「JFEエンジニアリング」）は
+    // 上のキーワード一致方式では見つからない（実際に発生を確認）。doda-Xのカードは
+    // 「職務経歴書 メッセージ 進捗状況」という固定ラベル行の直後に必ず「会社名 部署名」の
+    // 行が続く構造になっているため、それを直接使う（会社名と部署名の間の最初の空白で区切る）
+    if (!company) {
+      const toolbarIdx = lines.findIndex(l => l === '職務経歴書 メッセージ 進捗状況');
+      const nextLine = toolbarIdx >= 0 ? lines[toolbarIdx + 1] : '';
+      if (nextLine && !isEduLine(nextLine)) {
+        const spaceIdx = nextLine.search(/[ 　]/);
+        company = (spaceIdx > 0 ? nextLine.substring(0, spaceIdx) : nextLine).trim();
+      }
+    }
     // doda-Xは詳細パネルからも会社名を取得試み
     if (!company) {
       const p = findDodaxDetailPanel();
