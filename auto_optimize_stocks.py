@@ -207,8 +207,13 @@ def simulate(price_df: pd.DataFrame,
         recent = price_df.iloc[idx - skip_days] if skip_days > 0 else cur
 
         # 各銘柄のモメンタム計算
+        # ★ 生存者バイアス対策: ルックバック開始時点でデータが存在する銘柄のみ対象
+        lookback_start_idx = idx - lookback_days - skip_days
         momentum = {}
         for t in available:
+            # ルックバック開始時点より前に上場していること（NaNでないこと）を確認
+            if pd.isna(price_df[t].iloc[lookback_start_idx]):
+                continue
             p = float(past[t]) if not pd.isna(past[t]) else 0
             r = float(recent[t]) if not pd.isna(recent[t]) else 0
             c = float(cur[t]) if not pd.isna(cur[t]) else 0
@@ -474,7 +479,8 @@ def print_recommendation(result: dict):
     print(f"  top_n:            {int(best['top_n'])} 銘柄を保有")
     print(f"  skip_days:        {int(best['skip_days'])} 日")
     print(f"  平均OOSシャープ:  {best['平均OOSシャープ']:.3f}")
-    print(f"\n  ⚠️  注意: 生存者バイアスあり。実際の成績はこれより低い可能性あり")
+    print(f"\n  ⚠️  注意: 生存者バイアス対策済み（ルックバック開始時に上場していた銘柄のみ対象）")
+    print(f"         ただし上場廃止・倒産銘柄は含まれないため過大評価の可能性あり")
     print("=" * 60 + "\n")
 
 
@@ -499,6 +505,28 @@ def main():
     print("💾 結果を保存中...")
     save_results(result)
     print_recommendation(result)
+
+    # ── B: top_n=3 vs top_n=10 詳細比較 ──────────────────────────────────────
+    print("\n" + "=" * 60)
+    print("  📊 top_n=3銘柄 vs top_n=10銘柄 比較（lookback=2m, skip=21d）")
+    print("=" * 60)
+
+    price_df_full = fetch_prices()  # 全期間のデータで比較
+    configs = [
+        {"label": "集中型（3銘柄）", "top_n": 3,  "lookback_months": 2, "skip_days": 21},
+        {"label": "分散型（10銘柄）", "top_n": 10, "lookback_months": 2, "skip_days": 21},
+        {"label": "TOP2位（10銘柄/5m）","top_n": 10, "lookback_months": 5, "skip_days": 21},
+    ]
+    for cfg in configs:
+        label = cfg.pop("label")
+        sharpe, ret, _ = simulate(price_df_full, **cfg)
+        print(f"  {label:20s}  Sharpe: {sharpe:+.3f}  全期間リターン: {ret:+.1f}%")
+        cfg["label"] = label  # 戻す
+
+    print()
+    print("  💡 Sharpeが高い = リスク対比のリターンが良い")
+    print("     全期間リターンが高い ≠ 必ずしも良い（リスクが高い可能性）")
+    print("=" * 60 + "\n")
 
     print(f"  ⏱  総実行時間: {time.time()-t0:.0f} 秒（{(time.time()-t0)/60:.1f} 分）\n")
 

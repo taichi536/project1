@@ -1782,7 +1782,7 @@ elif page == "🔬 バックテスト":
     st.title("🔬 バックテスト")
     st.markdown("過去データで売買戦略の有効性を検証します")
 
-    bt_tab_single, bt_tab_batch, bt_tab_momentum, bt_tab_multi, bt_tab_crypto, bt_tab_optimizer = st.tabs(["📈 単一銘柄", "📊 一括バックテスト", "🚀 モメンタム戦略", "🌍 マルチアセット", "🪙 暗号資産", "🔬 最適化"])
+    bt_tab_single, bt_tab_batch, bt_tab_momentum, bt_tab_multi, bt_tab_crypto, bt_tab_optimizer, bt_tab_stocks = st.tabs(["📈 単一銘柄", "📊 一括バックテスト", "🚀 モメンタム戦略", "🌍 マルチアセット", "🪙 暗号資産", "🔬 最適化", "🎯 個別株モメンタム"])
 
     # ── 共通パラメータ（両タブで使う）──────────────────────────────────────
     with st.expander("⚙️ バックテスト設定（期間・戦略・資金）", expanded=False):
@@ -2536,6 +2536,131 @@ elif page == "🔬 バックテスト":
                             f"推奨パラメータ: lookback={top_lb[0]}ヶ月 / top_n={top_tn[0]}銘柄 / skip={top_sk[0]}日 — "
                             "マルチアセットタブでこの値を試してください。"
                         )
+
+    # ── 個別株モメンタムタブ ───────────────────────────────────────────────────
+    with bt_tab_stocks:
+        st.markdown("### 🎯 日経225 個別株モメンタム バックテスト")
+        st.caption(
+            "日経225主要銘柄から毎月モメンタム上位N銘柄を選択・保有します。"
+            "ウォークフォワード最適化の推奨値: **lookback=2ヶ月 / 3銘柄 / skip=21日**"
+        )
+
+        with st.expander("⚠️ 生存者バイアスについて", expanded=False):
+            st.markdown("""
+現在存在する銘柄だけでバックテストするため、過去に**倒産・上場廃止した銘柄が含まれません**。
+実際の成績はここに表示される数値より**10〜30%程度低くなる**可能性があります。
+
+対策として、ルックバック開始時点に上場していた銘柄のみを使用しています。
+""")
+
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        stk_lookback = sc1.selectbox("lookback（ヶ月）", [1,2,3,4,5,6,8,9,10,12], index=1, key="stk_lb")
+        stk_topn     = sc2.selectbox("保有銘柄数", [3,5,7,10,15,20], index=0, key="stk_topn")
+        stk_skip     = sc3.selectbox("skip（日）", [0,5,10,21], index=3, key="stk_skip")
+        stk_cash     = sc4.number_input("初期資金（円）", value=1_000_000, step=100_000, key="stk_cash")
+
+        sc5, sc6 = st.columns(2)
+        stk_start = sc5.text_input("開始日", value="2015-01-01", key="stk_start")
+        stk_end   = sc6.text_input("終了日", value="2025-12-31", key="stk_end")
+
+        if st.button("▶ バックテスト実行", key="run_stocks_bt", type="primary"):
+            from auto_optimize_stocks import NIKKEI_UNIVERSE, simulate as stk_simulate, FEE_RATE as STK_FEE
+            import yfinance as yf
+
+            with st.spinner("銘柄データ取得中（60銘柄）..."):
+                tickers = list(NIKKEI_UNIVERSE.values())
+                labels  = {v: k for k, v in NIKKEI_UNIVERSE.items()}
+                try:
+                    raw = yf.download(tickers, start=stk_start, end=stk_end,
+                                      interval="1d", auto_adjust=True, progress=False)
+                    close = raw["Close"] if "Close" in raw.columns else raw
+                    prices = {}
+                    for t in tickers:
+                        if t in close.columns:
+                            s = close[t].dropna()
+                            if len(s) > 30:
+                                prices[t] = s
+                    price_df_stk = pd.DataFrame(prices).ffill().dropna(how="all")
+                except Exception as e:
+                    st.error(f"データ取得エラー: {e}")
+                    price_df_stk = pd.DataFrame()
+
+            if price_df_stk.empty:
+                st.error("データを取得できませんでした")
+            else:
+                with st.spinner("バックテスト計算中..."):
+                    sharpe, total_ret, pv_series = stk_simulate(
+                        price_df_stk,
+                        lookback_months=stk_lookback,
+                        top_n=stk_topn,
+                        skip_days=stk_skip,
+                    )
+
+                if sharpe <= -100:
+                    st.error("データが不足しています。期間を延ばすか設定を変えてください。")
+                else:
+                    # メトリクス
+                    final_val = stk_cash * (1 + total_ret / 100)
+                    monthly_ret_s = pv_series.pct_change().dropna()
+                    max_dd = ((pv_series - pv_series.cummax()) / pv_series.cummax() * 100).min()
+
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("最終資産", f"¥{final_val:,.0f}",
+                              delta=f"{total_ret:+.1f}%")
+                    m2.metric("シャープレシオ", f"{sharpe:.2f}")
+                    m3.metric("最大ドローダウン", f"{max_dd:.1f}%")
+                    m4.metric("月次平均リターン", f"{monthly_ret_s.mean()*100:+.2f}%")
+
+                    # 資産推移グラフ
+                    st.markdown("#### 📈 資産推移")
+                    import plotly.graph_objects as go
+                    scaled = pv_series * (stk_cash / float(pv_series.iloc[0]))
+                    fig_stk = go.Figure()
+                    fig_stk.add_trace(go.Scatter(
+                        x=scaled.index, y=scaled.values,
+                        name=f"個別株モメンタム（top{stk_topn}）",
+                        line=dict(color="#00b4d8", width=2),
+                        fill="tozeroy", fillcolor="rgba(0,180,216,0.08)",
+                    ))
+                    fig_stk.update_layout(
+                        height=380, margin=dict(l=0, r=0, t=20, b=0),
+                        yaxis_title="資産（円）",
+                        yaxis_tickformat=",.0f",
+                    )
+                    st.plotly_chart(fig_stk, use_container_width=True)
+
+                    # 現在の推奨銘柄（最新モメンタムランキング）
+                    st.markdown("#### 🏆 現在のモメンタムランキング（上位10銘柄）")
+                    lookback_days = stk_lookback * 21
+                    n_pdf = len(price_df_stk)
+                    if n_pdf > lookback_days + stk_skip + 1:
+                        cur_p    = price_df_stk.iloc[-1]
+                        past_p   = price_df_stk.iloc[-(lookback_days + stk_skip + 1)]
+                        recent_p = price_df_stk.iloc[-(stk_skip + 1)] if stk_skip > 0 else cur_p
+                        mom_now  = {}
+                        for t in price_df_stk.columns:
+                            p = float(past_p[t]) if not pd.isna(past_p[t]) else 0
+                            r = float(recent_p[t]) if not pd.isna(recent_p[t]) else 0
+                            if p > 0 and r > 0:
+                                mom_now[t] = (r / p - 1) * 100
+                        ranked_now = sorted(mom_now.items(), key=lambda x: x[1], reverse=True)
+                        rank_df = pd.DataFrame([
+                            {
+                                "順位": i+1,
+                                "銘柄名": labels.get(t, t),
+                                "コード": t,
+                                f"モメンタム({stk_lookback}m)": f"{m:+.1f}%",
+                                "推奨": "✅ 買い" if i < stk_topn and m > 0 else ("⚠️ マイナス" if m <= 0 else ""),
+                            }
+                            for i, (t, m) in enumerate(ranked_now[:20])
+                        ])
+                        st.dataframe(rank_df, hide_index=True, use_container_width=True)
+
+                    st.info(
+                        "💡 NISAで実践する場合：毎月末に上位銘柄を確認し、"
+                        "保有中で圏外になった銘柄を売却 → 新たに上位に入った銘柄を購入。"
+                        "手数料無料のSBI・楽天証券推奨。"
+                    )
 
 
 # ─── ポートフォリオ最適化 ─────────────────────────────────────────────────────
