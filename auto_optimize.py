@@ -1,8 +1,13 @@
 """
-auto_optimize.py  ─  マルチアセット・モメンタム戦略 全自動最適化
+auto_optimize.py  ─  株式4資産モメンタム戦略 全自動最適化
 ======================================================================
 実行: python auto_optimize.py
 結果: results/ フォルダに CSV・グラフ・サマリーを保存
+
+【戦略】
+  日本株・米国株・先進国株・新興国株の4ETFを毎月ローテーション
+  全資産のモメンタムがマイナス → 現金（絶対モメンタムフィルター）
+  ※ Gary Antonacci「デュアルモメンタム」の考え方をベースに拡張
 
 【評価の仕組み】
   - 訓練3年でグリッドサーチ → ベストパラメータを選択
@@ -35,15 +40,12 @@ INITIAL_CASH = 1_000_000.0
 OUTPUT_DIR   = "results"
 
 UNIVERSE = {
-    "日本株":   "1306.T",
-    "米国株":   "2558.T",
-    "先進国株": "1657.T",
-    "新興国株": "1658.T",
-    "金":       "1540.T",
-    "J-REIT":   "1343.T",
-    "米国債":   "1482.T",
-    "先進国債": "2511.T",
-    "ドル円":   "USDJPY=X",
+    "日本株":   "1306.T",   # TOPIX ETF
+    "米国株":   "2558.T",   # S&P500 ETF
+    "先進国株": "1657.T",   # 先進国株ETF
+    "新興国株": "1658.T",   # 新興国株ETF
+    # 株のみ戦略: 債券・金・REIT・為替を除外
+    # → 全部マイナスなら現金（絶対モメンタムフィルター）
 }
 
 PARAM_GRID = {
@@ -171,7 +173,7 @@ def walk_forward(price_df: pd.DataFrame) -> dict:
     n_windows = len(window_starts)
 
     total_evals = n_combos * n_windows
-    print(f"🔬 最適化開始")
+    print(f"🔬 最適化開始（株式4資産: 日本株・米国株・先進国株・新興国株）")
     print(f"   パラメータ組み合わせ: {n_combos:,} 通り")
     print(f"   時間窓: {n_windows} 個（{price_df.index[TRAIN_DAYS].date()} 〜 {price_df.index[min(TRAIN_DAYS + TEST_DAYS, n-1)].date()} etc.）")
     print(f"   総評価回数: {total_evals:,} 回\n")
@@ -464,7 +466,11 @@ def print_recommendation(result: dict):
 def main():
     print("\n" + "=" * 60)
     print("  🔬 マルチアセット・モメンタム 全自動最適化")
-    print(f"  パラメータ組み合わせ: {13*4*6*2:,} 通り")
+    combos_count = (len(PARAM_GRID["lookback_months"]) *
+                    len(PARAM_GRID["top_n"]) *
+                    len(PARAM_GRID["skip_days"]) *
+                    len(PARAM_GRID["mom_threshold_pct"]))
+    print(f"  パラメータ組み合わせ: {combos_count:,} 通り")
     print(f"  データ期間: {DATA_START} 〜 {DATA_END}")
     print(f"  訓練: {TRAIN_DAYS//252}年  テスト: {TEST_DAYS//252}年  スライド: {STEP_DAYS}日（半年）")
     print("=" * 60 + "\n")
