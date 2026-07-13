@@ -12,6 +12,11 @@ auto_optimize_stocks.py  ─  日経225 個別株モメンタム戦略 全自動
   バックテストは現在の構成銘柄を使用するため「生存者バイアス」があります
   （倒産・上場廃止した銘柄が除外される）。実際の成績は過大評価の可能性あり。
 
+【誠実性の取り組み】
+  1. ルックアヘッドバイアス修正: シグナルは前日終値、執行は当日価格
+  2. DSR（偏向シャープ比）: 多重テストによる過学習を統計的に検出
+  3. ホールドアウト期間: 2024-2025年のデータは最適化に一切使用しない
+
 【パラメータ最適化】
   lookback_months × top_n × skip_days の組み合わせを
   ウォークフォワードで評価（訓練3年→テスト1年→半年スライド）
@@ -27,19 +32,22 @@ from itertools import product
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from scipy import stats
 
 warnings.filterwarnings("ignore")
 
 # ── 設定 ────────────────────────────────────────────────────────────────────
-DATA_START   = "2010-01-01"
-DATA_END     = "2025-12-31"
-TRAIN_DAYS   = 3 * 252
-TEST_DAYS    = 1 * 252
-STEP_DAYS    = 126            # 半年スライド
-FEE_RATE     = 0.001          # 往復0.2%（ネット証券想定）
-INITIAL_CASH = 1_000_000.0
-OUTPUT_DIR   = "results"
-MIN_STOCKS   = 10             # データ取得できる最低銘柄数
+DATA_START      = "2010-01-01"
+DATA_END_OPT    = "2023-12-31"   # 最適化に使うデータの終端（ホールドアウト前）
+HOLDOUT_START   = "2024-01-01"   # ホールドアウト開始（最適化中は絶対に触らない）
+HOLDOUT_END     = "2025-12-31"   # ホールドアウト終端
+TRAIN_DAYS      = 3 * 252
+TEST_DAYS       = 1 * 252
+STEP_DAYS       = 126            # 半年スライド
+FEE_RATE        = 0.001          # 往復0.2%（ネット証券想定）
+INITIAL_CASH    = 1_000_000.0
+OUTPUT_DIR      = "results"
+MIN_STOCKS      = 10             # データ取得できる最低銘柄数
 
 # ── 日経225 主要60銘柄 ────────────────────────────────────────────────────────
 NIKKEI_UNIVERSE = {
@@ -115,8 +123,10 @@ PARAM_GRID = {
 
 
 # ── データ取得 ────────────────────────────────────────────────────────────────
-def fetch_prices() -> pd.DataFrame:
-    print("📡 日経225主要銘柄の価格データを取得中...")
+def fetch_prices(start: str = DATA_START, end: str = DATA_END_OPT,
+                 label: str = "") -> pd.DataFrame:
+    period_label = label or f"{start}〜{end}"
+    print(f"📡 日経225主要銘柄の価格データを取得中... ({period_label})")
     print(f"   対象: {len(NIKKEI_UNIVERSE)} 銘柄")
     prices = {}
     failed = []
@@ -127,7 +137,7 @@ def fetch_prices() -> pd.DataFrame:
     # まとめてダウンロード（高速）
     try:
         raw = yf.download(
-            tickers, start=DATA_START, end=DATA_END,
+            tickers, start=start, end=end,
             interval="1d", auto_adjust=True, progress=False,
         )
         if "Close" in raw.columns:
@@ -147,16 +157,16 @@ def fetch_prices() -> pd.DataFrame:
     except Exception as e:
         print(f"  ⚠️  一括取得失敗: {e}、個別取得に切り替えます...")
         for ticker in tickers:
-            label = labels.get(ticker, ticker)
+            lab = labels.get(ticker, ticker)
             try:
-                df = yf.download(ticker, start=DATA_START, end=DATA_END,
+                df = yf.download(ticker, start=start, end=end,
                                  interval="1d", auto_adjust=True, progress=False)
                 if df is not None and len(df) > 200:
                     prices[ticker] = df["Close"].squeeze()
                 else:
-                    failed.append(label)
+                    failed.append(lab)
             except Exception:
-                failed.append(label)
+                failed.append(lab)
 
     if failed:
         print(f"  ⚠️  取得失敗 ({len(failed)}銘柄): {', '.join(failed[:10])}{'...' if len(failed) > 10 else ''}")
@@ -198,17 +208,22 @@ def simulate(price_df: pd.DataFrame,
 
     for rd in rebal_dates:
         idx = price_df.index.get_loc(rd)
-        required = lookback_days + skip_days + 1
+        # +2: シグナルは前日(idx-1)の価格を使うため1日余分に必要
+        required = lookback_days + skip_days + 2
         if idx < required:
             continue
 
-        cur    = price_df.iloc[idx]
-        past   = price_df.iloc[idx - lookback_days - skip_days]
-        recent = price_df.iloc[idx - skip_days] if skip_days > 0 else cur
+        # ★ ルックアヘッドバイアス修正
+        # シグナル計算: 前日終値（idx-1）を使う → 当日の値動きを先読みしない
+        # 執行価格:     当日終値（idx）を使う   → 前日シグナルで当日寄付き執行と等価
+        exec_p = price_df.iloc[idx]
+        sig    = price_df.iloc[idx - 1]
+        past   = price_df.iloc[idx - 1 - lookback_days - skip_days]
+        recent = price_df.iloc[idx - 1 - skip_days] if skip_days > 0 else sig
 
         # 各銘柄のモメンタム計算
         # ★ 生存者バイアス対策: ルックバック開始時点でデータが存在する銘柄のみ対象
-        lookback_start_idx = idx - lookback_days - skip_days
+        lookback_start_idx = idx - 1 - lookback_days - skip_days
         momentum = {}
         for t in available:
             # ルックバック開始時点より前に上場していること（NaNでないこと）を確認
@@ -216,8 +231,8 @@ def simulate(price_df: pd.DataFrame,
                 continue
             p = float(past[t]) if not pd.isna(past[t]) else 0
             r = float(recent[t]) if not pd.isna(recent[t]) else 0
-            c = float(cur[t]) if not pd.isna(cur[t]) else 0
-            if p > 0 and r > 0 and c > 0:
+            s = float(sig[t]) if not pd.isna(sig[t]) else 0
+            if p > 0 and r > 0 and s > 0:
                 momentum[t] = (r / p - 1) * 100
 
         if not momentum:
@@ -227,27 +242,27 @@ def simulate(price_df: pd.DataFrame,
         # 絶対モメンタムフィルター: 上位銘柄でもマイナスなら現金
         selected = [t for t, m in ranked[:actual_top_n] if m > 0]
 
-        # 現在の総資産
+        # 現在の総資産（当日執行価格で評価）
         pv = cash + sum(
-            holdings.get(t, 0) * float(cur[t])
+            holdings.get(t, 0) * float(exec_p[t])
             for t in holdings
-            if t in cur.index and not pd.isna(cur[t])
+            if t in exec_p.index and not pd.isna(exec_p[t])
         )
 
-        # 不要銘柄を売却
+        # 不要銘柄を売却（当日執行価格）
         for t in list(holdings.keys()):
             if t not in selected:
-                price = float(cur[t]) if t in cur.index and not pd.isna(cur[t]) else 0
+                price = float(exec_p[t]) if t in exec_p.index and not pd.isna(exec_p[t]) else 0
                 if price > 0:
                     cash += holdings[t] * price * (1 - FEE_RATE)
                 del holdings[t]
 
-        # 選択銘柄を等金額で購入
+        # 選択銘柄を等金額で購入（当日執行価格）
         if selected:
             per = pv / len(selected)
             for t in selected:
                 if t not in holdings:
-                    price = float(cur[t]) if not pd.isna(cur[t]) else 0
+                    price = float(exec_p[t]) if not pd.isna(exec_p[t]) else 0
                     if price > 0:
                         buy_amt = min(per, cash)
                         holdings[t] = buy_amt * (1 - FEE_RATE) / price
@@ -263,6 +278,38 @@ def simulate(price_df: pd.DataFrame,
     sharpe = float(monthly_ret.mean() / monthly_ret.std() * (12 ** 0.5)) if monthly_ret.std() > 0 else 0.0
     total_ret = float((pv_series.iloc[-1] / INITIAL_CASH - 1) * 100)
     return sharpe, total_ret, pv_series
+
+
+# ── DSR（偏向シャープ比）────────────────────────────────────────────────────
+def deflated_sharpe_ratio(sr_annualized: float, n_trials: int, n_obs: int,
+                          skew: float = 0.0, excess_kurt: float = 0.0) -> tuple:
+    """
+    Bailey & Lopez de Prado (2014) Deflated Sharpe Ratio.
+    多重テストによる過学習を補正し、真のシャープ比が0より大きい確率を返す。
+
+    sr_annualized: 年率換算シャープ比
+    n_trials:      試したパラメータ組み合わせの総数
+    n_obs:         月次リターンの観測数
+    Returns: (dsr, e_max_sr) - DSRと期待最大シャープ比
+    """
+    if n_trials <= 1 or n_obs <= 1:
+        return 0.0, 0.0
+
+    # ノイズだけで期待される最大シャープ比（Euler-Mascheroni定数 ≈ 0.5772）
+    e_max_sr = (
+        (1 - np.euler_gamma) * stats.norm.ppf(1 - 1.0 / n_trials)
+        + np.euler_gamma * stats.norm.ppf(1 - 1.0 / (n_trials * np.e))
+    )
+
+    # 月次シャープに変換して分散を計算
+    sr_m = sr_annualized / np.sqrt(12)
+    e_max_m = e_max_sr / np.sqrt(12)
+    variance = (1 - skew * sr_m + (excess_kurt / 4) * sr_m ** 2) / max(n_obs - 1, 1)
+    sigma = np.sqrt(max(variance, 1e-10))
+
+    z = (sr_m - e_max_m) / sigma
+    dsr = float(stats.norm.cdf(z))
+    return dsr, float(e_max_sr)
 
 
 # ── ウォークフォワード最適化 ─────────────────────────────────────────────────
@@ -407,24 +454,68 @@ def walk_forward(price_df: pd.DataFrame) -> dict:
         c = pd.concat(parts)
         return c[~c.index.duplicated(keep="last")].sort_index()
 
+    oos_equity = _concat(oos_parts)
+
+    # ── DSR計算 ─────────────────────────────────────────────────────────────
+    avg_oos_sharpe = float(windows_df["OOSシャープ"].mean())
+    n_obs_oos = len(oos_equity.pct_change().dropna()) if not oos_equity.empty else 1
+    dsr, e_max_sr = deflated_sharpe_ratio(
+        sr_annualized=avg_oos_sharpe,
+        n_trials=total_evals,
+        n_obs=n_obs_oos,
+    )
+
     return {
         "windows":       windows_df,
-        "oos_equity":    _concat(oos_parts),
+        "oos_equity":    oos_equity,
         "fixed_equity":  _concat(fix_parts),
         "param_summary": param_summary,
         "best_history":  best_history,
+        "dsr":           round(dsr, 4),
+        "e_max_sr":      round(e_max_sr, 3),
+        "n_trials":      total_evals,
         "summary": {
             "総評価回数":         total_evals,
             "有効窓数":           len(windows_df),
-            "平均OOSシャープ":    round(windows_df["OOSシャープ"].mean(), 3),
+            "平均OOSシャープ":    round(avg_oos_sharpe, 3),
             "平均固定Sharpe":     round(windows_df["固定Sharpe"].dropna().mean(), 3),
             "最適化優位率(%)":    round(windows_df["最適化優位"].mean() * 100, 1),
             "過学習比率":         round(
-                windows_df["OOSシャープ"].mean() / windows_df["訓練Sharpe"].mean(), 3
+                avg_oos_sharpe / windows_df["訓練Sharpe"].mean(), 3
             ) if windows_df["訓練Sharpe"].mean() > 0 else "N/A",
             "最終OOS資産":        round(running_oos),
             "最終固定資産":       round(running_fix),
+            "DSR":                round(dsr, 4),
+            "期待最大Sharpe":     round(e_max_sr, 3),
         },
+    }
+
+
+# ── ホールドアウト検証 ───────────────────────────────────────────────────────
+def run_holdout(best_params: dict) -> dict:
+    """
+    2024-2025年の完全未接触データで最良パラメータを一回だけ検証する。
+    この検証は最適化の後に一度だけ実施し、結果を見てパラメータを調整してはならない。
+    """
+    print(f"\n🔒 ホールドアウト検証（{HOLDOUT_START} 〜 {HOLDOUT_END}）")
+    print(f"   ※ このデータは最適化中に一切使用していません")
+    print(f"   検証パラメータ: {best_params}\n")
+
+    holdout_df = fetch_prices(start=HOLDOUT_START, end=HOLDOUT_END, label="ホールドアウト期間")
+
+    if holdout_df.empty or len(holdout_df) < 60:
+        return {"error": "ホールドアウトデータが不足しています"}
+
+    try:
+        sharpe, ret, eq = simulate(holdout_df, **best_params)
+    except Exception as e:
+        return {"error": str(e)}
+
+    return {
+        "sharpe": round(sharpe, 3),
+        "return_pct": round(ret, 2),
+        "equity": eq,
+        "params": best_params,
     }
 
 
@@ -450,6 +541,7 @@ def print_recommendation(result: dict):
     print("\n" + "=" * 60)
     print("  📊 最適化サマリー（日経225 個別株モメンタム）")
     print("=" * 60)
+    print(f"  最適化データ期間:  {DATA_START} 〜 {DATA_END_OPT}")
     print(f"  総評価回数:        {s['総評価回数']:,} 回")
     print(f"  有効時間窓:        {s['有効窓数']} 窓")
     print(f"  平均OOSシャープ:   {s['平均OOSシャープ']}")
@@ -458,6 +550,16 @@ def print_recommendation(result: dict):
     print(f"  過学習比率:        {s['過学習比率']}  ← 1.0が理想")
     print(f"  最終OOS資産:       ¥{s['最終OOS資産']:,}")
     print(f"  最終固定資産:      ¥{s['最終固定資産']:,}")
+    print(f"")
+    print(f"  ── DSR（偏向シャープ比）─────────────────────────")
+    dsr_val = s['DSR']
+    e_max   = s['期待最大Sharpe']
+    verdict = "✅ 統計的に有意（過学習リスク低）" if dsr_val >= 0.95 else \
+              "⚠️  境界的（要注意）"              if dsr_val >= 0.80 else \
+              "❌ 統計的に有意でない（過学習の可能性大）"
+    print(f"  DSR:               {dsr_val:.4f}  {verdict}")
+    print(f"  期待最大Sharpe:    {e_max:.3f}  ← {s['総評価回数']:,}試行のノイズ期待値")
+    print(f"  OOSシャープ:       {s['平均OOSシャープ']}  vs 期待最大 {e_max:.3f}")
 
     print("\n" + "-" * 60)
     print("  🏆 OOSシャープ TOP 10 パラメータ")
@@ -489,13 +591,16 @@ def main():
     print("\n" + "=" * 60)
     print("  🎯 日経225 個別株モメンタム戦略 全自動最適化")
     print(f"  対象銘柄: 日経225主要 {len(NIKKEI_UNIVERSE)} 銘柄")
-    print(f"  データ期間: {DATA_START} 〜 {DATA_END}")
+    print(f"  最適化データ: {DATA_START} 〜 {DATA_END_OPT}")
+    print(f"  ホールドアウト: {HOLDOUT_START} 〜 {HOLDOUT_END}（最適化外）")
     print(f"  訓練: {TRAIN_DAYS//252}年  テスト: {TEST_DAYS//252}年  スライド: {STEP_DAYS}日")
+    print(f"  ルックアヘッドバイアス修正: シグナル=前日終値 / 執行=当日価格")
     print("=" * 60 + "\n")
 
     t0 = time.time()
 
-    price_df = fetch_prices()
+    # ── 最適化（ホールドアウト期間を除いたデータのみ） ───────────────────────
+    price_df = fetch_prices(start=DATA_START, end=DATA_END_OPT)
     result = walk_forward(price_df)
 
     if "error" in result:
@@ -506,26 +611,54 @@ def main():
     save_results(result)
     print_recommendation(result)
 
-    # ── B: top_n=3 vs top_n=10 詳細比較 ──────────────────────────────────────
+    # ── ホールドアウト検証（一回だけ、最良パラメータで） ───────────────────
+    best_params_hist = result.get("best_history", [])
+    if best_params_hist:
+        # 最も頻出したパラメータを推奨パラメータとする
+        from collections import Counter
+        param_keys = list(PARAM_GRID.keys())
+        param_tuples = [tuple(p[k] for k in param_keys) for p in best_params_hist]
+        most_common = Counter(param_tuples).most_common(1)[0][0]
+        best_params = dict(zip(param_keys, most_common))
+
+        holdout_result = run_holdout(best_params)
+        print("\n" + "=" * 60)
+        print("  🔒 ホールドアウト検証結果")
+        print("=" * 60)
+        if "error" in holdout_result:
+            print(f"  ❌ {holdout_result['error']}")
+        else:
+            h_sharpe = holdout_result["sharpe"]
+            h_ret    = holdout_result["return_pct"]
+            verdict  = "✅ 汎化できている" if h_sharpe > 0.5 else \
+                       "⚠️  弱い（要注意）" if h_sharpe > 0.0 else \
+                       "❌ マイナス（過学習または戦略の限界）"
+            print(f"  対象期間:  {HOLDOUT_START} 〜 {HOLDOUT_END}")
+            print(f"  パラメータ: {best_params}")
+            print(f"  OOSシャープ: {h_sharpe}  {verdict}")
+            print(f"  リターン:    {h_ret:+.1f}%")
+            print(f"  最終資産:    ¥{round(holdout_result['equity'].iloc[-1]):,}" if not holdout_result['equity'].empty else "")
+        print("=" * 60 + "\n")
+
+    # ── 参考: 推奨パラメータと固定パラメータの全期間比較（2010-2023） ────────
     print("\n" + "=" * 60)
-    print("  📊 top_n=3銘柄 vs top_n=10銘柄 比較（lookback=2m, skip=21d）")
+    print(f"  📊 全期間比較（{DATA_START} 〜 {DATA_END_OPT}）")
     print("=" * 60)
 
-    price_df_full = fetch_prices()  # 全期間のデータで比較
     configs = [
-        {"label": "集中型（3銘柄）", "top_n": 3,  "lookback_months": 2, "skip_days": 21},
-        {"label": "分散型（10銘柄）", "top_n": 10, "lookback_months": 2, "skip_days": 21},
-        {"label": "TOP2位（10銘柄/5m）","top_n": 10, "lookback_months": 5, "skip_days": 21},
+        {"label": "集中型（3銘柄/lookback=2m）", "top_n": 3,  "lookback_months": 2, "skip_days": 21},
+        {"label": "分散型（10銘柄/lookback=2m）", "top_n": 10, "lookback_months": 2, "skip_days": 21},
+        {"label": "固定パラメータ（12m/10銘柄）",  "top_n": 10, "lookback_months": 12, "skip_days": 21},
     ]
     for cfg in configs:
         label = cfg.pop("label")
-        sharpe, ret, _ = simulate(price_df_full, **cfg)
-        print(f"  {label:20s}  Sharpe: {sharpe:+.3f}  全期間リターン: {ret:+.1f}%")
-        cfg["label"] = label  # 戻す
+        sharpe, ret, _ = simulate(price_df, **cfg)
+        print(f"  {label:30s}  Sharpe: {sharpe:+.3f}  リターン: {ret:+.1f}%")
+        cfg["label"] = label
 
     print()
     print("  💡 Sharpeが高い = リスク対比のリターンが良い")
-    print("     全期間リターンが高い ≠ 必ずしも良い（リスクが高い可能性）")
+    print("     ※ ルックアヘッドバイアス修正済み・ホールドアウト期間除外済み")
     print("=" * 60 + "\n")
 
     print(f"  ⏱  総実行時間: {time.time()-t0:.0f} 秒（{(time.time()-t0)/60:.1f} 分）\n")
