@@ -249,7 +249,7 @@ def simulate(price_df: pd.DataFrame,
             if t in exec_p.index and not pd.isna(exec_p[t])
         )
 
-        # 不要銘柄を売却（当日執行価格）
+        # Step1: 選択外の銘柄を全売却
         for t in list(holdings.keys()):
             if t not in selected:
                 price = float(exec_p[t]) if t in exec_p.index and not pd.isna(exec_p[t]) else 0
@@ -257,16 +257,32 @@ def simulate(price_df: pd.DataFrame,
                     cash += holdings[t] * price * (1 - FEE_RATE)
                 del holdings[t]
 
-        # 選択銘柄を等金額で購入（当日執行価格）
+        # Step2: 等金額リバランス（既存保有も含めて毎月均等に揃え直す）
         if selected:
-            per = pv / len(selected)
+            target = pv / len(selected)
+
+            # 過剰保有を先に売る（超過分をキャッシュに戻す）
             for t in selected:
-                if t not in holdings:
-                    price = float(exec_p[t]) if not pd.isna(exec_p[t]) else 0
+                if t in holdings and t in exec_p.index and not pd.isna(exec_p[t]):
+                    price = float(exec_p[t])
                     if price > 0:
-                        buy_amt = min(per, cash)
-                        holdings[t] = buy_amt * (1 - FEE_RATE) / price
-                        cash -= buy_amt
+                        cur_val = holdings[t] * price
+                        if cur_val > target:
+                            excess = cur_val - target
+                            sell_shares = excess / price
+                            holdings[t] -= sell_shares
+                            cash += sell_shares * price * (1 - FEE_RATE)
+
+            # 不足分を買い増し・新規購入
+            for t in selected:
+                price = float(exec_p[t]) if t in exec_p.index and not pd.isna(exec_p[t]) else 0
+                if price > 0:
+                    cur_val = holdings.get(t, 0) * price
+                    if cur_val < target:
+                        buy_amt = min(target - cur_val, cash)
+                        if buy_amt > 0:
+                            holdings[t] = holdings.get(t, 0) + buy_amt * (1 - FEE_RATE) / price
+                            cash -= buy_amt
 
         records.append({"日付": rd, "総資産": pv})
 
