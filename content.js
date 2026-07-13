@@ -1244,21 +1244,34 @@ document.addEventListener('click', e => {
     if (!raw) return;
 
     // ★ モーダルが閉じる前に同期的にテンプレート名を取得する（非同期にすると消える）
-    const checkedRadio = document.querySelector('input[type="radio"]:checked');
+    // 実機のDOM調査で確認した確実な手がかりを優先して使う：
+    // 選択中の行には data-selected="true" が付き、テンプレート名のセルには
+    // クラス名に"template-name"を含む要素がある。ラジオボタン(input[type=radio])
+    // から祖先のtr/liを遡ってセルを総当たりする方式は、実際のRDS画面で毎回
+    // 取得に失敗していた（原因不明。行の実構造とは一致しない挙動だった）ため、
+    // より直接的なこちらを優先し、旧方式はフォールバックとして残す。
     let tmplName = '';
-    if (checkedRadio) {
-      const row = checkedRadio.closest('tr, [role="row"]') || checkedRadio.closest('li, [class*="row"], [class*="item"]');
-      if (row) {
-        for (const cell of row.querySelectorAll('td, [role="cell"]')) {
-          if (cell.querySelector('input')) continue;
-          const t = cell.textContent?.trim() || '';
-          if (t.length > 3) { tmplName = t; break; }
-        }
-        if (!tmplName) {
-          for (const el of row.querySelectorAll('div, span, p')) {
-            if (el.querySelector('input, button')) continue;
-            const t = el.textContent?.trim() || '';
-            if (t.length > 3 && t.length < 80) { tmplName = t; break; }
+    const selectedRow = document.querySelector('[data-selected="true"]');
+    if (selectedRow) {
+      const nameCell = selectedRow.querySelector('[class*="template-name"]');
+      if (nameCell) tmplName = (nameCell.textContent || '').trim();
+    }
+    if (!tmplName) {
+      const checkedRadio = document.querySelector('input[type="radio"]:checked');
+      if (checkedRadio) {
+        const row = checkedRadio.closest('tr, [role="row"]') || checkedRadio.closest('li, [class*="row"], [class*="item"]');
+        if (row) {
+          for (const cell of row.querySelectorAll('td, [role="cell"]')) {
+            if (cell.querySelector('input')) continue;
+            const t = cell.textContent?.trim() || '';
+            if (t.length > 3) { tmplName = t; break; }
+          }
+          if (!tmplName) {
+            for (const el of row.querySelectorAll('div, span, p')) {
+              if (el.querySelector('input, button')) continue;
+              const t = el.textContent?.trim() || '';
+              if (t.length > 3 && t.length < 80) { tmplName = t; break; }
+            }
           }
         }
       }
@@ -1343,17 +1356,31 @@ document.addEventListener('click', e => {
           bodyText = histIdx > 50 ? rawPageText.substring(0, histIdx) : rawPageText;
         }
 
-        // モーダル内の選択中テンプレート名を取得（select や data属性）
-        let tmplRaw = '';
-        const tmplSel = searchRoot.querySelector('select');
-        if (tmplSel) {
-          const selText = (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim();
-          if (selText && selText.length > 3) tmplRaw = selText;
+        // テンプレート名は「確定」ボタン押下時点（テンプレート選択モーダルがまだ
+        // 開いている間）に既に正しく取得できているはずなので、それを最優先で使う。
+        // この確認画面には本来のテンプレート名はもう表示されておらず、ここで独自に
+        // 探そうとすると候補者プロフィール欄の見出し等、無関係なテキストを誤って
+        // 拾ってしまっていた（実機調査で確認済み）。
+        let tmplRaw = pending.templateRaw || '';
+        if (!tmplRaw) {
+          const tmplSel = searchRoot.querySelector('select');
+          if (tmplSel) {
+            const selText = (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim();
+            if (selText && selText.length > 3) tmplRaw = selText;
+          }
         }
         if (!tmplRaw) {
           // テンプレート名ラベルを探す（selected/active な行のタイトル等）
           const activeLabel = searchRoot.querySelector('[class*="selected"] [class*="title"], [class*="active"] [class*="title"], [class*="template"][class*="name"]');
           if (activeLabel) tmplRaw = (activeLabel.textContent || '').trim();
+        }
+
+        // 確定ボタン押下時点で既にポジション照合まで済んでいるなら、
+        // 本文の記録だけ済ませてここでの再照合はスキップする
+        if (pending.templateName) {
+          if (bodyText && !pending.bodyText) pending.bodyText = bodyText.substring(0, 2000);
+          sessionStorage.setItem('pendingScout', JSON.stringify(pending));
+          return;
         }
 
         let matched = '';
