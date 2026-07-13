@@ -16,6 +16,21 @@ chrome.storage.local.get(['currentPosition']).then(r => { _cachedCurrentPosition
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.currentPosition) {
     _cachedCurrentPosition = changes.currentPosition.newValue || '';
+    // 「スカウトを作成」クリック後・送信前にポジションを選び直すケースがあるため
+    // （候補者のプロフィールを見てから該当ポジションを選ぶ運用）、未送信のpendingScoutが
+    // あればfallbackPositionもその場で更新しておく。他候補者の「スカウトを作成」で
+    // pendingScout自体が上書きされていれば、その新しいレコードにのみ反映される。
+    try {
+      const raw = sessionStorage.getItem('pendingScout');
+      if (raw) {
+        const pending = JSON.parse(raw);
+        if (pending && pending.id) {
+          pending.fallbackPosition = _cachedCurrentPosition;
+          sessionStorage.setItem('pendingScout', JSON.stringify(pending));
+          console.log('[Snow-we] ポジション変更をpendingScoutに反映:', pending.id, '→', _cachedCurrentPosition || 'なし');
+        }
+      }
+    } catch (_) {}
   }
 });
 
