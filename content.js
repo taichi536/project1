@@ -1479,12 +1479,12 @@ document.addEventListener('click', e => {
               }
             }
           }
-          // 送信直前にインジケーターの最新選択値を読み取る（スカウトボタン押下後に変更した場合も反映）
-          let latestPosition = pending.fallbackPosition || '';
-          try {
-            const posData = await chrome.storage.local.get(['currentPosition']);
-            if (posData.currentPosition) latestPosition = posData.currentPosition;
-          } catch (_) {}
+          // fallbackPositionは「スカウト」ボタン押下時点でこの候補者用に固定済みの値をそのまま使う。
+          // 以前はここで送信直前にドロップダウンの「今の」値を読み直していたが、複数候補者を
+          // 連続処理する運用では、候補者Aの送信が完了する前に次の候補者B用にドロップダウンを
+          // 変更してしまうことがあり、その場合Aに本来の位置ではなくBの位置が記録される
+          // バグになっていた（スカウト時点で捕まえた値こそが、この候補者にとって正しい値）
+          const latestPosition = pending.fallbackPosition || '';
           console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし', '/ fallback:', latestPosition || 'なし');
           recordScoutSent(pending.id, pending.info || {}, pending.templateName || '', pending.bodyText || '', latestPosition);
         }
