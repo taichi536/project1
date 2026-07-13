@@ -2682,7 +2682,10 @@ async function tryClickRDSResumeTab() {
   if (!panel) return false;
 
   const panelText = (panel.innerText || '').trim();
-  const hasScoutHistoryTab = panelText.includes('スカウト履歴') && !panelText.includes('職務経歴');
+  // 先頭付近だけを見る（スカウト履歴タブ内のメッセージ本文に「職務経歴」という語が
+  // 含まれるケースがあり、パネル全体をincludes()すると誤検知して切り替えをスキップしてしまうため）
+  const headText = panelText.slice(0, 200);
+  const hasScoutHistoryTab = headText.includes('スカウト履歴') && !headText.includes('職務経歴');
   if (!hasScoutHistoryTab) return false; // すでにレジュメ表示中なら何もしない
 
   const tabLabels = ['レジュメ', 'プロフィール', '基本情報', '職務経歴'];
@@ -5876,10 +5879,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // スカウト履歴タブが開いたままの場合（removeNonProfileSectionsが空を返した）
         const rdsPanel2 = isRDS ? findRDSDetailPanel() : null;
         const rdsPanel2Text = rdsPanel2 ? (rdsPanel2.innerText || '') : '';
+        // 先頭付近だけを見る（スカウト履歴タブ内のメッセージ本文に職務経歴等の語が
+        // 含まれるケースがあり、パネル全体をincludes()すると誤検知するため）
+        const rdsPanel2Head = rdsPanel2Text.trim().slice(0, 200);
         const profileKwsForPanel = ['職務経歴', '職歴', 'スキル', '学歴', '業務内容', '自己PR', '資格', '経験'];
-        const panelHasProfileContent = profileKwsForPanel.some(kw => rdsPanel2Text.includes(kw));
+        const panelHasProfileContent = profileKwsForPanel.some(kw => rdsPanel2Head.includes(kw));
         const panelIsScoutHistory = isRDS && rdsPanel2
-          && rdsPanel2Text.includes('スカウト履歴')
+          && rdsPanel2Head.includes('スカウト履歴')
           && !panelHasProfileContent;
 
         if (isRDS && (looksEmpty || panelIsScoutHistory)) {
