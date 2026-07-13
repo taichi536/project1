@@ -229,13 +229,18 @@ def walk_forward(price_df: pd.DataFrame) -> dict:
         except Exception:
             fix_sharpe, fix_ret, fix_eq = -999.0, -999.0, pd.Series(dtype=float)
 
+        # -999 はデータ不足のセンチネル値 → その窓はスキップ
+        if oos_sharpe <= -100:
+            continue
+
         # ── OOS資産推移を接続 ──
         if not oos_eq.empty:
             scale = running_oos / float(oos_eq.iloc[0])
             oos_equity_parts.append(oos_eq * scale)
             running_oos = float((oos_eq * scale).iloc[-1])
 
-        if not fix_eq.empty:
+        valid_fix_sharpe = fix_sharpe if fix_sharpe > -100 else None
+        if not fix_eq.empty and valid_fix_sharpe is not None:
             scale = running_fixed / float(fix_eq.iloc[0])
             fixed_equity_parts.append(fix_eq * scale)
             running_fixed = float((fix_eq * scale).iloc[-1])
@@ -253,9 +258,9 @@ def walk_forward(price_df: pd.DataFrame) -> dict:
             "訓練Sharpe":           round(best_train_sharpe, 3),
             "OOSシャープ":          round(oos_sharpe, 3),
             "OOSリターン(%)":       round(oos_ret, 2),
-            "固定Sharpe":           round(fix_sharpe, 3),
-            "固定リターン(%)":      round(fix_ret, 2),
-            "最適化優位":           oos_sharpe > fix_sharpe,
+            "固定Sharpe":           round(valid_fix_sharpe, 3) if valid_fix_sharpe is not None else None,
+            "固定リターン(%)":      round(fix_ret, 2) if fix_ret > -100 else None,
+            "最適化優位":           oos_sharpe > fix_sharpe if valid_fix_sharpe is not None else True,
         })
         best_params_history.append(best_params)
 
@@ -295,7 +300,7 @@ def walk_forward(price_df: pd.DataFrame) -> dict:
             "総評価回数":         total_evals,
             "有効窓数":           len(windows_df),
             "平均OOSシャープ":    round(windows_df["OOSシャープ"].mean(), 3),
-            "平均固定Sharpe":     round(windows_df["固定Sharpe"].mean(), 3),
+            "平均固定Sharpe":     round(windows_df["固定Sharpe"].dropna().mean(), 3),
             "最適化優位率(%)":    round(windows_df["最適化優位"].mean() * 100, 1),
             "過学習比率":         round(
                 windows_df["OOSシャープ"].mean() /
@@ -315,7 +320,7 @@ def _concat_equity(parts: list) -> pd.Series:
 
 
 def _aggregate_params(results: list, keys: list) -> pd.DataFrame:
-    """パラメータ組み合わせごとに平均OOSシャープを集計。"""
+    """パラメータ組み合わせごとに平均OOSシャープを集計。-999は除外済みの前提。"""
     rows = []
     for r in results:
         rows.append({
@@ -323,6 +328,7 @@ def _aggregate_params(results: list, keys: list) -> pd.DataFrame:
                                "OOSシャープ", "OOSリターン(%)"]
         })
     df = pd.DataFrame(rows)
+    df = df[df["OOSシャープ"] > -100]  # 念のため再フィルタ
     agg = (
         df.groupby(["lookback_months", "top_n", "skip_days", "mom_threshold"])
         .agg(
