@@ -265,8 +265,9 @@ def fetch_prices(start: str = DATA_START, end: str = DATA_END_OPT,
     n_ok = len(price_df.columns)
     print(f"  → {n_ok} 銘柄取得成功（{price_df.index[0].date()} 〜 {price_df.index[-1].date()}）\n")
 
-    if n_ok < MIN_STOCKS:
-        print(f"❌ 取得できた銘柄が少なすぎます（{n_ok} < {MIN_STOCKS}）")
+    min_required = min(MIN_STOCKS, max(len(BACKTEST_UNIVERSE) - 2, 3))
+    if n_ok < min_required:
+        print(f"❌ 取得できた銘柄が少なすぎます（{n_ok} < {min_required}）")
         sys.exit(1)
 
     return price_df
