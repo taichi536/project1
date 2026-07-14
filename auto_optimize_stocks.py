@@ -170,8 +170,9 @@ PARAM_GRID = {
     "top_n":           [3, 5, 7, 10, 15, 20],               # 6個（保有銘柄数）
     "skip_days":       [0, 5, 10, 21],                       # 4個
     "use_vol_filter":  [0, 1],                                # 2個（クラッシュ対策）
+    "use_residual":    [0, 1],                                # 2個（残差モメンタム）
 }
-# 合計: 10 × 6 × 4 × 2 = 480 組み合わせ
+# 合計: 10 × 6 × 4 × 2 × 2 = 960 組み合わせ
 
 # ── ボラティリティ・フィルター設定（モメンタムクラッシュ対策）──────────────
 # 市場（ユニバース等加重指数）が「高ボラ かつ 下落トレンド」のとき現金退避。
@@ -179,6 +180,11 @@ PARAM_GRID = {
 VOL_WINDOW     = 21     # ボラ計測期間（1ヶ月）
 VOL_THRESHOLD  = 0.25   # 年率25%超で「高ボラ」
 TREND_WINDOW   = 63     # トレンド計測期間（3ヶ月）
+
+# ── 残差モメンタム設定（Blitz, Huij & Martens 2011）─────────────────────────
+# 各銘柄のβ（市場感応度）を推定し、市場の影響を除いた「銘柄固有の強さ」で
+# ランキングする。日本株ではこの分解により有意なリターンが得られるとの研究報告あり。
+BETA_WINDOW = 252   # β推定期間（1年）
 
 
 # ── データ取得 ────────────────────────────────────────────────────────────────
@@ -246,11 +252,13 @@ def simulate(price_df: pd.DataFrame,
              lookback_months: int,
              top_n: int,
              skip_days: int,
-             use_vol_filter: int = 0) -> tuple[float, float, pd.Series]:
+             use_vol_filter: int = 0,
+             use_residual: int = 0) -> tuple[float, float, pd.Series]:
     """
     クロスセクショナル・モメンタム戦略をシミュレート（numpy高速版）。
     毎月リバランス、等金額配分、上位top_n銘柄を保有。
     use_vol_filter=1: 市場が高ボラ＋下落トレンドのとき現金退避（クラッシュ対策）
+    use_residual=1:   残差モメンタム（β調整後の銘柄固有リターン）でランキング
     returns: (sharpe, total_return_pct, portfolio_series)
     """
     lookback_days = lookback_months * 21
@@ -263,13 +271,14 @@ def simulate(price_df: pd.DataFrame,
     is_month_start = np.r_[True, months[1:] != months[:-1]]
     rebal_indices = np.flatnonzero(is_month_start)
 
-    # 市場プロキシ（ユニバース等加重の日次リターン）
-    # mkt_ret[i] = i-1日目 → i日目 のリターン。i日目までの情報しか使わない。
-    if use_vol_filter:
+    # 日次リターンと市場プロキシ（ユニバース等加重）
+    # ret[i] = i-1日目 → i日目 のリターン。i日目までの情報しか使わない。
+    need_returns = use_vol_filter or use_residual
+    if need_returns:
         with np.errstate(invalid="ignore", divide="ignore"):
-            daily_ret = vals[1:] / vals[:-1] - 1
-        mkt_ret = np.full(n_rows, np.nan)
-        mkt_ret[1:] = np.nanmean(daily_ret, axis=1)
+            ret = np.full((n_rows, n_cols), np.nan)
+            ret[1:] = vals[1:] / vals[:-1] - 1
+        mkt_ret = np.nanmean(ret, axis=1)
 
     cash = INITIAL_CASH
     shares = np.zeros(n_cols)          # 銘柄ごとの保有株数
@@ -277,7 +286,8 @@ def simulate(price_df: pd.DataFrame,
 
     # +2: シグナルは前日(idx-1)の価格を使うため1日余分に必要
     required = max(lookback_days + skip_days + 2,
-                   TREND_WINDOW + 2 if use_vol_filter else 0)
+                   TREND_WINDOW + 2 if use_vol_filter else 0,
+                   BETA_WINDOW + skip_days + 2 if use_residual else 0)
 
     for idx in rebal_indices:
         if idx < required:
@@ -299,7 +309,34 @@ def simulate(price_df: pd.DataFrame,
         if not valid.any():
             continue
 
-        mom = np.where(valid, recent / past - 1, -np.inf)
+        if use_residual:
+            # ── 残差モメンタム ────────────────────────────────────────────
+            # β推定: 直近BETA_WINDOW日（前日まで）の日次リターンで回帰
+            Rw = ret[idx - BETA_WINDOW:idx]          # 最終行は idx-1 日のリターン
+            mw = mkt_ret[idx - BETA_WINDOW:idx]
+            obs_ok = ~np.isnan(Rw)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                mw_col = np.where(obs_ok, mw[:, None], np.nan)
+                cov  = np.nanmean(Rw * mw[:, None], axis=0) - np.nanmean(Rw, axis=0) * np.nanmean(mw_col, axis=0)
+                varm = np.nanvar(mw_col, axis=0)
+                beta = np.where(varm > 0, cov / varm, 1.0)
+
+            # 残差リターン = 銘柄リターン − β × 市場リターン（ルックバック期間分）
+            Rm = ret[idx - lookback_days - skip_days:idx - skip_days] if skip_days > 0 \
+                 else ret[idx - lookback_days:idx]
+            mm = mkt_ret[idx - lookback_days - skip_days:idx - skip_days] if skip_days > 0 \
+                 else mkt_ret[idx - lookback_days:idx]
+            resid = Rm - beta[None, :] * mm[:, None]
+            with np.errstate(invalid="ignore", divide="ignore"):
+                r_sum = np.nansum(resid, axis=0)
+                r_std = np.nanstd(resid, axis=0)
+                # ボラ調整済み残差モメンタム（Blitzの標準化）
+                score = np.where(r_std > 0, r_sum / r_std, -np.inf)
+            # 観測数が不足する銘柄は除外
+            enough = obs_ok.sum(axis=0) >= int(BETA_WINDOW * 0.8)
+            mom = np.where(valid & enough & np.isfinite(score), score, -np.inf)
+        else:
+            mom = np.where(valid, recent / past - 1, -np.inf)
 
         # ★ ボラティリティ・フィルター（モメンタムクラッシュ対策）
         # 前日(idx-1)までの市場リターンのみ使用 → ルックアヘッドなし
@@ -583,6 +620,7 @@ def walk_forward(price_df: pd.DataFrame) -> dict:
             "top_n":            best_params["top_n"],
             "skip_days":        best_params["skip_days"],
             "use_vol_filter":   best_params.get("use_vol_filter", 0),
+            "use_residual":     best_params.get("use_residual", 0),
             "訓練Sharpe":       round(best_train_sharpe, 3),
             "OOSシャープ":      round(oos_sharpe, 3),
             "OOSリターン(%)":   round(oos_ret, 2),
@@ -617,12 +655,13 @@ def walk_forward(price_df: pd.DataFrame) -> dict:
             "top_n":           r["top_n"],
             "skip_days":       r["skip_days"],
             "use_vol_filter":  r["use_vol_filter"],
+            "use_residual":    r["use_residual"],
             "OOSシャープ":     r["OOSシャープ"],
             "OOSリターン(%)":  r["OOSリターン(%)"],
         })
     param_df = pd.DataFrame(param_rows)
     param_summary = (
-        param_df.groupby(["lookback_months", "top_n", "skip_days", "use_vol_filter"])
+        param_df.groupby(["lookback_months", "top_n", "skip_days", "use_vol_filter", "use_residual"])
         .agg(平均OOSシャープ=("OOSシャープ", "mean"),
              平均OOSリターン=("OOSリターン(%)", "mean"),
              採用回数=("OOSシャープ", "count"))
@@ -753,6 +792,7 @@ def print_recommendation(result: dict):
             f"top_n={int(row['top_n']):2d}銘柄  "
             f"skip={int(row['skip_days']):2d}d  "
             f"volフィルタ={'有' if int(row['use_vol_filter']) else '無'}  "
+            f"{'残差' if int(row['use_residual']) else '通常'}  "
             f"→ OOS Sharpe: {row['平均OOSシャープ']:.3f}  "
             f"リターン: {row['平均OOSリターン']:+.1f}%"
         )
@@ -765,6 +805,7 @@ def print_recommendation(result: dict):
     print(f"  top_n:            {int(best['top_n'])} 銘柄を保有")
     print(f"  skip_days:        {int(best['skip_days'])} 日")
     print(f"  volフィルタ:      {'有効' if int(best['use_vol_filter']) else '無効'}")
+    print(f"  モメンタム種別:   {'残差モメンタム' if int(best['use_residual']) else '通常モメンタム'}")
     print(f"  平均OOSシャープ:  {best['平均OOSシャープ']:.3f}")
     print(f"\n  ⚠️  注意: 生存者バイアス対策済み（ルックバック開始時に上場していた銘柄のみ対象）")
     print(f"         ただし上場廃止・倒産銘柄は含まれないため過大評価の可能性あり")
@@ -865,6 +906,7 @@ def main():
         {"label": "集中型（3銘柄/lookback=2m）", "top_n": 3,  "lookback_months": 2, "skip_days": 21},
         {"label": "分散型（10銘柄/lookback=2m）", "top_n": 10, "lookback_months": 2, "skip_days": 21},
         {"label": "分散型＋volフィルタ",          "top_n": 10, "lookback_months": 2, "skip_days": 21, "use_vol_filter": 1},
+        {"label": "残差モメンタム（10銘柄/11m）",  "top_n": 10, "lookback_months": 11, "skip_days": 21, "use_residual": 1},
         {"label": "固定パラメータ（12m/10銘柄）",  "top_n": 10, "lookback_months": 12, "skip_days": 21},
     ]
     for cfg in configs:
