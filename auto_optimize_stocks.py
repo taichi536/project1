@@ -567,7 +567,7 @@ def walk_forward(price_df: pd.DataFrame) -> dict:
     n_windows = len(window_starts)
     total_evals = n_combos * n_windows
 
-    print(f"🔬 最適化開始（日経225個別株モメンタム）")
+    print(f"🔬 最適化開始（クロスセクショナル・モメンタム）")
     print(f"   対象銘柄数: {len(price_df.columns)} 銘柄")
     print(f"   パラメータ組み合わせ: {n_combos:,} 通り")
     print(f"   時間窓: {n_windows} 個")
@@ -973,7 +973,7 @@ def main():
             bh_rets.append(float(s.iloc[-1] / s.iloc[0] - 1) * 100)
     if bh_rets:
         bh_avg = float(np.mean(bh_rets))
-        print(f"  {'【B&H】60銘柄を均等保有（売買なし）':30s}  リターン: {bh_avg:+.1f}%")
+        print(f"  【B&H】全{len(bh_rets)}銘柄を均等保有（売買なし）      リターン: {bh_avg:+.1f}%")
 
     # 日経平均そのもの（銘柄選択バイアスなしの市場全体）
     try:
