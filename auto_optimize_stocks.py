@@ -672,9 +672,33 @@ def main():
         print(f"  {label:30s}  Sharpe: {sharpe:+.3f}  リターン: {ret:+.1f}%")
         cfg["label"] = label
 
+    # ── ベンチマーク: 生存者バイアスの定量化 ────────────────────────────────
+    # この60銘柄を「ただ均等に持ち続けた」場合のリターン。
+    # 銘柄リスト自体が現在の勝者で構成されているため、この数字が高いほど
+    # モメンタム戦略のリターンも銘柄選択バイアスで底上げされている。
+    bh_rets = []
+    for t in price_df.columns:
+        s = price_df[t].dropna()
+        if len(s) > 252:
+            bh_rets.append(float(s.iloc[-1] / s.iloc[0] - 1) * 100)
+    if bh_rets:
+        bh_avg = float(np.mean(bh_rets))
+        print(f"  {'【B&H】60銘柄を均等保有（売買なし）':30s}  リターン: {bh_avg:+.1f}%")
+
+    # 日経平均そのもの（銘柄選択バイアスなしの市場全体）
+    try:
+        n225 = yf.download("^N225", start=DATA_START, end=DATA_END_OPT,
+                           interval="1d", auto_adjust=True, progress=False)["Close"].dropna()
+        n225_ret = float(n225.iloc[-1] / n225.iloc[0] - 1) * 100
+        print(f"  {'【指数】日経平均 (^N225)':30s}  リターン: {n225_ret:+.1f}%")
+    except Exception:
+        pass
+
     print()
     print("  💡 Sharpeが高い = リスク対比のリターンが良い")
     print("     ※ ルックアヘッドバイアス修正済み・ホールドアウト期間除外済み")
+    print("  ⚠️  B&Hと日経平均の差 = 生存者バイアスの大きさ")
+    print("     モメンタム戦略とB&Hの差 = 戦略が本当に生み出した価値")
     print("=" * 60 + "\n")
 
     print(f"  ⏱  総実行時間: {time.time()-t0:.0f} 秒（{(time.time()-t0)/60:.1f} 分）\n")
