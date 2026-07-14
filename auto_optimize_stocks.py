@@ -113,6 +113,57 @@ NIKKEI_UNIVERSE = {
     "東京電力HD":     "9501.T",
 }
 
+# ── 2010年時点の日経225主要銘柄（生存者バイアス低減版）─────────────────────
+# 「2010年当時に大型だった銘柄」で構成。その後の勝敗を知らずに選んだリスト。
+# シャープ・東芝・NEC・日産・野村・東電など「後の敗者」も意図的に含む。
+# ※ 完全な上場廃止銘柄（JAL旧株など）はデータ取得不能なため含められない。
+#   その分のバイアスは残る（実際の成績はさらに低かった可能性がある）。
+NIKKEI_2010_UNIVERSE = {
+    # 自動車・輸送機器
+    "トヨタ": "7203.T", "ホンダ": "7267.T", "日産自動車": "7201.T",
+    "スズキ": "7269.T", "マツダ": "7261.T", "デンソー": "6902.T",
+    # 電機（2010年当時の主役。後の敗者を多数含む）
+    "ソニー": "6758.T", "パナソニック": "6752.T", "シャープ": "6753.T",
+    "東芝": "6502.T", "日立": "6501.T", "三菱電機": "6503.T",
+    "NEC": "6701.T", "富士通": "6702.T", "キヤノン": "7751.T",
+    "リコー": "7752.T", "京セラ": "6971.T", "村田製作所": "6981.T",
+    "TDK": "6762.T", "ファナック": "6954.T",
+    # 機械
+    "コマツ": "6301.T", "クボタ": "6326.T", "ダイキン": "6367.T",
+    # ゲーム（2010年はWii全盛期）
+    "任天堂": "7974.T",
+    # 鉄鋼・素材（2010年は中国需要で花形）
+    "日本製鉄": "5401.T", "JFE": "5411.T", "神戸製鋼": "5406.T",
+    "日本板硝子": "5202.T", "東レ": "3401.T", "帝人": "3402.T",
+    "住友化学": "4005.T", "三菱ケミカル": "4188.T", "信越化学": "4063.T",
+    "花王": "4452.T", "資生堂": "4911.T", "富士フイルム": "4901.T",
+    # 医薬品
+    "武田薬品": "4502.T", "アステラス製薬": "4503.T", "エーザイ": "4523.T",
+    "第一三共": "4568.T", "塩野義製薬": "4507.T",
+    # 食品
+    "キリンHD": "2503.T", "アサヒ": "2502.T", "JT": "2914.T",
+    # 金融
+    "三菱UFJ": "8306.T", "三井住友FG": "8316.T", "みずほFG": "8411.T",
+    "野村HD": "8604.T", "東京海上": "8766.T", "オリックス": "8591.T",
+    # 商社
+    "三菱商事": "8058.T", "三井物産": "8031.T", "伊藤忠商事": "8001.T",
+    "住友商事": "8053.T", "丸紅": "8002.T",
+    # 不動産
+    "三菱地所": "8802.T", "三井不動産": "8801.T",
+    # 通信
+    "NTT": "9432.T", "KDDI": "9433.T", "ソフトバンクG": "9984.T",
+    # 運輸
+    "JR東日本": "9020.T", "JR東海": "9022.T", "ANA": "9202.T",
+    "日本郵船": "9101.T", "商船三井": "9104.T",
+    # 電力・ガス（2010年は安定株の代表。後に東電が暴落）
+    "東京電力HD": "9501.T", "関西電力": "9503.T", "東京ガス": "9531.T",
+    # 小売
+    "セブン&アイ": "3382.T", "イオン": "8267.T", "ファーストリテイリング": "9983.T",
+}
+
+# バックテストに使うユニバース（生存者バイアス低減のため2010年版を使用）
+BACKTEST_UNIVERSE = NIKKEI_2010_UNIVERSE
+
 # ── パラメータグリッド ──────────────────────────────────────────────────────
 PARAM_GRID = {
     "lookback_months": [1, 2, 3, 4, 5, 6, 8, 9, 10, 12],  # 10個
@@ -126,13 +177,13 @@ PARAM_GRID = {
 def fetch_prices(start: str = DATA_START, end: str = DATA_END_OPT,
                  label: str = "") -> pd.DataFrame:
     period_label = label or f"{start}〜{end}"
-    print(f"📡 日経225主要銘柄の価格データを取得中... ({period_label})")
-    print(f"   対象: {len(NIKKEI_UNIVERSE)} 銘柄")
+    print(f"📡 2010年時点の日経225主要銘柄の価格データを取得中... ({period_label})")
+    print(f"   対象: {len(BACKTEST_UNIVERSE)} 銘柄（生存者バイアス低減版）")
     prices = {}
     failed = []
 
-    tickers = list(NIKKEI_UNIVERSE.values())
-    labels  = {v: k for k, v in NIKKEI_UNIVERSE.items()}
+    tickers = list(BACKTEST_UNIVERSE.values())
+    labels  = {v: k for k, v in BACKTEST_UNIVERSE.items()}
 
     # まとめてダウンロード（高速）
     try:
@@ -188,108 +239,94 @@ def simulate(price_df: pd.DataFrame,
              top_n: int,
              skip_days: int) -> tuple[float, float, pd.Series]:
     """
-    クロスセクショナル・モメンタム戦略をシミュレート。
+    クロスセクショナル・モメンタム戦略をシミュレート（numpy高速版）。
     毎月リバランス、等金額配分、上位top_n銘柄を保有。
     returns: (sharpe, total_return_pct, portfolio_series)
     """
     lookback_days = lookback_months * 21
-    available = list(price_df.columns)
-    actual_top_n = min(top_n, len(available))
+    vals = price_df.to_numpy(dtype=float)
+    n_rows, n_cols = vals.shape
+    actual_top_n = min(top_n, n_cols)
 
-    rebal_dates = []
-    for d in price_df.resample("MS").first().index:
-        mask = price_df.index >= d
-        if mask.any():
-            rebal_dates.append(price_df.index[mask][0])
+    # 毎月最初の営業日を高速に抽出
+    months = price_df.index.to_period("M").astype(str).to_numpy()
+    is_month_start = np.r_[True, months[1:] != months[:-1]]
+    rebal_indices = np.flatnonzero(is_month_start)
 
     cash = INITIAL_CASH
-    holdings: dict = {}
-    records = []
+    shares = np.zeros(n_cols)          # 銘柄ごとの保有株数
+    rec_dates, rec_pv = [], []
 
-    for rd in rebal_dates:
-        idx = price_df.index.get_loc(rd)
-        # +2: シグナルは前日(idx-1)の価格を使うため1日余分に必要
-        required = lookback_days + skip_days + 2
+    # +2: シグナルは前日(idx-1)の価格を使うため1日余分に必要
+    required = lookback_days + skip_days + 2
+
+    for idx in rebal_indices:
         if idx < required:
             continue
 
         # ★ ルックアヘッドバイアス修正
-        # シグナル計算: 前日終値（idx-1）を使う → 当日の値動きを先読みしない
-        # 執行価格:     当日終値（idx）を使う   → 前日シグナルで当日寄付き執行と等価
-        exec_p = price_df.iloc[idx]
-        sig    = price_df.iloc[idx - 1]
-        past   = price_df.iloc[idx - 1 - lookback_days - skip_days]
-        recent = price_df.iloc[idx - 1 - skip_days] if skip_days > 0 else sig
+        # シグナル計算: 前日終値（idx-1）/ 執行: 当日価格（idx）
+        exec_p = vals[idx]
+        sig    = vals[idx - 1]
+        past   = vals[idx - 1 - lookback_days - skip_days]
+        recent = vals[idx - 1 - skip_days] if skip_days > 0 else sig
 
-        # 各銘柄のモメンタム計算
-        # ★ 生存者バイアス対策: ルックバック開始時点でデータが存在する銘柄のみ対象
-        lookback_start_idx = idx - 1 - lookback_days - skip_days
-        momentum = {}
-        for t in available:
-            # ルックバック開始時点より前に上場していること（NaNでないこと）を確認
-            if pd.isna(price_df[t].iloc[lookback_start_idx]):
-                continue
-            p = float(past[t]) if not pd.isna(past[t]) else 0
-            r = float(recent[t]) if not pd.isna(recent[t]) else 0
-            s = float(sig[t]) if not pd.isna(sig[t]) else 0
-            if p > 0 and r > 0 and s > 0:
-                momentum[t] = (r / p - 1) * 100
-
-        if not momentum:
+        # ★ 生存者バイアス対策: ルックバック開始時点でデータが存在する銘柄のみ
+        valid = (
+            ~np.isnan(past) & (past > 0)
+            & ~np.isnan(recent) & (recent > 0)
+            & ~np.isnan(sig) & (sig > 0)
+        )
+        if not valid.any():
             continue
 
-        ranked   = sorted(momentum.items(), key=lambda x: x[1], reverse=True)
-        # 絶対モメンタムフィルター: 上位銘柄でもマイナスなら現金
-        selected = [t for t, m in ranked[:actual_top_n] if m > 0]
+        mom = np.where(valid, recent / past - 1, -np.inf)
+
+        # 上位actual_top_n → 絶対モメンタムフィルター（マイナスなら現金）
+        order = np.argsort(mom)[::-1][:actual_top_n]
+        sel = order[mom[order] > 0]
+
+        price_ok = ~np.isnan(exec_p) & (exec_p > 0)
 
         # 現在の総資産（当日執行価格で評価）
-        pv = cash + sum(
-            holdings.get(t, 0) * float(exec_p[t])
-            for t in holdings
-            if t in exec_p.index and not pd.isna(exec_p[t])
-        )
+        pv = cash + float(np.sum(np.where(price_ok, shares * exec_p, 0.0)))
 
         # Step1: 選択外の銘柄を全売却
-        for t in list(holdings.keys()):
-            if t not in selected:
-                price = float(exec_p[t]) if t in exec_p.index and not pd.isna(exec_p[t]) else 0
-                if price > 0:
-                    cash += holdings[t] * price * (1 - FEE_RATE)
-                del holdings[t]
+        sel_mask = np.zeros(n_cols, dtype=bool)
+        sel_mask[sel] = True
+        to_sell = (shares > 0) & ~sel_mask
+        cash += float(np.sum(shares[to_sell & price_ok] * exec_p[to_sell & price_ok])) * (1 - FEE_RATE)
+        shares[to_sell] = 0.0
 
-        # Step2: 等金額リバランス（既存保有も含めて毎月均等に揃え直す）
-        if selected:
-            target = pv / len(selected)
+        # Step2: 等金額リバランス
+        if len(sel) > 0:
+            target = pv / len(sel)
+            sp = exec_p[sel]
+            ok = price_ok[sel]
 
-            # 過剰保有を先に売る（超過分をキャッシュに戻す）
-            for t in selected:
-                if t in holdings and t in exec_p.index and not pd.isna(exec_p[t]):
-                    price = float(exec_p[t])
-                    if price > 0:
-                        cur_val = holdings[t] * price
-                        if cur_val > target:
-                            excess = cur_val - target
-                            sell_shares = excess / price
-                            holdings[t] -= sell_shares
-                            cash += sell_shares * price * (1 - FEE_RATE)
+            # 過剰保有を先に売る
+            cur_val = np.where(ok, shares[sel] * sp, 0.0)
+            excess = np.where(ok & (cur_val > target), cur_val - target, 0.0)
+            if excess.any():
+                cash += float(np.sum(excess)) * (1 - FEE_RATE)
+                shares[sel] -= np.where(excess > 0, excess / np.where(ok, sp, 1.0), 0.0)
 
-            # 不足分を買い増し・新規購入
-            for t in selected:
-                price = float(exec_p[t]) if t in exec_p.index and not pd.isna(exec_p[t]) else 0
-                if price > 0:
-                    cur_val = holdings.get(t, 0) * price
-                    if cur_val < target:
-                        buy_amt = min(target - cur_val, cash)
-                        if buy_amt > 0:
-                            holdings[t] = holdings.get(t, 0) + buy_amt * (1 - FEE_RATE) / price
-                            cash -= buy_amt
+            # 不足分を買い増し・新規購入（キャッシュ制約があるため順次）
+            cur_val = np.where(ok, shares[sel] * sp, 0.0)
+            for j in range(len(sel)):
+                if ok[j] and cur_val[j] < target:
+                    buy_amt = min(target - cur_val[j], cash)
+                    if buy_amt > 0:
+                        shares[sel[j]] += buy_amt * (1 - FEE_RATE) / sp[j]
+                        cash -= buy_amt
 
-        records.append({"日付": rd, "総資産": pv})
+        rec_dates.append(price_df.index[idx])
+        rec_pv.append(pv)
 
-    if len(records) < 3:
+    if len(rec_pv) < 3:
         return -999.0, -999.0, pd.Series(dtype=float)
 
-    pv_series = pd.DataFrame(records).set_index("日付")["総資産"]
+    pv_series = pd.Series(rec_pv, index=rec_dates, name="総資産")
     monthly_ret = pv_series.pct_change().dropna()
     sharpe = float(monthly_ret.mean() / monthly_ret.std() * (12 ** 0.5)) if monthly_ret.std() > 0 else 0.0
     total_ret = float((pv_series.iloc[-1] / INITIAL_CASH - 1) * 100)
