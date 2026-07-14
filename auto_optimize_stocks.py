@@ -169,8 +169,16 @@ PARAM_GRID = {
     "lookback_months": [1, 2, 3, 4, 5, 6, 8, 9, 10, 12],  # 10個
     "top_n":           [3, 5, 7, 10, 15, 20],               # 6個（保有銘柄数）
     "skip_days":       [0, 5, 10, 21],                       # 4個
+    "use_vol_filter":  [0, 1],                                # 2個（クラッシュ対策）
 }
-# 合計: 10 × 6 × 4 = 240 組み合わせ
+# 合計: 10 × 6 × 4 × 2 = 480 組み合わせ
+
+# ── ボラティリティ・フィルター設定（モメンタムクラッシュ対策）──────────────
+# 市場（ユニバース等加重指数）が「高ボラ かつ 下落トレンド」のとき現金退避。
+# モメンタムクラッシュは暴落後の反発局面で起きるため、この2条件で予兆を捉える。
+VOL_WINDOW     = 21     # ボラ計測期間（1ヶ月）
+VOL_THRESHOLD  = 0.25   # 年率25%超で「高ボラ」
+TREND_WINDOW   = 63     # トレンド計測期間（3ヶ月）
 
 
 # ── データ取得 ────────────────────────────────────────────────────────────────
@@ -237,10 +245,12 @@ def fetch_prices(start: str = DATA_START, end: str = DATA_END_OPT,
 def simulate(price_df: pd.DataFrame,
              lookback_months: int,
              top_n: int,
-             skip_days: int) -> tuple[float, float, pd.Series]:
+             skip_days: int,
+             use_vol_filter: int = 0) -> tuple[float, float, pd.Series]:
     """
     クロスセクショナル・モメンタム戦略をシミュレート（numpy高速版）。
     毎月リバランス、等金額配分、上位top_n銘柄を保有。
+    use_vol_filter=1: 市場が高ボラ＋下落トレンドのとき現金退避（クラッシュ対策）
     returns: (sharpe, total_return_pct, portfolio_series)
     """
     lookback_days = lookback_months * 21
@@ -253,12 +263,21 @@ def simulate(price_df: pd.DataFrame,
     is_month_start = np.r_[True, months[1:] != months[:-1]]
     rebal_indices = np.flatnonzero(is_month_start)
 
+    # 市場プロキシ（ユニバース等加重の日次リターン）
+    # mkt_ret[i] = i-1日目 → i日目 のリターン。i日目までの情報しか使わない。
+    if use_vol_filter:
+        with np.errstate(invalid="ignore", divide="ignore"):
+            daily_ret = vals[1:] / vals[:-1] - 1
+        mkt_ret = np.full(n_rows, np.nan)
+        mkt_ret[1:] = np.nanmean(daily_ret, axis=1)
+
     cash = INITIAL_CASH
     shares = np.zeros(n_cols)          # 銘柄ごとの保有株数
     rec_dates, rec_pv = [], []
 
     # +2: シグナルは前日(idx-1)の価格を使うため1日余分に必要
-    required = lookback_days + skip_days + 2
+    required = max(lookback_days + skip_days + 2,
+                   TREND_WINDOW + 2 if use_vol_filter else 0)
 
     for idx in rebal_indices:
         if idx < required:
@@ -282,9 +301,22 @@ def simulate(price_df: pd.DataFrame,
 
         mom = np.where(valid, recent / past - 1, -np.inf)
 
-        # 上位actual_top_n → 絶対モメンタムフィルター（マイナスなら現金）
-        order = np.argsort(mom)[::-1][:actual_top_n]
-        sel = order[mom[order] > 0]
+        # ★ ボラティリティ・フィルター（モメンタムクラッシュ対策）
+        # 前日(idx-1)までの市場リターンのみ使用 → ルックアヘッドなし
+        crash_risk = False
+        if use_vol_filter:
+            vol_win   = mkt_ret[idx - VOL_WINDOW:idx]
+            trend_win = mkt_ret[idx - TREND_WINDOW:idx]
+            mkt_vol   = float(np.nanstd(vol_win)) * np.sqrt(252)
+            mkt_trend = float(np.nansum(trend_win))
+            crash_risk = (mkt_vol > VOL_THRESHOLD) and (mkt_trend < 0)
+
+        if crash_risk:
+            sel = np.array([], dtype=int)   # 全額現金退避
+        else:
+            # 上位actual_top_n → 絶対モメンタムフィルター（マイナスなら現金）
+            order = np.argsort(mom)[::-1][:actual_top_n]
+            sel = order[mom[order] > 0]
 
         price_ok = ~np.isnan(exec_p) & (exec_p > 0)
 
@@ -454,6 +486,7 @@ def walk_forward(price_df: pd.DataFrame) -> dict:
             "lookback_months":  best_params["lookback_months"],
             "top_n":            best_params["top_n"],
             "skip_days":        best_params["skip_days"],
+            "use_vol_filter":   best_params.get("use_vol_filter", 0),
             "訓練Sharpe":       round(best_train_sharpe, 3),
             "OOSシャープ":      round(oos_sharpe, 3),
             "OOSリターン(%)":   round(oos_ret, 2),
@@ -487,12 +520,13 @@ def walk_forward(price_df: pd.DataFrame) -> dict:
             "lookback_months": r["lookback_months"],
             "top_n":           r["top_n"],
             "skip_days":       r["skip_days"],
+            "use_vol_filter":  r["use_vol_filter"],
             "OOSシャープ":     r["OOSシャープ"],
             "OOSリターン(%)":  r["OOSリターン(%)"],
         })
     param_df = pd.DataFrame(param_rows)
     param_summary = (
-        param_df.groupby(["lookback_months", "top_n", "skip_days"])
+        param_df.groupby(["lookback_months", "top_n", "skip_days", "use_vol_filter"])
         .agg(平均OOSシャープ=("OOSシャープ", "mean"),
              平均OOSリターン=("OOSリターン(%)", "mean"),
              採用回数=("OOSシャープ", "count"))
@@ -622,6 +656,7 @@ def print_recommendation(result: dict):
             f"  #{i+1:2d}  lookback={int(row['lookback_months']):2d}m  "
             f"top_n={int(row['top_n']):2d}銘柄  "
             f"skip={int(row['skip_days']):2d}d  "
+            f"volフィルタ={'有' if int(row['use_vol_filter']) else '無'}  "
             f"→ OOS Sharpe: {row['平均OOSシャープ']:.3f}  "
             f"リターン: {row['平均OOSリターン']:+.1f}%"
         )
@@ -633,6 +668,7 @@ def print_recommendation(result: dict):
     print(f"  lookback_months:  {int(best['lookback_months'])} ヶ月")
     print(f"  top_n:            {int(best['top_n'])} 銘柄を保有")
     print(f"  skip_days:        {int(best['skip_days'])} 日")
+    print(f"  volフィルタ:      {'有効' if int(best['use_vol_filter']) else '無効'}")
     print(f"  平均OOSシャープ:  {best['平均OOSシャープ']:.3f}")
     print(f"\n  ⚠️  注意: 生存者バイアス対策済み（ルックバック開始時に上場していた銘柄のみ対象）")
     print(f"         ただし上場廃止・倒産銘柄は含まれないため過大評価の可能性あり")
@@ -643,7 +679,7 @@ def print_recommendation(result: dict):
 def main():
     print("\n" + "=" * 60)
     print("  🎯 日経225 個別株モメンタム戦略 全自動最適化")
-    print(f"  対象銘柄: 日経225主要 {len(NIKKEI_UNIVERSE)} 銘柄")
+    print(f"  対象銘柄: 2010年時点の日経225主要 {len(BACKTEST_UNIVERSE)} 銘柄（生存者バイアス低減版）")
     print(f"  最適化データ: {DATA_START} 〜 {DATA_END_OPT}")
     print(f"  ホールドアウト: {HOLDOUT_START} 〜 {HOLDOUT_END}（最適化外）")
     print(f"  訓練: {TRAIN_DAYS//252}年  テスト: {TEST_DAYS//252}年  スライド: {STEP_DAYS}日")
@@ -701,6 +737,7 @@ def main():
     configs = [
         {"label": "集中型（3銘柄/lookback=2m）", "top_n": 3,  "lookback_months": 2, "skip_days": 21},
         {"label": "分散型（10銘柄/lookback=2m）", "top_n": 10, "lookback_months": 2, "skip_days": 21},
+        {"label": "分散型＋volフィルタ",          "top_n": 10, "lookback_months": 2, "skip_days": 21, "use_vol_filter": 1},
         {"label": "固定パラメータ（12m/10銘柄）",  "top_n": 10, "lookback_months": 12, "skip_days": 21},
     ]
     for cfg in configs:
