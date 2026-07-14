@@ -397,6 +397,102 @@ def deflated_sharpe_ratio(sr_annualized: float, n_trials: int, n_obs: int,
     return dsr, float(e_max_sr)
 
 
+# ── CPCV / PBO 分析 ─────────────────────────────────────────────────────────
+def compute_pbo(price_df: pd.DataFrame, n_blocks: int = 12) -> dict:
+    """
+    CSCV法によるPBO（バックテスト過学習確率）の計算。
+    Bailey, Borwein, Lopez de Prado & Zhu (2015)
+
+    手順:
+      1. 全パラメータの月次リターン行列 M (Tヶ月 × N組み合わせ) を作成
+      2. Tヶ月を n_blocks ブロックに分割
+      3. 半分を訓練(IS)・残り半分をテスト(OOS)とする全組み合わせ C(12,6)=924通り
+      4. 各分割で「IS最良パラメータのOOS順位」を記録
+      5. PBO = OOS順位が中央値以下だった割合（高い = 過学習）
+
+    ウォークフォワード（1本の歴史パス）と違い、924通りの擬似パスで検証する。
+    """
+    from itertools import combinations
+
+    keys   = list(PARAM_GRID.keys())
+    combos = list(product(*[PARAM_GRID[k] for k in keys]))
+
+    print(f"🔀 CPCV/PBO分析: {len(combos)}パラメータの月次リターン行列を構築中...")
+
+    ret_series = {}
+    for i, combo in enumerate(combos):
+        params = dict(zip(keys, combo))
+        try:
+            _, _, eq = simulate(price_df, **params)
+        except Exception:
+            continue
+        if eq.empty or len(eq) < 24:
+            continue
+        ret_series[i] = eq.pct_change().dropna()
+
+    if len(ret_series) < 10:
+        return {"error": "有効なパラメータが少なすぎます"}
+
+    # 全パラメータ共通の月のみ使用（ルックバック長の違いで開始月が異なるため）
+    M_df = pd.concat(ret_series.values(), axis=1, join="inner", keys=ret_series.keys())
+    M = M_df.to_numpy()          # T × N
+    T, N = M.shape
+    if T < n_blocks * 2:
+        return {"error": f"共通観測月が少なすぎます（{T}ヶ月）"}
+
+    # ブロック分割
+    block_bounds = np.linspace(0, T, n_blocks + 1, dtype=int)
+    blocks = [np.arange(block_bounds[b], block_bounds[b + 1]) for b in range(n_blocks)]
+
+    def _sharpe_cols(rows):
+        sub = M[rows]
+        mu = sub.mean(axis=0)
+        sd = sub.std(axis=0)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            sr = np.where(sd > 0, mu / sd * np.sqrt(12), -np.inf)
+        return sr
+
+    logits = []
+    is_oos_pairs = []
+    n_below_median = 0
+    splits = list(combinations(range(n_blocks), n_blocks // 2))
+
+    for is_blk in splits:
+        oos_blk = [b for b in range(n_blocks) if b not in is_blk]
+        is_rows  = np.concatenate([blocks[b] for b in is_blk])
+        oos_rows = np.concatenate([blocks[b] for b in oos_blk])
+
+        sr_is  = _sharpe_cols(is_rows)
+        sr_oos = _sharpe_cols(oos_rows)
+
+        best = int(np.argmax(sr_is))
+        # IS最良パラメータのOOS順位（0〜1、1が最上位）
+        rank = float(np.mean(sr_oos <= sr_oos[best]))
+        omega = min(max(rank, 1e-6), 1 - 1e-6)
+        logit = np.log(omega / (1 - omega))
+        logits.append(logit)
+        if rank <= 0.5:
+            n_below_median += 1
+        is_oos_pairs.append((sr_is[best], sr_oos[best]))
+
+    pbo = n_below_median / len(splits)
+
+    # IS→OOS 劣化スロープ（記事1と同じ分析。負なら「IS好成績ほどOOSが悪い」）
+    pairs = np.array(is_oos_pairs)
+    finite = np.isfinite(pairs).all(axis=1)
+    slope = float(np.polyfit(pairs[finite, 0], pairs[finite, 1], 1)[0]) if finite.sum() > 2 else float("nan")
+    mean_oos_of_best = float(np.nanmean(pairs[finite, 1])) if finite.sum() > 0 else float("nan")
+
+    return {
+        "pbo": pbo,
+        "n_splits": len(splits),
+        "n_params": N,
+        "n_months": T,
+        "is_oos_slope": slope,
+        "mean_oos_sharpe_of_is_best": mean_oos_of_best,
+    }
+
+
 # ── ウォークフォワード最適化 ─────────────────────────────────────────────────
 def walk_forward(price_df: pd.DataFrame) -> dict:
     keys   = list(PARAM_GRID.keys())
@@ -700,6 +796,27 @@ def main():
     save_results(result)
     print_recommendation(result)
 
+    # ── CPCV / PBO 分析（924通りの擬似歴史パスで過学習を測定） ──────────────
+    pbo_result = compute_pbo(price_df)
+    print("\n" + "=" * 60)
+    print("  🔀 CPCV / PBO 分析結果")
+    print("=" * 60)
+    if "error" in pbo_result:
+        print(f"  ❌ {pbo_result['error']}")
+    else:
+        pbo = pbo_result["pbo"]
+        verdict = "✅ 過学習リスク低い" if pbo < 0.2 else \
+                  "⚠️  境界的"          if pbo < 0.5 else \
+                  "❌ 過学習の可能性大（IS最良≒OOSでは中央値以下）"
+        print(f"  分割数:            {pbo_result['n_splits']} 通り（12ブロックCSCV）")
+        print(f"  有効パラメータ数:  {pbo_result['n_params']}")
+        print(f"  共通観測月数:      {pbo_result['n_months']} ヶ月")
+        print(f"  PBO:               {pbo:.3f}  {verdict}")
+        print(f"     → 訓練で1位のパラメータがテストで下位半分に落ちる確率")
+        print(f"  IS→OOS スロープ:   {pbo_result['is_oos_slope']:+.3f}  ← マイナスなら「IS好成績ほどOOSが悪い」")
+        print(f"  IS最良のOOS平均Sharpe: {pbo_result['mean_oos_sharpe_of_is_best']:+.3f}")
+    print("=" * 60 + "\n")
+
     # ── ホールドアウト検証（一回だけ、最良パラメータで） ───────────────────
     best_params_hist = result.get("best_history", [])
     if best_params_hist:
@@ -727,6 +844,16 @@ def main():
             print(f"  OOSシャープ: {h_sharpe}  {verdict}")
             print(f"  リターン:    {h_ret:+.1f}%")
             print(f"  最終資産:    ¥{round(holdout_result['equity'].iloc[-1]):,}" if not holdout_result['equity'].empty else "")
+            # 同期間の日経平均と比較（市場に勝てているかが本当の基準）
+            try:
+                n225_h = yf.download("^N225", start=HOLDOUT_START, end=HOLDOUT_END,
+                                     interval="1d", auto_adjust=True, progress=False)["Close"].squeeze().dropna()
+                n225_h_ret = float(n225_h.iloc[-1] / n225_h.iloc[0] - 1) * 100
+                diff = h_ret - n225_h_ret
+                print(f"  日経平均:    {n225_h_ret:+.1f}%  → 戦略との差: {diff:+.1f}pt "
+                      f"{'✅ 市場に勝利' if diff > 0 else '❌ 市場に敗北（インデックスの方が良かった）'}")
+            except Exception as e:
+                print(f"  日経平均比較: 取得失敗 ({e})")
         print("=" * 60 + "\n")
 
     # ── 参考: 推奨パラメータと固定パラメータの全期間比較（2010-2023） ────────
