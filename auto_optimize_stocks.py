@@ -164,6 +164,10 @@ NIKKEI_2010_UNIVERSE = {
 # バックテストに使うユニバース（生存者バイアス低減のため2010年版を使用）
 BACKTEST_UNIVERSE = NIKKEI_2010_UNIVERSE
 
+# ベンチマーク指数（--usモードではS&P500に切り替え）
+BENCH_TICKER = "^N225"
+BENCH_LABEL  = "日経平均"
+
 # ── マルチアセットETFユニバース（--etf モード）──────────────────────────────
 # 資産クラス間モメンタムは相関が低くトレンドが持続しやすい（学術的に最も頑健）。
 # 個別株と違い生存者バイアスの心配もない（資産クラスは倒産しない）。
@@ -177,6 +181,43 @@ MULTI_ASSET_UNIVERSE = {
     "米国債":   "1482.T",
     "先進国債": "2511.T",
     "ドル円":   "USDJPY=X",
+}
+
+# ── 2010年時点のS&P500主要銘柄（--us モード、生存者バイアス低減版）──────────
+# 「2010年当時に大型だった銘柄」で構成。GE・シティ・AIG・ゼロックス・
+# インテル・フォードなど「後の敗者・停滞組」を意図的に含む。
+# ※ 完全上場廃止銘柄（コダック旧株・シアーズ等）は取得不能でバイアスは残る。
+# ※ USD建て。日本の投資家には為替リスクが別途加わる。
+SP500_2010_UNIVERSE = {
+    # テック（2010年の主役。勝者も敗者も含む）
+    "Apple": "AAPL", "Microsoft": "MSFT", "IBM": "IBM", "Intel": "INTC",
+    "Cisco": "CSCO", "Oracle": "ORCL", "HP": "HPQ", "Qualcomm": "QCOM",
+    "TI": "TXN", "Google": "GOOGL", "Amazon": "AMZN", "eBay": "EBAY",
+    "Xerox": "XRX", "AMD": "AMD", "Micron": "MU",
+    # 金融（金融危機直後の生き残り）
+    "JPMorgan": "JPM", "BofA": "BAC", "Citi": "C", "WellsFargo": "WFC",
+    "GoldmanSachs": "GS", "MorganStanley": "MS", "Amex": "AXP",
+    "USBancorp": "USB", "AIG": "AIG", "Berkshire": "BRK-B",
+    # エネルギー
+    "Exxon": "XOM", "Chevron": "CVX", "ConocoPhillips": "COP",
+    "Schlumberger": "SLB", "Halliburton": "HAL", "Occidental": "OXY",
+    # 資本財・自動車
+    "GE": "GE", "Caterpillar": "CAT", "Boeing": "BA", "3M": "MMM",
+    "UPS": "UPS", "FedEx": "FDX", "UnionPacific": "UNP", "Honeywell": "HON",
+    "Emerson": "EMR", "Deere": "DE", "Ford": "F", "GM": "GM",
+    # ヘルスケア
+    "J&J": "JNJ", "Pfizer": "PFE", "Merck": "MRK", "Abbott": "ABT",
+    "BMS": "BMY", "EliLilly": "LLY", "Amgen": "AMGN", "Gilead": "GILD",
+    "UnitedHealth": "UNH", "CVS": "CVS",
+    # 生活必需品・一般消費財
+    "Walmart": "WMT", "P&G": "PG", "CocaCola": "KO", "Pepsi": "PEP",
+    "McDonalds": "MCD", "Disney": "DIS", "HomeDepot": "HD", "Nike": "NKE",
+    "Starbucks": "SBUX", "Target": "TGT", "Lowes": "LOW", "Costco": "COST",
+    "Altria": "MO", "PhilipMorris": "PM", "Colgate": "CL",
+    "KimberlyClark": "KMB", "GeneralMills": "GIS", "Kellogg": "K",
+    # 通信・公益
+    "AT&T": "T", "Verizon": "VZ", "Duke": "DUK", "SouthernCo": "SO",
+    "Exelon": "EXC",
 }
 
 # ── パラメータグリッド ──────────────────────────────────────────────────────
@@ -840,17 +881,26 @@ def print_recommendation(result: dict):
 
 # ── メイン ────────────────────────────────────────────────────────────────────
 def main():
-    global BACKTEST_UNIVERSE, PARAM_GRID
+    global BACKTEST_UNIVERSE, PARAM_GRID, BENCH_TICKER, BENCH_LABEL
 
-    # --etf: マルチアセットETFモード（資産クラス間モメンタム）
+    # --etf: マルチアセットETF / --us: 米国S&P500個別株
     etf_mode = "--etf" in sys.argv
+    us_mode  = "--us" in sys.argv
     if etf_mode:
         BACKTEST_UNIVERSE = MULTI_ASSET_UNIVERSE
         PARAM_GRID = ETF_PARAM_GRID
-
-    title = "マルチアセットETF モメンタム戦略" if etf_mode else "日経225 個別株モメンタム戦略"
-    uni_desc = (f"9資産ETF（株4地域・金・REIT・債券2種・為替）" if etf_mode
-                else f"2010年時点の日経225主要 {len(BACKTEST_UNIVERSE)} 銘柄（生存者バイアス低減版）")
+        title = "マルチアセットETF モメンタム戦略"
+        uni_desc = "9資産ETF（株4地域・金・REIT・債券2種・為替）"
+    elif us_mode:
+        BACKTEST_UNIVERSE = SP500_2010_UNIVERSE
+        BENCH_TICKER = "^GSPC"
+        BENCH_LABEL  = "S&P500"
+        title = "米国S&P500 個別株モメンタム戦略"
+        uni_desc = (f"2010年時点のS&P500主要 {len(BACKTEST_UNIVERSE)} 銘柄"
+                    f"（生存者バイアス低減版・USD建て）")
+    else:
+        title = "日経225 個別株モメンタム戦略"
+        uni_desc = f"2010年時点の日経225主要 {len(BACKTEST_UNIVERSE)} 銘柄（生存者バイアス低減版）"
 
     print("\n" + "=" * 60)
     print(f"  🎯 {title} 全自動最適化")
@@ -923,16 +973,16 @@ def main():
             print(f"  OOSシャープ: {h_sharpe}  {verdict}")
             print(f"  リターン:    {h_ret:+.1f}%")
             print(f"  最終資産:    ¥{round(holdout_result['equity'].iloc[-1]):,}" if not holdout_result['equity'].empty else "")
-            # 同期間の日経平均と比較（市場に勝てているかが本当の基準）
+            # 同期間のベンチマーク指数と比較（市場に勝てているかが本当の基準）
             try:
-                n225_h = yf.download("^N225", start=HOLDOUT_START, end=HOLDOUT_END,
-                                     interval="1d", auto_adjust=True, progress=False)["Close"].squeeze().dropna()
-                n225_h_ret = float(n225_h.iloc[-1] / n225_h.iloc[0] - 1) * 100
-                diff = h_ret - n225_h_ret
-                print(f"  日経平均:    {n225_h_ret:+.1f}%  → 戦略との差: {diff:+.1f}pt "
+                bench_h = yf.download(BENCH_TICKER, start=HOLDOUT_START, end=HOLDOUT_END,
+                                      interval="1d", auto_adjust=True, progress=False)["Close"].squeeze().dropna()
+                bench_h_ret = float(bench_h.iloc[-1] / bench_h.iloc[0] - 1) * 100
+                diff = h_ret - bench_h_ret
+                print(f"  {BENCH_LABEL}:    {bench_h_ret:+.1f}%  → 戦略との差: {diff:+.1f}pt "
                       f"{'✅ 市場に勝利' if diff > 0 else '❌ 市場に敗北（インデックスの方が良かった）'}")
             except Exception as e:
-                print(f"  日経平均比較: 取得失敗 ({e})")
+                print(f"  {BENCH_LABEL}比較: 取得失敗 ({e})")
         print("=" * 60 + "\n")
 
     # ── 参考: 推奨パラメータと固定パラメータの全期間比較（2010-2023） ────────
@@ -975,19 +1025,19 @@ def main():
         bh_avg = float(np.mean(bh_rets))
         print(f"  【B&H】全{len(bh_rets)}銘柄を均等保有（売買なし）      リターン: {bh_avg:+.1f}%")
 
-    # 日経平均そのもの（銘柄選択バイアスなしの市場全体）
+    # ベンチマーク指数そのもの（銘柄選択バイアスなしの市場全体）
     try:
-        n225 = yf.download("^N225", start=DATA_START, end=DATA_END_OPT,
-                           interval="1d", auto_adjust=True, progress=False)["Close"].squeeze().dropna()
-        n225_ret = float(n225.iloc[-1] / n225.iloc[0] - 1) * 100
-        print(f"  {'【指数】日経平均 (^N225)':30s}  リターン: {n225_ret:+.1f}%")
+        bench = yf.download(BENCH_TICKER, start=DATA_START, end=DATA_END_OPT,
+                            interval="1d", auto_adjust=True, progress=False)["Close"].squeeze().dropna()
+        bench_ret = float(bench.iloc[-1] / bench.iloc[0] - 1) * 100
+        print(f"  【指数】{BENCH_LABEL} ({BENCH_TICKER})        リターン: {bench_ret:+.1f}%")
     except Exception as e:
-        print(f"  【指数】日経平均: 取得失敗 ({e})")
+        print(f"  【指数】{BENCH_LABEL}: 取得失敗 ({e})")
 
     print()
     print("  💡 Sharpeが高い = リスク対比のリターンが良い")
     print("     ※ ルックアヘッドバイアス修正済み・ホールドアウト期間除外済み")
-    print("  ⚠️  B&Hと日経平均の差 = 生存者バイアスの大きさ")
+    print(f"  ⚠️  B&Hと{BENCH_LABEL}の差 = 生存者バイアスの大きさ")
     print("     モメンタム戦略とB&Hの差 = 戦略が本当に生み出した価値")
     print("=" * 60 + "\n")
 
