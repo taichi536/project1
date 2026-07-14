@@ -164,6 +164,21 @@ NIKKEI_2010_UNIVERSE = {
 # バックテストに使うユニバース（生存者バイアス低減のため2010年版を使用）
 BACKTEST_UNIVERSE = NIKKEI_2010_UNIVERSE
 
+# ── マルチアセットETFユニバース（--etf モード）──────────────────────────────
+# 資産クラス間モメンタムは相関が低くトレンドが持続しやすい（学術的に最も頑健）。
+# 個別株と違い生存者バイアスの心配もない（資産クラスは倒産しない）。
+MULTI_ASSET_UNIVERSE = {
+    "日本株":   "1306.T",
+    "米国株":   "2558.T",
+    "先進国株": "1657.T",
+    "新興国株": "1658.T",
+    "金":       "1540.T",
+    "J-REIT":   "1343.T",
+    "米国債":   "1482.T",
+    "先進国債": "2511.T",
+    "ドル円":   "USDJPY=X",
+}
+
 # ── パラメータグリッド ──────────────────────────────────────────────────────
 PARAM_GRID = {
     "lookback_months": [1, 2, 3, 4, 5, 6, 8, 9, 10, 12],  # 10個
@@ -173,6 +188,16 @@ PARAM_GRID = {
     "use_residual":    [0, 1],                                # 2個（残差モメンタム）
 }
 # 合計: 10 × 6 × 4 × 2 × 2 = 960 組み合わせ
+
+# ETFモード用グリッド（9資産なのでtop_nを小さく）
+ETF_PARAM_GRID = {
+    "lookback_months": [1, 2, 3, 4, 5, 6, 8, 9, 10, 12],
+    "top_n":           [1, 2, 3, 4],
+    "skip_days":       [0, 5, 10, 21],
+    "use_vol_filter":  [0, 1],
+    "use_residual":    [0, 1],
+}
+# 合計: 10 × 4 × 4 × 2 × 2 = 640 組み合わせ
 
 # ── ボラティリティ・フィルター設定（モメンタムクラッシュ対策）──────────────
 # 市場（ユニバース等加重指数）が「高ボラ かつ 下落トレンド」のとき現金退避。
@@ -191,8 +216,8 @@ BETA_WINDOW = 252   # β推定期間（1年）
 def fetch_prices(start: str = DATA_START, end: str = DATA_END_OPT,
                  label: str = "") -> pd.DataFrame:
     period_label = label or f"{start}〜{end}"
-    print(f"📡 2010年時点の日経225主要銘柄の価格データを取得中... ({period_label})")
-    print(f"   対象: {len(BACKTEST_UNIVERSE)} 銘柄（生存者バイアス低減版）")
+    print(f"📡 価格データを取得中... ({period_label})")
+    print(f"   対象: {len(BACKTEST_UNIVERSE)} 銘柄")
     prices = {}
     failed = []
 
@@ -814,9 +839,21 @@ def print_recommendation(result: dict):
 
 # ── メイン ────────────────────────────────────────────────────────────────────
 def main():
+    global BACKTEST_UNIVERSE, PARAM_GRID
+
+    # --etf: マルチアセットETFモード（資産クラス間モメンタム）
+    etf_mode = "--etf" in sys.argv
+    if etf_mode:
+        BACKTEST_UNIVERSE = MULTI_ASSET_UNIVERSE
+        PARAM_GRID = ETF_PARAM_GRID
+
+    title = "マルチアセットETF モメンタム戦略" if etf_mode else "日経225 個別株モメンタム戦略"
+    uni_desc = (f"9資産ETF（株4地域・金・REIT・債券2種・為替）" if etf_mode
+                else f"2010年時点の日経225主要 {len(BACKTEST_UNIVERSE)} 銘柄（生存者バイアス低減版）")
+
     print("\n" + "=" * 60)
-    print("  🎯 日経225 個別株モメンタム戦略 全自動最適化")
-    print(f"  対象銘柄: 2010年時点の日経225主要 {len(BACKTEST_UNIVERSE)} 銘柄（生存者バイアス低減版）")
+    print(f"  🎯 {title} 全自動最適化")
+    print(f"  対象: {uni_desc}")
     print(f"  最適化データ: {DATA_START} 〜 {DATA_END_OPT}")
     print(f"  ホールドアウト: {HOLDOUT_START} 〜 {HOLDOUT_END}（最適化外）")
     print(f"  訓練: {TRAIN_DAYS//252}年  テスト: {TEST_DAYS//252}年  スライド: {STEP_DAYS}日")
@@ -902,13 +939,22 @@ def main():
     print(f"  📊 全期間比較（{DATA_START} 〜 {DATA_END_OPT}）")
     print("=" * 60)
 
-    configs = [
-        {"label": "集中型（3銘柄/lookback=2m）", "top_n": 3,  "lookback_months": 2, "skip_days": 21},
-        {"label": "分散型（10銘柄/lookback=2m）", "top_n": 10, "lookback_months": 2, "skip_days": 21},
-        {"label": "分散型＋volフィルタ",          "top_n": 10, "lookback_months": 2, "skip_days": 21, "use_vol_filter": 1},
-        {"label": "残差モメンタム（10銘柄/11m）",  "top_n": 10, "lookback_months": 11, "skip_days": 21, "use_residual": 1},
-        {"label": "固定パラメータ（12m/10銘柄）",  "top_n": 10, "lookback_months": 12, "skip_days": 21},
-    ]
+    if etf_mode:
+        configs = [
+            {"label": "TOP1資産（12m/skip21d）",   "top_n": 1, "lookback_months": 12, "skip_days": 21},
+            {"label": "TOP2資産（12m/skip21d）",   "top_n": 2, "lookback_months": 12, "skip_days": 21},
+            {"label": "TOP3資産（6m/skip21d）",    "top_n": 3, "lookback_months": 6,  "skip_days": 21},
+            {"label": "TOP2＋volフィルタ",          "top_n": 2, "lookback_months": 12, "skip_days": 21, "use_vol_filter": 1},
+            {"label": "残差モメンタム（TOP2/11m）", "top_n": 2, "lookback_months": 11, "skip_days": 21, "use_residual": 1},
+        ]
+    else:
+        configs = [
+            {"label": "集中型（3銘柄/lookback=2m）", "top_n": 3,  "lookback_months": 2, "skip_days": 21},
+            {"label": "分散型（10銘柄/lookback=2m）", "top_n": 10, "lookback_months": 2, "skip_days": 21},
+            {"label": "分散型＋volフィルタ",          "top_n": 10, "lookback_months": 2, "skip_days": 21, "use_vol_filter": 1},
+            {"label": "残差モメンタム（10銘柄/11m）",  "top_n": 10, "lookback_months": 11, "skip_days": 21, "use_residual": 1},
+            {"label": "固定パラメータ（12m/10銘柄）",  "top_n": 10, "lookback_months": 12, "skip_days": 21},
+        ]
     for cfg in configs:
         label = cfg.pop("label")
         sharpe, ret, _ = simulate(price_df, **cfg)
