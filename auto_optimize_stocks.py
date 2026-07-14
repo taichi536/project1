@@ -688,11 +688,11 @@ def main():
     # 日経平均そのもの（銘柄選択バイアスなしの市場全体）
     try:
         n225 = yf.download("^N225", start=DATA_START, end=DATA_END_OPT,
-                           interval="1d", auto_adjust=True, progress=False)["Close"].dropna()
+                           interval="1d", auto_adjust=True, progress=False)["Close"].squeeze().dropna()
         n225_ret = float(n225.iloc[-1] / n225.iloc[0] - 1) * 100
         print(f"  {'【指数】日経平均 (^N225)':30s}  リターン: {n225_ret:+.1f}%")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  【指数】日経平均: 取得失敗 ({e})")
 
     print()
     print("  💡 Sharpeが高い = リスク対比のリターンが良い")
