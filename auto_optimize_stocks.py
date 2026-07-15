@@ -828,7 +828,7 @@ def print_recommendation(result: dict):
     ps = result["param_summary"]
 
     print("\n" + "=" * 60)
-    print("  📊 最適化サマリー（日経225 個別株モメンタム）")
+    print("  📊 最適化サマリー")
     print("=" * 60)
     print(f"  最適化データ期間:  {DATA_START} 〜 {DATA_END_OPT}")
     print(f"  総評価回数:        {s['総評価回数']:,} 回")
