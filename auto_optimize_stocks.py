@@ -933,6 +933,80 @@ def run_holdout(best_params: dict) -> dict:
     }
 
 
+# ── フォワードテスト: 今月のシグナル出力 ─────────────────────────────────────
+def rank_lowvol(price_df: pd.DataFrame, lookback_months: int, top_n: int):
+    """直近データで低ボラランキングを計算し、上位top_nの(ticker, 年率ボラ%)を返す。"""
+    vals = price_df.to_numpy(dtype=float)
+    lookback_days = lookback_months * 21
+    if len(vals) < lookback_days + 2:
+        return []
+    with np.errstate(invalid="ignore", divide="ignore"):
+        ret = vals[1:] / vals[:-1] - 1
+    window = ret[-lookback_days:]
+    vol = np.nanstd(window, axis=0) * np.sqrt(252) * 100
+    enough = (~np.isnan(window)).sum(axis=0) >= int(lookback_days * 0.8)
+    score = np.where(enough & (vol > 0), vol, np.inf)
+    order = np.argsort(score)[:top_n]
+    cols = list(price_df.columns)
+    return [(cols[i], float(vol[i])) for i in order if np.isfinite(score[i])]
+
+
+def run_signal():
+    """
+    フォワードテスト用: 今日時点の低ボラポートフォリオを出力し、ログに追記する。
+    毎月月初に実行 → results/signal_log.csv に記録が蓄積 → 数ヶ月後に
+    「事前に記録したシグナル」対「実際の成績」という汚染ゼロの検証ができる。
+    ※ ユニバースは現在の日経225主要銘柄（実際に今日買える銘柄）を使う。
+      フォワードテストでは生存者バイアスは発生しない（未来は誰にも見えない）。
+    """
+    global BACKTEST_UNIVERSE
+    BACKTEST_UNIVERSE = NIKKEI_UNIVERSE   # 現在の投資可能銘柄
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    start = (datetime.now() - pd.Timedelta(days=365 * 3)).strftime("%Y-%m-%d")
+
+    print("\n" + "=" * 60)
+    print("  📮 フォワードテスト・シグナル（低ボラティリティ戦略）")
+    print(f"  実行日: {today}")
+    print("=" * 60 + "\n")
+
+    price_df = fetch_prices(start=start, end=today, label="直近3年")
+    labels = {v: k for k, v in NIKKEI_UNIVERSE.items()}
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    log_path = os.path.join(OUTPUT_DIR, "signal_log.csv")
+    log_rows = []
+
+    configs = [
+        {"name": "低ボラ(12m/15銘柄)", "lookback_months": 12, "top_n": 15},
+        {"name": "低ボラ(24m/20銘柄)", "lookback_months": 24, "top_n": 20},
+    ]
+    for cfg in configs:
+        ranked = rank_lowvol(price_df, cfg["lookback_months"], cfg["top_n"])
+        print(f"  ── {cfg['name']} ─────────────────────────────")
+        if not ranked:
+            print("    データ不足で計算できませんでした")
+            continue
+        for i, (t, v) in enumerate(ranked):
+            print(f"    {i+1:2d}. {labels.get(t, t):16s} ({t})  年率ボラ {v:5.1f}%")
+        print()
+        for i, (t, v) in enumerate(ranked):
+            log_rows.append({
+                "実行日": today, "戦略": cfg["name"], "順位": i + 1,
+                "銘柄": labels.get(t, t), "ティッカー": t,
+                "年率ボラ(%)": round(v, 2),
+            })
+
+    if log_rows:
+        log_df = pd.DataFrame(log_rows)
+        header = not os.path.exists(log_path)
+        log_df.to_csv(log_path, mode="a", header=header,
+                      index=False, encoding="utf-8-sig")
+        print(f"  📄 シグナルを記録しました: {log_path}")
+        print(f"     毎月月初に実行し続けると、汚染ゼロのフォワードテスト記録になります。")
+        print(f"     ※ これは検証記録であり、投資判断はご自身で行ってください。\n")
+
+
 # ── 結果保存 ──────────────────────────────────────────────────────────────────
 def save_results(result: dict):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -1007,6 +1081,11 @@ def print_recommendation(result: dict):
 # ── メイン ────────────────────────────────────────────────────────────────────
 def main():
     global BACKTEST_UNIVERSE, PARAM_GRID, BENCH_TICKER, BENCH_LABEL
+
+    # --signal: フォワードテスト（今月のシグナル出力のみ）
+    if "--signal" in sys.argv:
+        run_signal()
+        return
 
     # --etf: ETF / --us: 米国株 / --crypto: 暗号資産 / --fx: 為替 / --lowvol: 低ボラ日本株
     etf_mode    = "--etf" in sys.argv
