@@ -952,11 +952,31 @@ def run_holdout(best_params: dict) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
+    # ── コスト感応度分析 ────────────────────────────────────────────────────
+    # 片道手数料を0%〜0.5%まで振ってホールドアウト成績の劣化を測る。
+    # S株（単元未満株）のスプレッド・約定ズレを含む実効コストの目安:
+    # ネット証券の単元株 ≈ 0.05〜0.1% / S株 ≈ 0.2〜0.5%
+    global FEE_RATE
+    orig_fee = FEE_RATE
+    fee_sensitivity = []
+    for fee in (0.0, 0.001, 0.003, 0.005):
+        FEE_RATE = fee
+        try:
+            s2, r2, _ = simulate_period(holdout_df, start_idx, len(holdout_df), **best_params)
+            if s2 > -100:
+                fee_sensitivity.append({"片道コスト(%)": fee * 100,
+                                        "リターン(%)": round(r2, 1),
+                                        "シャープ": round(s2, 3)})
+        except Exception:
+            pass
+    FEE_RATE = orig_fee
+
     return {
         "sharpe": round(sharpe, 3),
         "return_pct": round(ret, 2),
         "equity": eq,
         "daily_equity": daily[0] if daily else pd.Series(dtype=float),
+        "fee_sensitivity": fee_sensitivity,
         "params": best_params,
     }
 
@@ -1260,6 +1280,28 @@ def main():
                           f"（日次同士・月中の下落込みで公平）")
                 else:
                     print(f"  最大DD:    戦略の日次データなし（{BENCH_LABEL} 日次: {bench_dd_d:.1f}%）")
+
+                # ★ コスト感応度: 実効コストが上がったとき成績がどこまで劣化するか
+                sens = holdout_result.get("fee_sensitivity", [])
+                if sens:
+                    print(f"")
+                    print(f"  ── コスト感応度（片道手数料を変えて再評価）────")
+                    for row in sens:
+                        note = ""
+                        if row["片道コスト(%)"] == 0.1:
+                            note = "  ← 単元株のネット証券水準"
+                        elif row["片道コスト(%)"] == 0.3:
+                            note = "  ← S株（単元未満株）の実効水準"
+                        elif row["片道コスト(%)"] == 0.5:
+                            note = "  ← 悲観シナリオ"
+                        print(f"  片道 {row['片道コスト(%)']:.1f}%:  "
+                              f"リターン {row['リターン(%)']:+6.1f}%  "
+                              f"シャープ {row['シャープ']:.3f}{note}")
+                    if bench_sharpe > 0:
+                        worst = sens[-1]
+                        beats = worst["シャープ"] > bench_sharpe
+                        print(f"  → 悲観シナリオでも{BENCH_LABEL}のシャープ({bench_sharpe:.3f})に"
+                              f"{'✅ 勝る（コスト耐性あり）' if beats else '❌ 負ける（コストで優位性消失）'}")
             except Exception as e:
                 print(f"  {BENCH_LABEL}比較: 取得失敗 ({e})")
         print("=" * 60 + "\n")
