@@ -230,6 +230,19 @@ FX_PARAM_GRID = {
     "use_residual":    [0, 1],
 }
 
+# ── 低ボラティリティ戦略グリッド（--lowvol モード）──────────────────────────
+# 「過去のボラティリティが低い銘柄」を保有する。日本株で有効性の報告が
+# 複数あるアノマリー（低リスク・アノマリー）。
+# ★ 多重テストを抑えるため意図的に小さいグリッド（32通り）にしている。
+LOWVOL_PARAM_GRID = {
+    "lookback_months": [3, 6, 12, 24],    # ボラ推定期間
+    "top_n":           [5, 10, 15, 20],   # 低ボラ上位N銘柄を保有
+    "skip_days":       [0],
+    "use_vol_filter":  [0, 1],
+    "use_residual":    [0],
+    "use_lowvol":      [1],
+}
+
 # ── 2010年時点のS&P500主要銘柄（--us モード、生存者バイアス低減版）──────────
 # 「2010年当時に大型だった銘柄」で構成。GE・シティ・AIG・ゼロックス・
 # インテル・フォードなど「後の敗者・停滞組」を意図的に含む。
@@ -367,12 +380,14 @@ def simulate(price_df: pd.DataFrame,
              top_n: int,
              skip_days: int,
              use_vol_filter: int = 0,
-             use_residual: int = 0) -> tuple[float, float, pd.Series]:
+             use_residual: int = 0,
+             use_lowvol: int = 0) -> tuple[float, float, pd.Series]:
     """
-    クロスセクショナル・モメンタム戦略をシミュレート（numpy高速版）。
+    クロスセクショナル戦略をシミュレート（numpy高速版）。
     毎月リバランス、等金額配分、上位top_n銘柄を保有。
     use_vol_filter=1: 市場が高ボラ＋下落トレンドのとき現金退避（クラッシュ対策）
     use_residual=1:   残差モメンタム（β調整後の銘柄固有リターン）でランキング
+    use_lowvol=1:     低ボラティリティ戦略（過去ボラが低い順に保有・常時投資）
     returns: (sharpe, total_return_pct, portfolio_series)
     """
     lookback_days = lookback_months * 21
@@ -387,7 +402,7 @@ def simulate(price_df: pd.DataFrame,
 
     # 日次リターンと市場プロキシ（ユニバース等加重）
     # ret[i] = i-1日目 → i日目 のリターン。i日目までの情報しか使わない。
-    need_returns = use_vol_filter or use_residual
+    need_returns = use_vol_filter or use_residual or use_lowvol
     if need_returns:
         with np.errstate(invalid="ignore", divide="ignore"):
             ret = np.full((n_rows, n_cols), np.nan)
@@ -423,7 +438,16 @@ def simulate(price_df: pd.DataFrame,
         if not valid.any():
             continue
 
-        if use_residual:
+        if use_lowvol:
+            # ── 低ボラティリティ戦略 ──────────────────────────────────────
+            # 過去lookback期間の日次ボラが低い銘柄ほど高スコア
+            Rm = ret[idx - lookback_days - skip_days:idx - skip_days] if skip_days > 0 \
+                 else ret[idx - lookback_days:idx]
+            with np.errstate(invalid="ignore"):
+                vol = np.nanstd(Rm, axis=0)
+            enough = (~np.isnan(Rm)).sum(axis=0) >= int(len(Rm) * 0.8)
+            mom = np.where(valid & enough & (vol > 0), -vol, -np.inf)
+        elif use_residual:
             # ── 残差モメンタム ────────────────────────────────────────────
             # β推定: 直近BETA_WINDOW日（前日まで）の日次リターンで回帰
             Rw = ret[idx - BETA_WINDOW:idx]          # 最終行は idx-1 日のリターン
@@ -465,9 +489,13 @@ def simulate(price_df: pd.DataFrame,
         if crash_risk:
             sel = np.array([], dtype=int)   # 全額現金退避
         else:
-            # 上位actual_top_n → 絶対モメンタムフィルター（マイナスなら現金）
             order = np.argsort(mom)[::-1][:actual_top_n]
-            sel = order[mom[order] > 0]
+            if use_lowvol:
+                # 低ボラ戦略は常時投資（市場タイミングは取らない）
+                sel = order[np.isfinite(mom[order])]
+            else:
+                # 絶対モメンタムフィルター（上位でもマイナスなら現金）
+                sel = order[mom[order] > 0]
 
         price_ok = ~np.isnan(exec_p) & (exec_p > 0)
 
@@ -930,13 +958,19 @@ def print_recommendation(result: dict):
 def main():
     global BACKTEST_UNIVERSE, PARAM_GRID, BENCH_TICKER, BENCH_LABEL
 
-    # --etf: マルチアセットETF / --us: 米国株 / --crypto: 暗号資産 / --fx: 為替
+    # --etf: ETF / --us: 米国株 / --crypto: 暗号資産 / --fx: 為替 / --lowvol: 低ボラ日本株
     etf_mode    = "--etf" in sys.argv
     us_mode     = "--us" in sys.argv
     crypto_mode = "--crypto" in sys.argv
     fx_mode     = "--fx" in sys.argv
+    lowvol_mode = "--lowvol" in sys.argv
     asset_class_mode = etf_mode or crypto_mode or fx_mode   # 少数資産モード
-    if etf_mode:
+    if lowvol_mode:
+        PARAM_GRID = LOWVOL_PARAM_GRID
+        title = "日本株 低ボラティリティ戦略"
+        uni_desc = (f"2010年時点の日経225主要 {len(BACKTEST_UNIVERSE)} 銘柄"
+                    f"（生存者バイアス低減版）★ グリッドを32通りに限定し多重テストを抑制")
+    elif etf_mode:
         BACKTEST_UNIVERSE = MULTI_ASSET_UNIVERSE
         PARAM_GRID = ETF_PARAM_GRID
         title = "マルチアセットETF モメンタム戦略"
@@ -1056,7 +1090,15 @@ def main():
     print(f"  📊 全期間比較（{DATA_START} 〜 {DATA_END_OPT}）")
     print("=" * 60)
 
-    if asset_class_mode:
+    if lowvol_mode:
+        configs = [
+            {"label": "低ボラ（12m/10銘柄）",       "top_n": 10, "lookback_months": 12, "skip_days": 0, "use_lowvol": 1},
+            {"label": "低ボラ（12m/20銘柄）",       "top_n": 20, "lookback_months": 12, "skip_days": 0, "use_lowvol": 1},
+            {"label": "低ボラ（24m/10銘柄）",       "top_n": 10, "lookback_months": 24, "skip_days": 0, "use_lowvol": 1},
+            {"label": "低ボラ＋volフィルタ",         "top_n": 10, "lookback_months": 12, "skip_days": 0, "use_lowvol": 1, "use_vol_filter": 1},
+            {"label": "参考:通常モメンタム(2m/10)", "top_n": 10, "lookback_months": 2, "skip_days": 21},
+        ]
+    elif asset_class_mode:
         configs = [
             {"label": "TOP1資産（12m/skip21d）",   "top_n": 1, "lookback_months": 12, "skip_days": 21},
             {"label": "TOP2資産（12m/skip21d）",   "top_n": 2, "lookback_months": 12, "skip_days": 21},
