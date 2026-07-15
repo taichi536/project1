@@ -381,14 +381,17 @@ def simulate(price_df: pd.DataFrame,
              skip_days: int,
              use_vol_filter: int = 0,
              use_residual: int = 0,
-             use_lowvol: int = 0) -> tuple[float, float, pd.Series]:
+             use_lowvol: int = 0,
+             daily_out: list = None) -> tuple[float, float, pd.Series]:
     """
     クロスセクショナル戦略をシミュレート（numpy高速版）。
     毎月リバランス、等金額配分、上位top_n銘柄を保有。
     use_vol_filter=1: 市場が高ボラ＋下落トレンドのとき現金退避（クラッシュ対策）
     use_residual=1:   残差モメンタム（β調整後の銘柄固有リターン）でランキング
     use_lowvol=1:     低ボラティリティ戦略（過去ボラが低い順に保有・常時投資）
-    returns: (sharpe, total_return_pct, portfolio_series)
+    daily_out:        リストを渡すと日次資産曲線(pd.Series)を1つ追加で格納する
+                      （月中ドローダウン計測用。グリッドサーチでは渡さず高速に保つ）
+    returns: (sharpe, total_return_pct, portfolio_series)  ※シャープは月次ベース
     """
     lookback_days = lookback_months * 21
     vals = price_df.to_numpy(dtype=float)
@@ -412,13 +415,15 @@ def simulate(price_df: pd.DataFrame,
     cash = INITIAL_CASH
     shares = np.zeros(n_cols)          # 銘柄ごとの保有株数
     rec_dates, rec_pv = [], []
+    daily_segments = []                # (開始idx, 終了idx, shares複製, cash) のリスト
 
     # +2: シグナルは前日(idx-1)の価格を使うため1日余分に必要
     required = max(lookback_days + skip_days + 2,
                    TREND_WINDOW + 2 if use_vol_filter else 0,
                    BETA_WINDOW + skip_days + 2 if use_residual else 0)
 
-    for idx in rebal_indices:
+    rebal_list = [int(i) for i in rebal_indices]
+    for ri, idx in enumerate(rebal_list):
         if idx < required:
             continue
 
@@ -534,8 +539,23 @@ def simulate(price_df: pd.DataFrame,
         rec_dates.append(price_df.index[idx])
         rec_pv.append(pv)
 
+        # 日次資産曲線用: 取引後の保有で次のリバランスまでの毎日を評価
+        if daily_out is not None:
+            seg_end = rebal_list[ri + 1] if ri + 1 < len(rebal_list) else n_rows
+            daily_segments.append((idx, seg_end, shares.copy(), cash))
+
     if len(rec_pv) < 3:
         return -999.0, -999.0, pd.Series(dtype=float)
+
+    if daily_out is not None and daily_segments:
+        parts = []
+        for s, e, sh, ca in daily_segments:
+            seg_vals = vals[s:e]
+            pv_days = np.nansum(np.where(np.isnan(seg_vals), 0.0, seg_vals) * sh, axis=1) + ca
+            parts.append(pd.Series(pv_days, index=price_df.index[s:e]))
+        daily_series = pd.concat(parts)
+        daily_series = daily_series[~daily_series.index.duplicated(keep="last")].sort_index()
+        daily_out.append(daily_series)
 
     pv_series = pd.Series(rec_pv, index=rec_dates, name="総資産")
     monthly_ret = pv_series.pct_change().dropna()
@@ -558,7 +578,7 @@ def _required_days(params: dict) -> int:
 
 
 def simulate_period(price_df: pd.DataFrame, start_idx: int, end_idx: int,
-                    **params) -> tuple[float, float, pd.Series]:
+                    daily_out: list = None, **params) -> tuple[float, float, pd.Series]:
     """
     [start_idx, end_idx) を評価期間としてシミュレートする。
     評価期間の前にウォームアップデータを与えるため、長いlookbackの
@@ -567,11 +587,16 @@ def simulate_period(price_df: pd.DataFrame, start_idx: int, end_idx: int,
     """
     warmup = _required_days(params)
     s = max(0, start_idx - warmup)
-    sharpe_raw, ret_raw, eq = simulate(price_df.iloc[s:end_idx], **params)
+    inner_daily = [] if daily_out is not None else None
+    sharpe_raw, ret_raw, eq = simulate(price_df.iloc[s:end_idx],
+                                       daily_out=inner_daily, **params)
+    start_date = price_df.index[start_idx]
+    if daily_out is not None and inner_daily:
+        d = inner_daily[0]
+        daily_out.append(d[d.index >= start_date])
     if eq.empty:
         return sharpe_raw, ret_raw, eq
 
-    start_date = price_df.index[start_idx]
     eq2 = eq[eq.index >= start_date]
     if len(eq2) < 3:
         return -999.0, -999.0, pd.Series(dtype=float)
@@ -921,7 +946,9 @@ def run_holdout(best_params: dict) -> dict:
     start_idx = int(np.argmax(start_mask))
 
     try:
-        sharpe, ret, eq = simulate_period(holdout_df, start_idx, len(holdout_df), **best_params)
+        daily = []
+        sharpe, ret, eq = simulate_period(holdout_df, start_idx, len(holdout_df),
+                                          daily_out=daily, **best_params)
     except Exception as e:
         return {"error": str(e)}
 
@@ -929,6 +956,7 @@ def run_holdout(best_params: dict) -> dict:
         "sharpe": round(sharpe, 3),
         "return_pct": round(ret, 2),
         "equity": eq,
+        "daily_equity": daily[0] if daily else pd.Series(dtype=float),
         "params": best_params,
     }
 
@@ -1212,24 +1240,26 @@ def main():
                       f"{'✅ 市場に勝利' if diff > 0 else '❌ 市場に敗北（インデックスの方が良かった）'}")
 
                 # リスク調整後の比較（低ボラ系戦略の正しい評価軸）
-                # ★ 公平性: 戦略の資産曲線は月次サンプリングなので、
-                #   ベンチマークも月次サンプリングに揃えてDDを比較する
                 bench_level_m = bench_h.resample("MS").first().dropna()
                 bench_m = bench_level_m.pct_change().dropna()
                 bench_sharpe = float(bench_m.mean() / bench_m.std() * np.sqrt(12)) if bench_m.std() > 0 else 0.0
-                bench_dd_m = float((bench_level_m / bench_level_m.cummax() - 1).min()) * 100
                 bench_dd_d = float((bench_h / bench_h.cummax() - 1).min()) * 100
-                eq_h = holdout_result["equity"]
-                strat_dd = float((eq_h / eq_h.cummax() - 1).min()) * 100 if not eq_h.empty else float("nan")
                 sharpe_diff = h_sharpe - bench_sharpe
                 print(f"")
-                print(f"  ── リスク調整後比較（月次サンプリングで統一）──────")
+                print(f"  ── リスク調整後比較 ─────────────────────────")
                 print(f"  シャープ:  戦略 {h_sharpe:.3f} vs {BENCH_LABEL} {bench_sharpe:.3f} "
-                      f"→ {sharpe_diff:+.3f} {'✅ リスク調整後は勝利' if sharpe_diff > 0 else '❌ リスク調整後も敗北'}")
-                print(f"  最大DD:    戦略 {strat_dd:.1f}% vs {BENCH_LABEL} {bench_dd_m:.1f}% "
-                      f"{'✅ 下落耐性あり' if strat_dd > bench_dd_m else '❌ 下落も大きい'}")
-                print(f"  （参考: {BENCH_LABEL}の日次ベース最大DD {bench_dd_d:.1f}%。"
-                      f"戦略の月中DDは月次データでは測定不能）")
+                      f"→ {sharpe_diff:+.3f} {'✅ リスク調整後は勝利' if sharpe_diff > 0 else '❌ リスク調整後も敗北'}"
+                      f"（月次同士で公平）")
+
+                # ★ 日次資産曲線による月中DD込みの公平な比較
+                eq_d = holdout_result.get("daily_equity", pd.Series(dtype=float))
+                if not eq_d.empty:
+                    strat_dd_d = float((eq_d / eq_d.cummax() - 1).min()) * 100
+                    print(f"  最大DD:    戦略 {strat_dd_d:.1f}% vs {BENCH_LABEL} {bench_dd_d:.1f}% "
+                          f"{'✅ 下落耐性あり' if strat_dd_d > bench_dd_d else '❌ 下落も大きい'}"
+                          f"（日次同士・月中の下落込みで公平）")
+                else:
+                    print(f"  最大DD:    戦略の日次データなし（{BENCH_LABEL} 日次: {bench_dd_d:.1f}%）")
             except Exception as e:
                 print(f"  {BENCH_LABEL}比較: 取得失敗 ({e})")
         print("=" * 60 + "\n")
