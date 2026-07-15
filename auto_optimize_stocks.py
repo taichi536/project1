@@ -1131,6 +1131,20 @@ def main():
                 diff = h_ret - bench_h_ret
                 print(f"  {BENCH_LABEL}:    {bench_h_ret:+.1f}%  → 戦略との差: {diff:+.1f}pt "
                       f"{'✅ 市場に勝利' if diff > 0 else '❌ 市場に敗北（インデックスの方が良かった）'}")
+
+                # リスク調整後の比較（低ボラ系戦略の正しい評価軸）
+                bench_m = bench_h.resample("MS").first().pct_change().dropna()
+                bench_sharpe = float(bench_m.mean() / bench_m.std() * np.sqrt(12)) if bench_m.std() > 0 else 0.0
+                bench_dd = float((bench_h / bench_h.cummax() - 1).min()) * 100
+                eq_h = holdout_result["equity"]
+                strat_dd = float((eq_h / eq_h.cummax() - 1).min()) * 100 if not eq_h.empty else float("nan")
+                sharpe_diff = h_sharpe - bench_sharpe
+                print(f"")
+                print(f"  ── リスク調整後比較 ─────────────────────────")
+                print(f"  シャープ:  戦略 {h_sharpe:.3f} vs {BENCH_LABEL} {bench_sharpe:.3f} "
+                      f"→ {sharpe_diff:+.3f} {'✅ リスク調整後は勝利' if sharpe_diff > 0 else '❌ リスク調整後も敗北'}")
+                print(f"  最大DD:    戦略 {strat_dd:.1f}% vs {BENCH_LABEL} {bench_dd:.1f}% "
+                      f"{'✅ 下落耐性あり' if strat_dd > bench_dd else '❌ 下落も大きい'}")
             except Exception as e:
                 print(f"  {BENCH_LABEL}比較: 取得失敗 ({e})")
         print("=" * 60 + "\n")
