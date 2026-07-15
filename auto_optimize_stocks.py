@@ -544,6 +544,44 @@ def simulate(price_df: pd.DataFrame,
     return sharpe, total_ret, pv_series
 
 
+# ── ウォームアップ付き期間評価 ───────────────────────────────────────────────
+def _required_days(params: dict) -> int:
+    """指定パラメータが取引を開始するために必要なウォームアップ日数。"""
+    lb = params["lookback_months"] * 21
+    skip = params.get("skip_days", 0)
+    req = lb + skip + 2
+    if params.get("use_vol_filter"):
+        req = max(req, TREND_WINDOW + 2)
+    if params.get("use_residual"):
+        req = max(req, BETA_WINDOW + skip + 2)
+    return req
+
+
+def simulate_period(price_df: pd.DataFrame, start_idx: int, end_idx: int,
+                    **params) -> tuple[float, float, pd.Series]:
+    """
+    [start_idx, end_idx) を評価期間としてシミュレートする。
+    評価期間の前にウォームアップデータを与えるため、長いlookbackの
+    パラメータでも期間の初日から取引できる（成績集計は評価期間のみ）。
+    ※ ウォームアップは評価期間より過去のデータなのでルックアヘッドではない。
+    """
+    warmup = _required_days(params)
+    s = max(0, start_idx - warmup)
+    sharpe_raw, ret_raw, eq = simulate(price_df.iloc[s:end_idx], **params)
+    if eq.empty:
+        return sharpe_raw, ret_raw, eq
+
+    start_date = price_df.index[start_idx]
+    eq2 = eq[eq.index >= start_date]
+    if len(eq2) < 3:
+        return -999.0, -999.0, pd.Series(dtype=float)
+
+    mr = eq2.pct_change().dropna()
+    sharpe = float(mr.mean() / mr.std() * np.sqrt(12)) if mr.std() > 0 else 0.0
+    ret = float((eq2.iloc[-1] / eq2.iloc[0] - 1) * 100)
+    return sharpe, ret, eq2
+
+
 # ── DSR（偏向シャープ比）────────────────────────────────────────────────────
 def deflated_sharpe_ratio(sr_annualized: float, n_trials: int, n_obs: int,
                           skew: float = 0.0, excess_kurt: float = 0.0) -> tuple:
@@ -727,8 +765,11 @@ def walk_forward(price_df: pd.DataFrame) -> dict:
             continue
 
         # テスト期間（OOS）評価
+        # ★ ウォームアップ付き: 長いlookbackのパラメータもテスト初日から取引できる
         try:
-            oos_sharpe, oos_ret, oos_eq = simulate(test_df, **best_params)
+            oos_sharpe, oos_ret, oos_eq = simulate_period(
+                price_df, train_end, test_end, **best_params
+            )
         except Exception:
             continue
 
@@ -737,8 +778,9 @@ def walk_forward(price_df: pd.DataFrame) -> dict:
 
         # 固定パラメータ（lookback=12m, top_n=10, skip=21d）との比較
         try:
-            fix_sharpe, fix_ret, fix_eq = simulate(
-                test_df, lookback_months=12, top_n=10, skip_days=21
+            fix_sharpe, fix_ret, fix_eq = simulate_period(
+                price_df, train_end, test_end,
+                lookback_months=12, top_n=10, skip_days=21,
             )
         except Exception:
             fix_sharpe, fix_ret, fix_eq = -999.0, -999.0, pd.Series(dtype=float)
@@ -865,13 +907,21 @@ def run_holdout(best_params: dict) -> dict:
     print(f"   ※ このデータは最適化中に一切使用していません")
     print(f"   検証パラメータ: {best_params}\n")
 
-    holdout_df = fetch_prices(start=HOLDOUT_START, end=HOLDOUT_END, label="ホールドアウト期間")
+    # ★ ウォームアップ: 2022年からのデータを与え、成績集計は2024年以降のみ。
+    #   ホールドアウト開始時点で過去データを持っているのは現実と同じ条件。
+    holdout_df = fetch_prices(start="2022-01-01", end=HOLDOUT_END,
+                              label="ホールドアウト期間（ウォームアップ込み）")
 
     if holdout_df.empty or len(holdout_df) < 60:
         return {"error": "ホールドアウトデータが不足しています"}
 
+    start_mask = holdout_df.index >= HOLDOUT_START
+    if not start_mask.any():
+        return {"error": "ホールドアウト期間のデータがありません"}
+    start_idx = int(np.argmax(start_mask))
+
     try:
-        sharpe, ret, eq = simulate(holdout_df, **best_params)
+        sharpe, ret, eq = simulate_period(holdout_df, start_idx, len(holdout_df), **best_params)
     except Exception as e:
         return {"error": str(e)}
 
