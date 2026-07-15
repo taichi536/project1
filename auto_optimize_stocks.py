@@ -1133,18 +1133,24 @@ def main():
                       f"{'✅ 市場に勝利' if diff > 0 else '❌ 市場に敗北（インデックスの方が良かった）'}")
 
                 # リスク調整後の比較（低ボラ系戦略の正しい評価軸）
-                bench_m = bench_h.resample("MS").first().pct_change().dropna()
+                # ★ 公平性: 戦略の資産曲線は月次サンプリングなので、
+                #   ベンチマークも月次サンプリングに揃えてDDを比較する
+                bench_level_m = bench_h.resample("MS").first().dropna()
+                bench_m = bench_level_m.pct_change().dropna()
                 bench_sharpe = float(bench_m.mean() / bench_m.std() * np.sqrt(12)) if bench_m.std() > 0 else 0.0
-                bench_dd = float((bench_h / bench_h.cummax() - 1).min()) * 100
+                bench_dd_m = float((bench_level_m / bench_level_m.cummax() - 1).min()) * 100
+                bench_dd_d = float((bench_h / bench_h.cummax() - 1).min()) * 100
                 eq_h = holdout_result["equity"]
                 strat_dd = float((eq_h / eq_h.cummax() - 1).min()) * 100 if not eq_h.empty else float("nan")
                 sharpe_diff = h_sharpe - bench_sharpe
                 print(f"")
-                print(f"  ── リスク調整後比較 ─────────────────────────")
+                print(f"  ── リスク調整後比較（月次サンプリングで統一）──────")
                 print(f"  シャープ:  戦略 {h_sharpe:.3f} vs {BENCH_LABEL} {bench_sharpe:.3f} "
                       f"→ {sharpe_diff:+.3f} {'✅ リスク調整後は勝利' if sharpe_diff > 0 else '❌ リスク調整後も敗北'}")
-                print(f"  最大DD:    戦略 {strat_dd:.1f}% vs {BENCH_LABEL} {bench_dd:.1f}% "
-                      f"{'✅ 下落耐性あり' if strat_dd > bench_dd else '❌ 下落も大きい'}")
+                print(f"  最大DD:    戦略 {strat_dd:.1f}% vs {BENCH_LABEL} {bench_dd_m:.1f}% "
+                      f"{'✅ 下落耐性あり' if strat_dd > bench_dd_m else '❌ 下落も大きい'}")
+                print(f"  （参考: {BENCH_LABEL}の日次ベース最大DD {bench_dd_d:.1f}%。"
+                      f"戦略の月中DDは月次データでは測定不能）")
             except Exception as e:
                 print(f"  {BENCH_LABEL}比較: 取得失敗 ({e})")
         print("=" * 60 + "\n")
