@@ -183,6 +183,53 @@ MULTI_ASSET_UNIVERSE = {
     "ドル円":   "USDJPY=X",
 }
 
+# ── 暗号資産ユニバース（--crypto モード）─────────────────────────────────────
+# ※ 生存者バイアスが極めて強い点に注意: 死んだ数千のコインは取得不能で、
+#   ここにあるのは「生き残った」メジャーコインのみ。結果は過大評価される。
+# ※ 日本の税制では雑所得（最大55%課税・損失繰越不可・NISA対象外）。
+CRYPTO_UNIVERSE = {
+    "Bitcoin":      "BTC-USD",
+    "Ethereum":     "ETH-USD",
+    "XRP":          "XRP-USD",
+    "Litecoin":     "LTC-USD",
+    "BitcoinCash":  "BCH-USD",
+    "Cardano":      "ADA-USD",
+    "Dogecoin":     "DOGE-USD",
+    "Stellar":      "XLM-USD",
+    "Monero":       "XMR-USD",
+    "EthereumClassic": "ETC-USD",
+    "Zcash":        "ZEC-USD",
+    "Dash":         "DASH-USD",
+}
+CRYPTO_PARAM_GRID = {
+    "lookback_months": [1, 2, 3, 4, 5, 6, 8, 9, 10, 12],
+    "top_n":           [1, 2, 3, 5],
+    "skip_days":       [0, 5, 10, 21],
+    "use_vol_filter":  [0, 1],
+    "use_residual":    [0, 1],
+}
+
+# ── FXユニバース（--fx モード、円建てクロス）────────────────────────────────
+# 「円に対して最も強い通貨を保有、全て弱ければ円のまま」という円建てモメンタム。
+# ※ スワップポイント（金利差損益）は含まれない。実際のFX運用とは乖離あり。
+FX_UNIVERSE = {
+    "米ドル":       "USDJPY=X",
+    "ユーロ":       "EURJPY=X",
+    "英ポンド":     "GBPJPY=X",
+    "豪ドル":       "AUDJPY=X",
+    "NZドル":       "NZDJPY=X",
+    "カナダドル":   "CADJPY=X",
+    "スイスフラン": "CHFJPY=X",
+    "シンガポールドル": "SGDJPY=X",
+}
+FX_PARAM_GRID = {
+    "lookback_months": [1, 2, 3, 4, 5, 6, 8, 9, 10, 12],
+    "top_n":           [1, 2, 3],
+    "skip_days":       [0, 5, 10, 21],
+    "use_vol_filter":  [0, 1],
+    "use_residual":    [0, 1],
+}
+
 # ── 2010年時点のS&P500主要銘柄（--us モード、生存者バイアス低減版）──────────
 # 「2010年当時に大型だった銘柄」で構成。GE・シティ・AIG・ゼロックス・
 # インテル・フォードなど「後の敗者・停滞組」を意図的に含む。
@@ -883,9 +930,12 @@ def print_recommendation(result: dict):
 def main():
     global BACKTEST_UNIVERSE, PARAM_GRID, BENCH_TICKER, BENCH_LABEL
 
-    # --etf: マルチアセットETF / --us: 米国S&P500個別株
-    etf_mode = "--etf" in sys.argv
-    us_mode  = "--us" in sys.argv
+    # --etf: マルチアセットETF / --us: 米国株 / --crypto: 暗号資産 / --fx: 為替
+    etf_mode    = "--etf" in sys.argv
+    us_mode     = "--us" in sys.argv
+    crypto_mode = "--crypto" in sys.argv
+    fx_mode     = "--fx" in sys.argv
+    asset_class_mode = etf_mode or crypto_mode or fx_mode   # 少数資産モード
     if etf_mode:
         BACKTEST_UNIVERSE = MULTI_ASSET_UNIVERSE
         PARAM_GRID = ETF_PARAM_GRID
@@ -898,6 +948,22 @@ def main():
         title = "米国S&P500 個別株モメンタム戦略"
         uni_desc = (f"2010年時点のS&P500主要 {len(BACKTEST_UNIVERSE)} 銘柄"
                     f"（生存者バイアス低減版・USD建て）")
+    elif crypto_mode:
+        BACKTEST_UNIVERSE = CRYPTO_UNIVERSE
+        PARAM_GRID = CRYPTO_PARAM_GRID
+        BENCH_TICKER = "BTC-USD"
+        BENCH_LABEL  = "BTC単独保有"
+        title = "暗号資産 モメンタム戦略"
+        uni_desc = (f"主要 {len(BACKTEST_UNIVERSE)} コイン（USD建て）"
+                    f"⚠️ 生存者バイアス大・雑所得課税に注意")
+    elif fx_mode:
+        BACKTEST_UNIVERSE = FX_UNIVERSE
+        PARAM_GRID = FX_PARAM_GRID
+        BENCH_TICKER = "USDJPY=X"
+        BENCH_LABEL  = "米ドル単独保有"
+        title = "FX（円建てクロス）モメンタム戦略"
+        uni_desc = (f"対円 {len(BACKTEST_UNIVERSE)} 通貨 "
+                    f"⚠️ スワップポイントは未考慮")
     else:
         title = "日経225 個別株モメンタム戦略"
         uni_desc = f"2010年時点の日経225主要 {len(BACKTEST_UNIVERSE)} 銘柄（生存者バイアス低減版）"
@@ -990,7 +1056,7 @@ def main():
     print(f"  📊 全期間比較（{DATA_START} 〜 {DATA_END_OPT}）")
     print("=" * 60)
 
-    if etf_mode:
+    if asset_class_mode:
         configs = [
             {"label": "TOP1資産（12m/skip21d）",   "top_n": 1, "lookback_months": 12, "skip_days": 21},
             {"label": "TOP2資産（12m/skip21d）",   "top_n": 2, "lookback_months": 12, "skip_days": 21},
