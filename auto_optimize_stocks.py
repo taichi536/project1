@@ -1055,6 +1055,105 @@ def run_signal():
         print(f"     ※ これは検証記録であり、投資判断はご自身で行ってください。\n")
 
 
+# ── フォワードテスト: 途中経過の集計 ─────────────────────────────────────────
+def track_performance(log_df: pd.DataFrame, price_df: pd.DataFrame,
+                      bench: pd.Series) -> pd.DataFrame:
+    """
+    シグナルログの各記録について「記録日以降の等金額リターン」を計算し、
+    同期間のベンチマークと比較する。集計ロジック（テスト可能な純関数）。
+    """
+    rows = []
+    for (sig_date, strat), grp in log_df.groupby(["実行日", "戦略"]):
+        sig_ts = pd.Timestamp(sig_date)
+        mask = np.asarray(price_df.index >= sig_ts)
+        if not mask.any():
+            continue
+        entry_idx = int(np.argmax(mask))
+        entry = price_df.iloc[entry_idx]
+        latest = price_df.iloc[-1]
+
+        rets = []
+        for t in grp["ティッカー"]:
+            if t in price_df.columns:
+                e, l = float(entry[t]), float(latest[t])
+                if e > 0 and not (np.isnan(e) or np.isnan(l)):
+                    rets.append(l / e - 1)
+        if not rets:
+            continue
+        port_ret = float(np.mean(rets)) * 100
+
+        bmask = bench.index >= sig_ts
+        if bmask.any():
+            b_entry = float(bench[bmask].iloc[0])
+            b_ret = (float(bench.iloc[-1]) / b_entry - 1) * 100
+        else:
+            b_ret = float("nan")
+
+        days = (price_df.index[-1] - price_df.index[entry_idx]).days
+        rows.append({
+            "シグナル日": sig_date, "戦略": strat, "経過日数": days,
+            "銘柄数": len(rets), "戦略リターン(%)": round(port_ret, 2),
+            "ベンチ(%)": round(b_ret, 2), "差(pt)": round(port_ret - b_ret, 2),
+        })
+    return pd.DataFrame(rows)
+
+
+def run_track():
+    """
+    フォワードテストの途中経過を表示する。いつ実行してもよい（毎日でも）。
+    記録済みシグナルの「その後」を集計するだけで、記録自体は変更しない。
+    """
+    log_path = os.path.join(OUTPUT_DIR, "signal_log.csv")
+    if not os.path.exists(log_path):
+        print("\n❌ シグナルログがありません。まず --signal を実行してください。\n")
+        return
+
+    log_df = pd.read_csv(log_path)
+    if log_df.empty:
+        print("\n❌ シグナルログが空です。\n")
+        return
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    first = str(log_df["実行日"].min())
+
+    print("\n" + "=" * 60)
+    print("  📈 フォワードテスト途中経過")
+    print(f"  最初のシグナル: {first} / 確認日: {today}")
+    print("=" * 60 + "\n")
+
+    tickers = sorted(log_df["ティッカー"].unique())
+    print(f"📡 {len(tickers)} 銘柄 + 日経平均の価格を取得中...")
+    try:
+        raw = yf.download(tickers, start=first, end=today,
+                          interval="1d", auto_adjust=True, progress=False)
+        close = raw["Close"] if "Close" in raw.columns else raw
+        price_df = pd.DataFrame({t: close[t] for t in tickers if t in close.columns}).ffill()
+        bench = yf.download("^N225", start=first, end=today,
+                            interval="1d", auto_adjust=True, progress=False)["Close"].squeeze().dropna()
+    except Exception as e:
+        print(f"❌ データ取得失敗: {e}")
+        return
+
+    result = track_performance(log_df, price_df, bench)
+    if result.empty:
+        print("  集計可能な記録がまだありません（シグナル当日は経過ゼロです）\n")
+        return
+
+    print()
+    for _, r in result.iterrows():
+        mark = "✅" if r["差(pt)"] > 0 else "❌" if r["差(pt)"] < 0 else "─"
+        print(f"  {r['シグナル日']}  {r['戦略']:16s} {r['経過日数']:4d}日  "
+              f"戦略 {r['戦略リターン(%)']:+6.2f}%  日経 {r['ベンチ(%)']:+6.2f}%  "
+              f"差 {r['差(pt)']:+6.2f}pt {mark}")
+
+    print()
+    avg_diff = float(result["差(pt)"].mean())
+    print(f"  平均超過リターン: {avg_diff:+.2f}pt "
+          f"{'（低ボラは強気相場で劣後するのが正常。シャープ比較は6ヶ月後から）' if len(result) < 12 else ''}")
+    print(f"  ※ 経過が短いうちは1日の値動きでいくらでも反転します。")
+    print(f"     判断材料になるのは最低6ヶ月・できれば12ヶ月分の記録です。\n")
+
+
 # ── 結果保存 ──────────────────────────────────────────────────────────────────
 def save_results(result: dict):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -1133,6 +1232,11 @@ def main():
     # --signal: フォワードテスト（今月のシグナル出力のみ）
     if "--signal" in sys.argv:
         run_signal()
+        return
+
+    # --track: フォワードテストの途中経過（いつでも・何度でも実行可）
+    if "--track" in sys.argv:
+        run_track()
         return
 
     # --etf: ETF / --us: 米国株 / --crypto: 暗号資産 / --fx: 為替 / --lowvol: 低ボラ日本株
