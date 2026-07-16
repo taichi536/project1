@@ -1114,6 +1114,8 @@ def run_track():
         return
 
     today = datetime.now().strftime("%Y-%m-%d")
+    # yfinanceのendは排他的なので、今日の分を含めるため明日を指定
+    end = (datetime.now() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     first = str(log_df["実行日"].min())
 
     print("\n" + "=" * 60)
@@ -1124,14 +1126,23 @@ def run_track():
     tickers = sorted(log_df["ティッカー"].unique())
     print(f"📡 {len(tickers)} 銘柄 + 日経平均の価格を取得中...")
     try:
-        raw = yf.download(tickers, start=first, end=today,
+        raw = yf.download(tickers, start=first, end=end,
                           interval="1d", auto_adjust=True, progress=False)
         close = raw["Close"] if "Close" in raw.columns else raw
         price_df = pd.DataFrame({t: close[t] for t in tickers if t in close.columns}).ffill()
-        bench = yf.download("^N225", start=first, end=today,
-                            interval="1d", auto_adjust=True, progress=False)["Close"].squeeze().dropna()
+
+        bench_raw = yf.download("^N225", start=first, end=end,
+                                interval="1d", auto_adjust=True, progress=False)["Close"]
+        # データが1点しかない場合squeezeでスカラーになるため、列取り出しで統一
+        if isinstance(bench_raw, pd.DataFrame):
+            bench_raw = bench_raw.iloc[:, 0]
+        bench = bench_raw.dropna()
     except Exception as e:
         print(f"❌ データ取得失敗: {e}")
+        return
+
+    if len(price_df) < 2:
+        print("  価格データがまだ1日分しかありません。明日以降に再実行してください。\n")
         return
 
     result = track_performance(log_df, price_df, bench)
