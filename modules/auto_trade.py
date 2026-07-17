@@ -17,7 +17,13 @@ from datetime import datetime
 from modules.broker import get_broker, calc_order_qty, BrokerBase
 
 
-_SETTINGS_FILE = Path(__file__).parent.parent / ".auto_trade_settings.json"
+from modules import userstore
+
+_LEGACY_SETTINGS = Path(__file__).parent.parent / ".auto_trade_settings.json"
+
+
+def _settings_file() -> Path:
+    return userstore.user_path("auto_trade_settings.json", legacy=_LEGACY_SETTINGS)
 
 _DEFAULT_SETTINGS = {
     "enabled": False,           # 自動売買の有効/無効
@@ -47,9 +53,10 @@ class AutoTrader:
         self.broker: BrokerBase = get_broker()
 
     def _load_settings(self) -> dict:
-        if _SETTINGS_FILE.exists():
+        p = _settings_file()
+        if p.exists():
             try:
-                saved = json.loads(_SETTINGS_FILE.read_text())
+                saved = json.loads(p.read_text())
                 return {**_DEFAULT_SETTINGS, **saved}
             except Exception:
                 pass
@@ -57,7 +64,7 @@ class AutoTrader:
 
     def save_settings(self, updates: dict):
         self.settings.update(updates)
-        _SETTINGS_FILE.write_text(
+        _settings_file().write_text(
             json.dumps(self.settings, ensure_ascii=False, indent=2)
         )
 

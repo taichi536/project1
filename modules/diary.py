@@ -3,11 +3,13 @@ import pandas as pd
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "diary.db"
+from modules import userstore
+
+_LEGACY_DB = Path(__file__).parent.parent / "diary.db"
 
 
 def _conn():
-    return sqlite3.connect(DB_PATH)
+    return sqlite3.connect(userstore.user_path("diary.db", legacy=_LEGACY_DB))
 
 
 def init_db():

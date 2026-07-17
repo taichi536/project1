@@ -9,13 +9,20 @@ import json
 from pathlib import Path
 from datetime import datetime, timedelta
 
-_TRACKER_FILE = Path(__file__).parent.parent / ".signal_tracker.json"
+from modules import userstore
+
+_LEGACY_TRACKER = Path(__file__).parent.parent / ".signal_tracker.json"
+
+
+def _tracker_file() -> Path:
+    return userstore.user_path("signal_tracker.json", legacy=_LEGACY_TRACKER)
 
 
 def _load() -> dict:
-    if _TRACKER_FILE.exists():
+    p = _tracker_file()
+    if p.exists():
         try:
-            return json.loads(_TRACKER_FILE.read_text())
+            return json.loads(p.read_text())
         except Exception:
             pass
     return {"signals": [], "summary": {}}
@@ -23,7 +30,7 @@ def _load() -> dict:
 
 def _save(data: dict):
     try:
-        _TRACKER_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        _tracker_file().write_text(json.dumps(data, ensure_ascii=False, indent=2))
     except Exception:
         pass
 

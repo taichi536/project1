@@ -10,7 +10,14 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
-PAPER_FILE = os.path.join(os.path.dirname(__file__), "..", ".paper_trades.json")
+from pathlib import Path
+from modules import userstore
+
+_LEGACY_PAPER = Path(__file__).parent.parent / ".paper_trades.json"
+
+
+def _paper_file() -> str:
+    return str(userstore.user_path("paper_trades.json", legacy=_LEGACY_PAPER))
 
 MARKETS = {
     "BTC":  {"ticker": "BTC-USD",  "interval": "1h",  "period": "7d",  "initial": 1000.0, "fee": 0.001, "unit": "USD", "decimals": 0},
@@ -76,9 +83,9 @@ def get_signal(df: pd.DataFrame) -> str:
 
 
 def load_state() -> dict:
-    if os.path.exists(PAPER_FILE):
+    if os.path.exists(_paper_file()):
         try:
-            with open(PAPER_FILE) as f:
+            with open(_paper_file()) as f:
                 return json.load(f)
         except Exception:
             pass
@@ -91,7 +98,7 @@ def load_state() -> dict:
 
 
 def save_state(state: dict):
-    with open(PAPER_FILE, "w") as f:
+    with open(_paper_file(), "w") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
@@ -230,5 +237,5 @@ def get_summary() -> dict:
 
 def reset_paper_trades():
     """ペーパートレードをリセット"""
-    if os.path.exists(PAPER_FILE):
-        os.remove(PAPER_FILE)
+    if os.path.exists(_paper_file()):
+        os.remove(_paper_file())

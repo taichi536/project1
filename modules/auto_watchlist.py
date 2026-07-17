@@ -15,9 +15,23 @@ from modules.data_fetcher import fetch_ohlcv
 from modules.technical import compute_all
 from modules.signals import evaluate_signals, overall_signal
 
-_SETTINGS_FILE = Path(__file__).parent.parent / ".auto_watchlist_settings.json"
-_STATE_FILE = Path(__file__).parent.parent / ".auto_watchlist_state.json"
-_RESULT_FILE = Path(__file__).parent.parent / ".auto_watchlist_last_result.json"
+from modules import userstore
+
+_LEGACY_SETTINGS = Path(__file__).parent.parent / ".auto_watchlist_settings.json"
+_LEGACY_STATE = Path(__file__).parent.parent / ".auto_watchlist_state.json"
+_LEGACY_RESULT = Path(__file__).parent.parent / ".auto_watchlist_last_result.json"
+
+
+def _settings_file() -> Path:
+    return userstore.user_path("auto_watchlist_settings.json", legacy=_LEGACY_SETTINGS)
+
+
+def _state_file() -> Path:
+    return userstore.user_path("auto_watchlist_state.json", legacy=_LEGACY_STATE)
+
+
+def _result_file() -> Path:
+    return userstore.user_path("auto_watchlist_last_result.json", legacy=_LEGACY_RESULT)
 
 DEFAULT_SETTINGS = {
     "enabled": False,
@@ -31,9 +45,9 @@ DEFAULT_SETTINGS = {
 
 
 def load_settings() -> dict:
-    if _SETTINGS_FILE.exists():
+    if _settings_file().exists():
         try:
-            saved = json.loads(_SETTINGS_FILE.read_text())
+            saved = json.loads(_settings_file().read_text())
             return {**DEFAULT_SETTINGS, **saved}
         except Exception:
             pass
@@ -43,20 +57,20 @@ def load_settings() -> dict:
 def save_settings(updates: dict):
     settings = load_settings()
     settings.update(updates)
-    _SETTINGS_FILE.write_text(json.dumps(settings, ensure_ascii=False, indent=2))
+    _settings_file().write_text(json.dumps(settings, ensure_ascii=False, indent=2))
 
 
 def _load_state() -> dict:
-    if _STATE_FILE.exists():
+    if _state_file().exists():
         try:
-            return json.loads(_STATE_FILE.read_text())
+            return json.loads(_state_file().read_text())
         except Exception:
             pass
     return {}
 
 
 def _save_state(state: dict):
-    _STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2))
+    _state_file().write_text(json.dumps(state, ensure_ascii=False, indent=2))
 
 
 def get_universe_tickers(categories: list[str]) -> list[str]:
@@ -211,7 +225,7 @@ def run_auto_watchlist(verbose: bool = True) -> dict:
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "watchlist": watchlist,
     }
-    _RESULT_FILE.write_text(json.dumps(result, ensure_ascii=False, indent=2))
+    _result_file().write_text(json.dumps(result, ensure_ascii=False, indent=2))
 
     if verbose:
         print(f"\n[自動ウォッチリスト] 完了: +{len(added)}件追加 / -{len(removed)}件削除")
@@ -222,9 +236,9 @@ def run_auto_watchlist(verbose: bool = True) -> dict:
 
 def load_last_result() -> dict | None:
     """前回のスキャン結果をファイルから読み込む"""
-    if _RESULT_FILE.exists():
+    if _result_file().exists():
         try:
-            return json.loads(_RESULT_FILE.read_text())
+            return json.loads(_result_file().read_text())
         except Exception:
             pass
     return None

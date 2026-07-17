@@ -39,16 +39,21 @@ def fetch_and_compute(ticker: str, period: str, sma_short: int, sma_long: int, i
     return compute_all(df, sma_short=sma_short, sma_long=sma_long)
 
 
-# ─── ダッシュボード設定の永続化 ──────────────────────────────────────────────
+# ─── ダッシュボード設定の永続化（ユーザーごとに分離） ────────────────────────
 import json as _json
 from pathlib import Path as _Path
+from modules import userstore
 
-_DASH_CONFIG_FILE = _Path(__file__).parent / ".dashboard_config.json"
+_LEGACY_DASH_CONFIG = _Path(__file__).parent / ".dashboard_config.json"
+
+def _dash_config_file() -> _Path:
+    return userstore.user_path("dashboard_config.json", legacy=_LEGACY_DASH_CONFIG)
 
 def _load_dash_config() -> dict:
-    if _DASH_CONFIG_FILE.exists():
+    p = _dash_config_file()
+    if p.exists():
         try:
-            return _json.loads(_DASH_CONFIG_FILE.read_text())
+            return _json.loads(p.read_text())
         except Exception:
             pass
     return {}
@@ -56,7 +61,7 @@ def _load_dash_config() -> dict:
 def _save_dash_config(updates: dict):
     cfg = _load_dash_config()
     cfg.update(updates)
-    _DASH_CONFIG_FILE.write_text(_json.dumps(cfg, ensure_ascii=False))
+    _dash_config_file().write_text(_json.dumps(cfg, ensure_ascii=False))
 
 # session_stateにキーがなければファイルから復元（ページ遷移・リロード両対応）
 _dash_cfg = _load_dash_config()
@@ -74,6 +79,11 @@ def _on_auto_refresh_change():
 # ─── サイドバー ───────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("📈 株式分析ツール")
+
+    # ログイン中のアカウント表示（マルチユーザー環境用）
+    _user_email = userstore.user_email()
+    if _user_email:
+        st.caption(f"👤 {_user_email}（データはこのアカウント専用に保存されます）")
     st.markdown("---")
 
     # 市場ステータス

@@ -8,25 +8,37 @@ from modules.data_fetcher import fetch_ohlcv, normalize_ticker, fetch_realtime_p
 from modules.technical import compute_all
 from modules.signals import evaluate_signals, overall_signal
 
-WATCHLIST_PATH = Path(__file__).parent.parent / "watchlist.json"
-_SCAN_CACHE_FILE = Path(__file__).parent.parent / ".scan_cache.json"
+from modules import userstore
+
+_LEGACY_WATCHLIST = Path(__file__).parent.parent / "watchlist.json"
+_LEGACY_SCAN_CACHE = Path(__file__).parent.parent / ".scan_cache.json"
 _CACHE_TTL_SECONDS = 1800  # 30分間キャッシュ
 
 
+def _watchlist_path() -> Path:
+    return userstore.user_path("watchlist.json", legacy=_LEGACY_WATCHLIST)
+
+
+def _scan_cache_path() -> Path:
+    return userstore.user_path("scan_cache.json", legacy=_LEGACY_SCAN_CACHE)
+
+
 def load_watchlist() -> list[str]:
-    if WATCHLIST_PATH.exists():
-        return json.loads(WATCHLIST_PATH.read_text())
+    p = _watchlist_path()
+    if p.exists():
+        return json.loads(p.read_text())
     return ["7203", "9984", "6758", "AAPL", "MSFT"]
 
 
 def save_watchlist(tickers: list[str]):
-    WATCHLIST_PATH.write_text(json.dumps(tickers, ensure_ascii=False))
+    _watchlist_path().write_text(json.dumps(tickers, ensure_ascii=False))
 
 
 def _load_cache() -> dict:
-    if _SCAN_CACHE_FILE.exists():
+    p = _scan_cache_path()
+    if p.exists():
         try:
-            return json.loads(_SCAN_CACHE_FILE.read_text())
+            return json.loads(p.read_text())
         except Exception:
             pass
     return {}
@@ -34,7 +46,7 @@ def _load_cache() -> dict:
 
 def _save_cache(cache: dict):
     try:
-        _SCAN_CACHE_FILE.write_text(json.dumps(cache, ensure_ascii=False))
+        _scan_cache_path().write_text(json.dumps(cache, ensure_ascii=False))
     except Exception:
         pass
 

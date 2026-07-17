@@ -4,3 +4,13 @@ __pycache__/
 diary.db
 .env
 .fx_rate_cache.json
+data/users/
+.paper_trades.json
+.signal_tracker.json
+.auto_trade_settings.json
+.auto_watchlist_settings.json
+.auto_watchlist_state.json
+.auto_watchlist_last_result.json
+.dashboard_config.json
+.scan_cache.json
+watchlist.json
