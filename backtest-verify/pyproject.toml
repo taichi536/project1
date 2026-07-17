@@ -27,8 +27,5 @@ classifiers = [
 [project.scripts]
 backtest-verify = "backtest_verify.cli:main"
 
-[project.urls]
-Homepage = "https://github.com/taichi536/backtest-verify"
-
 [tool.setuptools.packages.find]
 where = ["src"]

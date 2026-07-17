@@ -79,17 +79,6 @@ print(result["dsr"], result["pbo_analysis"]["pbo"])
 500 parameter combinations and only report the winner with `--trials 1`,
 the tool cannot save you.
 
-## Background
-
-This tool was extracted from a real research campaign: cross-sectional
-momentum strategies were optimized across five markets (Japanese equities,
-US equities, multi-asset ETFs, crypto, FX) with ~70,000 parameter
-evaluations. Initial backtests showed up to +4,900% — and every one of those
-results evaporated under the checks implemented here (look-ahead bias,
-survivorship bias, rebalancing bugs, and multiple-testing inflation).
-The verification machinery outlived every strategy it tested. So we shipped
-the machinery.
-
 ## Disclaimer
 
 This tool performs statistical verification only. It is **not investment
