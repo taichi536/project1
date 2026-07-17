@@ -1,0 +1,13 @@
+LICENSE
+README.md
+pyproject.toml
+src/backtest_verify/__init__.py
+src/backtest_verify/cli.py
+src/backtest_verify/core.py
+src/backtest_verify.egg-info/PKG-INFO
+src/backtest_verify.egg-info/SOURCES.txt
+src/backtest_verify.egg-info/dependency_links.txt
+src/backtest_verify.egg-info/entry_points.txt
+src/backtest_verify.egg-info/requires.txt
+src/backtest_verify.egg-info/top_level.txt
+tests/test_core.py

@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "backtest-verify"
+version = "0.1.0"
+description = "Statistical overfitting detection for trading strategy backtests (DSR, PBO/CSCV)"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Taichi Endo" }]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.21",
+    "pandas>=1.3",
+    "scipy>=1.7",
+]
+keywords = ["backtesting", "overfitting", "quantitative-finance", "sharpe-ratio", "pbo", "dsr"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+
+[project.scripts]
+backtest-verify = "backtest_verify.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/taichi536/backtest-verify"
+
+[tool.setuptools.packages.find]
+where = ["src"]
