@@ -382,7 +382,8 @@ def simulate(price_df: pd.DataFrame,
              use_vol_filter: int = 0,
              use_residual: int = 0,
              use_lowvol: int = 0,
-             daily_out: list = None) -> tuple[float, float, pd.Series]:
+             daily_out: list = None,
+             rebal_freq: str = "monthly") -> tuple[float, float, pd.Series]:
     """
     クロスセクショナル戦略をシミュレート（numpy高速版）。
     毎月リバランス、等金額配分、上位top_n銘柄を保有。
@@ -398,10 +399,18 @@ def simulate(price_df: pd.DataFrame,
     n_rows, n_cols = vals.shape
     actual_top_n = min(top_n, n_cols)
 
-    # 毎月最初の営業日を高速に抽出
-    months = price_df.index.to_period("M").astype(str).to_numpy()
-    is_month_start = np.r_[True, months[1:] != months[:-1]]
-    rebal_indices = np.flatnonzero(is_month_start)
+    # リバランス日（月次=毎月最初の営業日 / weekly=毎週最初の営業日 / biweekly=隔週）
+    if rebal_freq == "weekly" or rebal_freq == "biweekly":
+        iso = price_df.index.isocalendar()
+        wk = (iso["year"].astype(str) + "-" + iso["week"].astype(str)).to_numpy()
+        is_start = np.r_[True, wk[1:] != wk[:-1]]
+        rebal_indices = np.flatnonzero(is_start)
+        if rebal_freq == "biweekly":
+            rebal_indices = rebal_indices[::2]
+    else:
+        months = price_df.index.to_period("M").astype(str).to_numpy()
+        is_month_start = np.r_[True, months[1:] != months[:-1]]
+        rebal_indices = np.flatnonzero(is_month_start)
 
     # 日次リターンと市場プロキシ（ユニバース等加重）
     # ret[i] = i-1日目 → i日目 のリターン。i日目までの情報しか使わない。
@@ -558,8 +567,9 @@ def simulate(price_df: pd.DataFrame,
         daily_out.append(daily_series)
 
     pv_series = pd.Series(rec_pv, index=rec_dates, name="総資産")
-    monthly_ret = pv_series.pct_change().dropna()
-    sharpe = float(monthly_ret.mean() / monthly_ret.std() * (12 ** 0.5)) if monthly_ret.std() > 0 else 0.0
+    period_ret = pv_series.pct_change().dropna()
+    ann = {"monthly": 12, "biweekly": 26, "weekly": 52}.get(rebal_freq, 12)
+    sharpe = float(period_ret.mean() / period_ret.std() * (ann ** 0.5)) if period_ret.std() > 0 else 0.0
     total_ret = float((pv_series.iloc[-1] / INITIAL_CASH - 1) * 100)
     return sharpe, total_ret, pv_series
 
@@ -602,7 +612,9 @@ def simulate_period(price_df: pd.DataFrame, start_idx: int, end_idx: int,
         return -999.0, -999.0, pd.Series(dtype=float)
 
     mr = eq2.pct_change().dropna()
-    sharpe = float(mr.mean() / mr.std() * np.sqrt(12)) if mr.std() > 0 else 0.0
+    ann = {"monthly": 12, "biweekly": 26, "weekly": 52}.get(
+        params.get("rebal_freq", "monthly"), 12)
+    sharpe = float(mr.mean() / mr.std() * np.sqrt(ann)) if mr.std() > 0 else 0.0
     ret = float((eq2.iloc[-1] / eq2.iloc[0] - 1) * 100)
     return sharpe, ret, eq2
 
@@ -1165,6 +1177,55 @@ def run_track():
     print(f"     判断材料になるのは最低6ヶ月・できれば12ヶ月分の記録です。\n")
 
 
+# ── リバランス頻度テスト ─────────────────────────────────────────────────────
+def run_freq_test():
+    """
+    「月1回のリバランスは最適か？」を事前登録型の小さな比較で検証する。
+    グリッドサーチはしない（多重テストを増やさないため）:
+    代表2戦略 × 頻度3種 × コスト2水準 = 12評価のみ。
+    """
+    global FEE_RATE
+    print("\n" + "=" * 64)
+    print("  ⏱ リバランス頻度テスト（月次 vs 隔週 vs 週次）")
+    print("  ※ 事前登録型: 代表2戦略のみ・グリッドサーチなし・12評価")
+    print(f"  データ: {DATA_START} 〜 {DATA_END_OPT}（ホールドアウトは使用しない）")
+    print("=" * 64 + "\n")
+
+    price_df = fetch_prices(start=DATA_START, end=DATA_END_OPT)
+
+    configs = [
+        {"label": "低ボラ（12m/15銘柄）",
+         "params": {"lookback_months": 12, "top_n": 15, "skip_days": 0, "use_lowvol": 1}},
+        {"label": "モメンタム（2m/10銘柄）",
+         "params": {"lookback_months": 2, "top_n": 10, "skip_days": 21}},
+    ]
+    freqs = [("monthly", "月次"), ("biweekly", "隔週"), ("weekly", "週次")]
+    fees = [(0.001, "0.1%"), (0.003, "0.3%")]
+
+    orig_fee = FEE_RATE
+    for cfg in configs:
+        print(f"  ── {cfg['label']} " + "─" * (46 - len(cfg['label']) * 2))
+        print(f"  {'頻度':6s}  " + "  ".join(f"[片道{fl}] Sharpe / リターン" for _, fl in fees))
+        for freq, freq_label in freqs:
+            cells = []
+            for fee, _ in fees:
+                FEE_RATE = fee
+                try:
+                    sh, ret, _ = simulate(price_df, **cfg["params"], rebal_freq=freq)
+                    cells.append(f"{sh:+.3f} / {ret:+8.1f}%")
+                except Exception as e:
+                    cells.append(f"error: {e}")
+            print(f"  {freq_label:6s}  " + "      ".join(cells))
+        print()
+    FEE_RATE = orig_fee
+
+    print("  💡 読み方: 頻度を上げてシャープが改善しても、コスト0.3%の列で")
+    print("     消えるなら、それは実運用に存在しない優位性です。")
+    print("  ⚠️  この比較は最適化期間内の観察であり、ホールドアウト検証は")
+    print("     行っていません（もう使い切ったため）。参考情報に留めてください。")
+    print("=" * 64 + "\n")
+
+
 # ── 結果保存 ──────────────────────────────────────────────────────────────────
 def save_results(result: dict):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -1248,6 +1309,11 @@ def main():
     # --track: フォワードテストの途中経過（いつでも・何度でも実行可）
     if "--track" in sys.argv:
         run_track()
+        return
+
+    # --freq-test: リバランス頻度の比較（月次 vs 隔週 vs 週次）
+    if "--freq-test" in sys.argv:
+        run_freq_test()
         return
 
     # --etf: ETF / --us: 米国株 / --crypto: 暗号資産 / --fx: 為替 / --lowvol: 低ボラ日本株
