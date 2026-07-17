@@ -1782,7 +1782,7 @@ elif page == "🔬 バックテスト":
     st.title("🔬 バックテスト")
     st.markdown("過去データで売買戦略の有効性を検証します")
 
-    bt_tab_single, bt_tab_batch, bt_tab_momentum, bt_tab_multi, bt_tab_crypto, bt_tab_optimizer, bt_tab_stocks = st.tabs(["📈 単一銘柄", "📊 一括バックテスト", "🚀 モメンタム戦略", "🌍 マルチアセット", "🪙 暗号資産", "🔬 最適化", "🎯 個別株モメンタム"])
+    bt_tab_single, bt_tab_batch, bt_tab_momentum, bt_tab_multi, bt_tab_crypto, bt_tab_optimizer, bt_tab_stocks, bt_tab_verify = st.tabs(["📈 単一銘柄", "📊 一括バックテスト", "🚀 モメンタム戦略", "🌍 マルチアセット", "🪙 暗号資産", "🔬 最適化", "🎯 個別株モメンタム", "🔍 検証"])
 
     # ── 共通パラメータ（両タブで使う）──────────────────────────────────────
     with st.expander("⚙️ バックテスト設定（期間・戦略・資金）", expanded=False):
@@ -2662,8 +2662,130 @@ elif page == "🔬 バックテスト":
                         "手数料無料のSBI・楽天証券推奨。"
                     )
 
+    with bt_tab_verify:
+        st.markdown("### 🔍 バックテスト過学習チェック")
+        st.caption(
+            "戦略の好成績が「本物」か「多重テストの産物（運）」かを統計的に判定します。"
+            "手法: DSR (Bailey & López de Prado 2014) / PBO・CSCV (Bailey et al. 2015)"
+        )
 
-# ─── ポートフォリオ最適化 ─────────────────────────────────────────────────────
+        # backtest-verify パッケージをpip install不要で読み込む
+        import sys as _sys
+        _pkg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "backtest-verify", "src")
+        if _pkg_path not in _sys.path:
+            _sys.path.insert(0, _pkg_path)
+        from backtest_verify import verify as bv_verify, deflated_sharpe_ratio as bv_dsr
+
+        def _verdict_banner(dsr_val, pbo_val=None, slope_val=None):
+            checks = ["pass" if dsr_val >= 0.95 else "warn" if dsr_val >= 0.80 else "fail"]
+            if pbo_val is not None:
+                checks.append("pass" if pbo_val < 0.2 else "warn" if pbo_val < 0.5 else "fail")
+            if slope_val is not None and not pd.isna(slope_val):
+                checks.append("pass" if slope_val > 0 else "fail")
+            overall = "fail" if "fail" in checks else "warn" if "warn" in checks else "pass"
+            if overall == "pass":
+                st.success("✅ **合格** ─ 統計的な過学習の兆候は検出されませんでした（将来の成果の保証ではありません）")
+            elif overall == "warn":
+                st.warning("⚠️ **境界的** ─ 追加データやフォワードテストでの確認を推奨します")
+            else:
+                st.error("❌ **不合格** ─ この成績はノイズ（運）と区別できません。実運用の根拠としては不十分です")
+
+        vf_mode = st.radio(
+            "入力方法", ["かんたん判定（数字3つ）", "CSVアップロード"],
+            horizontal=True, key="vf_mode",
+        )
+
+        if vf_mode == "かんたん判定（数字3つ）":
+            st.caption("データ不要。バックテスト結果の数字を入れるだけで「運でも出る水準」と比較します。")
+            vc1, vc2, vc3 = st.columns(3)
+            vf_sharpe = vc1.number_input("年率シャープ比", value=1.5, step=0.1, key="vf_sharpe")
+            vf_months = vc2.number_input("期間（月数）", value=120, min_value=12, step=12, key="vf_months")
+            vf_trials = vc3.number_input("試した戦略・パラメータ総数", value=100, min_value=1, key="vf_trials")
+
+            if st.button("判定する", type="primary", key="vf_quick_run"):
+                dsr_v, emax_v = bv_dsr(float(vf_sharpe), int(vf_trials), int(vf_months))
+                _verdict_banner(dsr_v)
+                m1, m2, m3 = st.columns(3)
+                m1.metric("DSR（偏向シャープ比）", f"{dsr_v:.4f}",
+                          help="試行回数を補正した後も、真のシャープ比が0を超える確率。0.95以上で合格")
+                m2.metric("ノイズ期待最大シャープ", f"{emax_v:.2f}",
+                          help=f"{int(vf_trials):,}回試せば、優位性ゼロでも運だけでこの水準の勝者が生まれる")
+                m3.metric("あなたのシャープ比", f"{float(vf_sharpe):.2f}",
+                          delta=f"{float(vf_sharpe) - emax_v:+.2f} vs ノイズ天井")
+                st.caption("※ 「試した総数」には捨てた設定・没にした戦略も含めてください。正直な申告ほど判定は正確です。")
+
+        else:
+            st.caption(
+                "行 = 期間、列 = 戦略のリターン行列（1列でも可）。先頭列が日付なら自動除外。"
+                "**パラメータ探索の全結果**（全組み合わせ×期間）を渡すとPBOまで検査できます。"
+            )
+            vf_file = st.file_uploader("CSVファイル", type=["csv"], key="vf_file")
+            fc1, fc2, fc3 = st.columns(3)
+            vf_freq = fc1.selectbox("データの頻度", ["月次", "日次", "週次"], key="vf_freq")
+            vf_trials2 = fc2.number_input("試した総数（空欄=列数）", value=0, min_value=0, key="vf_trials2")
+            vf_equity = fc3.checkbox("資産曲線（金額）として読み込む", key="vf_equity")
+
+            if vf_file is not None:
+                try:
+                    vdf = pd.read_csv(vf_file)
+                    first_col = vdf.columns[0]
+                    if vdf[first_col].dtype == object:
+                        try:
+                            vdf[first_col] = pd.to_datetime(vdf[first_col])
+                            vdf = vdf.set_index(first_col)
+                        except (ValueError, TypeError):
+                            pass
+                    vdf = vdf.apply(pd.to_numeric, errors="coerce").dropna(how="all")
+                    vdf = vdf.dropna(axis=1, how="all")
+                    if vf_equity:
+                        vdf = vdf.pct_change().dropna(how="all")
+
+                    ppy = {"月次": 12, "日次": 252, "週次": 52}[vf_freq]
+                    res = bv_verify(vdf, n_trials=int(vf_trials2) or None, periods_per_year=ppy)
+
+                    pbo_a = res.get("pbo_analysis") or {}
+                    pbo_v = pbo_a.get("pbo") if "error" not in pbo_a else None
+                    slope_v = pbo_a.get("is_oos_slope") if "error" not in pbo_a else None
+                    _verdict_banner(res["dsr"], pbo_v, slope_v)
+
+                    st.caption(
+                        f"データ: {res['n_periods']}期間 × {res['n_strategies']}戦略 / "
+                        f"申告試行数: {res['n_trials']:,} / "
+                        f"最良戦略: **{res['best_strategy']}**（シャープ {res['best_sharpe']}）"
+                    )
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("DSR", f"{res['dsr']:.4f}",
+                              help="0.95以上で合格。試行回数を補正した統計的有意性")
+                    m2.metric("ノイズ期待最大シャープ", f"{res['expected_max_sharpe']:.2f}")
+                    if pbo_v is not None:
+                        m3.metric("PBO（過学習確率）", f"{pbo_v:.3f}",
+                                  help="訓練期1位がテスト期に下位半分へ落ちる確率。0.2未満で合格")
+                        s1, s2 = st.columns(2)
+                        s1.metric("IS→OOS勾配", f"{slope_v:+.3f}" if not pd.isna(slope_v) else "—",
+                                  help="マイナスなら「訓練で良いほどテストで悪い」（過剰適合の症状）")
+                        s2.metric("訓練期1位のOOS平均シャープ",
+                                  f"{pbo_a.get('mean_oos_sharpe_of_is_best', float('nan')):+.3f}")
+                    else:
+                        m3.metric("PBO", "—", help="単一戦略のためスキップ。複数列を渡すと計算されます")
+                except Exception as e:
+                    st.error(f"読み込みエラー: {e} ─ CSVは「行=期間、列=戦略」の数値表にしてください。")
+
+        with st.expander("⚠️ このチェックに**できないこと**（重要）", expanded=False):
+            st.markdown("""
+このツールが検出できるのは**多重テストによる過学習**だけです。以下はデータ自体の問題であり、
+統計では見抜けません。入力する前にセルフチェックしてください：
+
+- **ルックアヘッドバイアス**: シグナル計算と執行に同じ日の価格を使っていないか？
+  （シグナルは前日終値、執行は当日価格に分離するのが正解）
+- **生存者バイアス**: 銘柄リストを「現在の勝者」で組んでいないか？
+  （バックテスト開始時点で存在した銘柄リストを使うのが正解）
+- **リバランスの整合性**: 「等金額」のつもりで勝者を放置していないか？
+- **コストの現実性**: 手数料・スプレッド・スリッページを入れているか？
+
+当プロジェクトの検証では、これら4つの罠で最大リターンが**+4,900%→市場平均以下**まで
+変わりました。このチェックの合格は「データが誠実であれば統計的には有意」という意味です。
+""")
 elif page == "📐 ポートフォリオ":
     st.title("📐 ポートフォリオ最適化")
     st.markdown("相関分析・最小分散・ケリー基準で分散投資を最適化します")
