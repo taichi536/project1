@@ -1325,9 +1325,20 @@ def main():
     asset_class_mode = etf_mode or crypto_mode or fx_mode   # 少数資産モード
     if lowvol_mode:
         PARAM_GRID = LOWVOL_PARAM_GRID
-        title = "日本株 低ボラティリティ戦略"
-        uni_desc = (f"2010年時点の日経225主要 {len(BACKTEST_UNIVERSE)} 銘柄"
-                    f"（生存者バイアス低減版）★ グリッドを32通りに限定し多重テストを抑制")
+        if us_mode:
+            # ★ ユニバース外再現テスト: 日本株で検証したのと同一のプロトコル
+            #   （同じ32グリッド・同じ検証手順）を米国株にそのまま適用する。
+            #   新たなパラメータ探索ではなく「再現実験」なので多重テストは増えない。
+            BACKTEST_UNIVERSE = SP500_2010_UNIVERSE
+            BENCH_TICKER = "^GSPC"
+            BENCH_LABEL  = "S&P500"
+            title = "米国S&P500 低ボラティリティ戦略（再現テスト）"
+            uni_desc = (f"2010年時点のS&P500主要 {len(BACKTEST_UNIVERSE)} 銘柄"
+                        f"（生存者バイアス低減版・USD建て）★ 日本と同一プロトコルの再現実験")
+        else:
+            title = "日本株 低ボラティリティ戦略"
+            uni_desc = (f"2010年時点の日経225主要 {len(BACKTEST_UNIVERSE)} 銘柄"
+                        f"（生存者バイアス低減版）★ グリッドを32通りに限定し多重テストを抑制")
     elif etf_mode:
         BACKTEST_UNIVERSE = MULTI_ASSET_UNIVERSE
         PARAM_GRID = ETF_PARAM_GRID
