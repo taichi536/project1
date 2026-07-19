@@ -47,8 +47,8 @@ const GICS_INDUSTRIES = [
 ];
 
 const MEDIA_LABEL = {
-  rds: 'RDS', bizreach: 'ビズリーチ', dodax: 'doda X',
-  ambi: 'AMBI', green: 'Green', mynavi: 'マイナビ'
+  rds: 'RDS', bizreach: 'ビズリーチ', dodax: 'dodaX',
+  ambi: 'アンビ', green: 'Green', mynavi: 'マイナビ'
 };
 
 // メンバーと年齢列の対応（各セクション7列: 年齢・会社名・大学・ポジション名・媒体・業界・送信日時）
@@ -391,7 +391,24 @@ function recordScoutBatch(ss, items) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    return items.map(data => recordScoutOne(ss, data));
+    return items.map(data => {
+      try {
+        return recordScoutOne(ss, data);
+      } catch (err) {
+        // 1件のエラー（例: データ入力規則違反）でバッチ全体を失敗させない。
+        // この件だけ記録エラーログに残し、他の正常な候補者の記録は成功させる
+        // （クライアント側が失敗と判定してバッチ全体を再送＝重複するのを防ぐ）
+        Logger.log('recordScoutOne個別エラー candidateId=' + (data.candidateId || '') + ': ' + err.message);
+        try {
+          logAnomaly(ss, {
+            recruiter: data.recruiter, company: data.company,
+            missing: '記録処理エラー: ' + err.message, sheet: SHEET_DB, row: '',
+            candidateId: data.candidateId || '',
+          });
+        } catch (_) {}
+        return { error: err.message, candidateId: data.candidateId || '' };
+      }
+    });
   } finally {
     lock.releaseLock();
   }
