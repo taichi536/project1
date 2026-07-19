@@ -6,7 +6,12 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      width: 420px;
+      /* サイドパネル化に伴い、固定幅のポップアップ用ボックスではなく、Chromeが
+         割り当てる（ユーザーがドラッグでリサイズ可能な）サイドパネルの実際の幅に
+         追従させる。固定pxのままだと、パネル幅がそれより広い場合に余白が余ったり、
+         狭い場合に横スクロールが発生したりしてしまう */
+      width: 100%;
+      min-width: 300px;
       font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Yu Gothic', sans-serif;
       font-size: 13px;
       color: #2c2c2a;

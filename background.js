@@ -1,5 +1,15 @@
 // background.js — GAS中継 & ポジション一覧の管理
 
+// 通常のポップアップ（action.default_popup）は、ページ上をクリックしたりタブを切り替えたり
+// すると自動的に閉じてしまい、承認待ちレビュー中にRDSの候補者詳細を見ながら操作できない・
+// 閉じて承認待ちリストの続きを見失う、という問題が繰り返し起きていた。サイドパネルは
+// ページと重ならず開いたまま閉じないため、この問題自体を解消できる。アイコンクリックで
+// ポップアップの代わりにサイドパネルが開くようにする（manifest.json側もdefault_popupを
+// 外し、side_panel.default_pathに切り替え済み）
+chrome.sidePanel
+  .setPanelBehavior({ openPanelOnActionClick: true })
+  .catch((error) => console.error('[Snow-we] サイドパネル設定失敗:', error));
+
 // ポジション一覧（ここだけ編集すれば popup・content 両方に反映される）
 const POSITION_LIST = [
   'ファンクションコンサルタント(営業/Eコマース)-song',
