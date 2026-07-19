@@ -63,13 +63,28 @@ function showExtensionInvalidatedBanner() {
   _extensionInvalidatedBannerShown = true;
   try {
     const banner = document.createElement('div');
-    banner.textContent = '⚠️ Snow-we拡張機能が更新されました。この操作以降は記録されない可能性があります。ページを再読み込みしてください。';
     banner.style.cssText = `
       position:fixed;top:0;left:0;right:0;z-index:2147483647;
       background:#fef3c7;color:#78350f;font-family:sans-serif;font-size:13px;
-      font-weight:600;padding:10px 16px;text-align:center;
+      font-weight:600;padding:10px 40px 10px 16px;text-align:center;
       box-shadow:0 2px 8px rgba(0,0,0,0.15);
     `;
+    const text = document.createElement('span');
+    text.textContent = '⚠️ Snow-we拡張機能が更新されました。この操作以降は記録されない可能性があります。ページを再読み込みしてください。';
+    banner.appendChild(text);
+
+    // ページ側の閉じるボタン等と重なって操作しづらいという報告があったため、
+    // このバナー自体をすぐ閉じられるようにする
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = `
+      position:absolute;top:0;right:0;height:100%;width:32px;
+      background:transparent;border:none;color:#78350f;font-size:18px;
+      font-weight:700;cursor:pointer;line-height:1;
+    `;
+    closeBtn.addEventListener('click', () => banner.remove());
+    banner.appendChild(closeBtn);
+
     document.documentElement.appendChild(banner);
   } catch (_) {}
 }
