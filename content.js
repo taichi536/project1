@@ -62,12 +62,15 @@ function showExtensionInvalidatedBanner() {
   if (_extensionInvalidatedBannerShown) return;
   _extensionInvalidatedBannerShown = true;
   try {
+    // 画面上部いっぱいに固定すると、ページ自体の閉じるボタン等（右上に多い）と
+    // 重なって操作しづらくなるという報告があったため、他の通知バッジ類と同じく
+    // 画面下部の隅に小さく表示する形に変更
     const banner = document.createElement('div');
     banner.style.cssText = `
-      position:fixed;top:0;left:0;right:0;z-index:2147483647;
-      background:#fef3c7;color:#78350f;font-family:sans-serif;font-size:13px;
-      font-weight:600;padding:10px 40px 10px 16px;text-align:center;
-      box-shadow:0 2px 8px rgba(0,0,0,0.15);
+      position:fixed;bottom:12px;left:12px;z-index:2147483647;max-width:360px;
+      background:#fef3c7;color:#78350f;font-family:sans-serif;font-size:12px;
+      font-weight:600;padding:10px 40px 10px 14px;border-radius:8px;
+      box-shadow:0 2px 12px rgba(0,0,0,0.25);
     `;
     const text = document.createElement('span');
     text.textContent = '⚠️ Snow-we拡張機能が更新されました。この操作以降は記録されない可能性があります。ページを再読み込みしてください。';
