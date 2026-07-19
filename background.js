@@ -196,15 +196,34 @@ chrome.alarms.get('snowWeGasQueueFlush', (existing) => {
   }
 });
 
-// 直近で送信失敗が起きた時刻。連続失敗中は再送の間隔を広げ、GAS側が混雑している
-// ときに拡張機能側からさらにリクエストを畳みかけて悪化させるのを防ぐ
-let _lastGasFailureTs = 0;
+// 連続失敗に応じて再送間隔を自動的に延ばすサーキットブレーカー。
+// サービスワーカーはアイドル時に頻繁に再起動されメモリ上の変数が消えるため、
+// chrome.storage.localに状態を持たせて再起動をまたいでも機能するようにする
+// （30秒/1分/2分/4分/8分…と倍々に延ばし、最大15分でキャップ。GAS側の同時実行数
+// 上限を拡張機能側から圧迫し続けて悪化させる「再送の嵐」を防ぐのが目的。
+// キューの中身自体は消さないので、記録が失われることはなく間隔が空くだけ）
+async function getGasBackoffUntil() {
+  const { gasBackoff } = await chrome.storage.local.get(['gasBackoff']);
+  return gasBackoff?.nextRetryTs || 0;
+}
+async function recordGasSuccess() {
+  await chrome.storage.local.set({ gasBackoff: { consecutiveFailures: 0, nextRetryTs: 0 } });
+}
+async function recordGasFailure() {
+  const { gasBackoff } = await chrome.storage.local.get(['gasBackoff']);
+  const consecutiveFailures = (gasBackoff?.consecutiveFailures || 0) + 1;
+  const waitMs = Math.min(30000 * Math.pow(2, consecutiveFailures - 1), 15 * 60 * 1000);
+  await chrome.storage.local.set({
+    gasBackoff: { consecutiveFailures, nextRetryTs: Date.now() + waitMs }
+  });
+  console.warn(`[Snow-we] GASサーキットブレーカー作動: 連続失敗${consecutiveFailures}回、次回再送まで約${Math.round(waitMs / 1000)}秒待機`);
+}
 
 async function flushGasScoutQueue() {
   return withQueueLock(async () => {
-    // 直近30秒以内に失敗している場合は今回はスキップする（1分おきのアラームで
-    // 自然に間隔が空くのを待つ。4秒デバウンスでの即時再送で連打しない）
-    if (_lastGasFailureTs && Date.now() - _lastGasFailureTs < 30000) return;
+    // バックオフ期間中は今回のフラッシュをスキップ（キューの中身はそのまま残る）
+    const backoffUntil = await getGasBackoffUntil();
+    if (Date.now() < backoffUntil) return;
 
     const { gasSettings, gasScoutQueue } = await chrome.storage.local.get(['gasSettings', 'gasScoutQueue']);
     const queue = gasScoutQueue || [];
@@ -233,13 +252,13 @@ async function flushGasScoutQueue() {
     const anySuccess = results.some(r => r.status === 'fulfilled' && r.value?.ok !== false);
 
     if (anySuccess) {
-      _lastGasFailureTs = 0;
+      await recordGasSuccess();
       for (const item of queue) {
         if (item.candidateId) await patchScoutHistoryEntry(item.candidateId, { gasSent: true });
       }
       console.log(`[Snow-we] スカウト記録バッチ送信成功: ${queue.length}件`);
     } else {
-      _lastGasFailureTs = Date.now();
+      await recordGasFailure();
       // 失敗の実際の理由を記録する（原因調査のため。rejectedならエラー内容、
       // fulfilledでもok:falseならGASが返したエラーメッセージを出す）
       results.forEach((r, i) => {
