@@ -1426,6 +1426,7 @@ $('api-test-btn').addEventListener('click', async () => {
     });
 
     const data = await response.json();
+    await recordApiCost('claude-haiku-4-5-20251001', data.usage);
     if (response.ok) {
       resultEl.textContent = `✅ 接続成功！`;
       resultEl.style.color = '#085041';

@@ -4094,13 +4094,17 @@ async function loadRecentFeedbacks(limit = 10) {
   local = local.filter(f => !isContaminatedFeedback(f));
   team = team.filter(f => !isContaminatedFeedback(f));
 
-  // ローカル優先でマージ、重複排除（profileSummary+correction で判定）
-  const seen = new Set(local.map(f => (f.profileSummary || '').slice(0, 40) + f.correction));
-  const merged = [...local];
-  for (const f of team) {
+  // 重複排除（profileSummary+correction で判定）した上で、ローカル・チーム分を
+  // 合わせて日時(ts)の新しい順に並び替える。以前は単純にローカル分を全部並べてから
+  // チーム分を後ろに追加していたため、ローカルの訂正履歴が上限件数以上たまっていると
+  // それだけで枠が埋まり、他メンバーによるより新しい訂正例が一切参照されなかった
+  const seen = new Set();
+  const merged = [];
+  for (const f of [...local, ...team]) {
     const key = (f.profileSummary || '').slice(0, 40) + f.correction;
     if (!seen.has(key)) { seen.add(key); merged.push(f); }
   }
+  merged.sort((a, b) => (b.ts || 0) - (a.ts || 0));
   return merged.slice(0, limit);
 }
 
