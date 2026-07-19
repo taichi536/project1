@@ -4075,6 +4075,14 @@ function isContaminatedFeedback(f) {
   return SCOUT_BOILERPLATE_MARKERS.some(marker => summary.includes(marker));
 }
 
+// チームフィードバックの短時間キャッシュ。夜間自動実行等で候補者を100〜300人
+// 連続判定する際、loadRecentFeedbacksが候補者ごとに毎回GASへ生で問い合わせると、
+// ほぼ同じ内容を100〜300回取りに行くことになりGAS側の負荷・レイテンシを無駄に
+// 増やす（以前対処したロック競合を助長する方向）。チームのフィードバックは
+// 秒単位で変わるものではないため、3分間はキャッシュを使い回す
+let _teamFeedbackCache = { data: null, ts: 0 };
+const TEAM_FEEDBACK_CACHE_MS = 3 * 60 * 1000;
+
 async function loadRecentFeedbacks(limit = 10) {
   // ローカルフィードバック
   let local = [];
@@ -4083,12 +4091,17 @@ async function loadRecentFeedbacks(limit = 10) {
     local = stored.snowWeFeedbacks || [];
   } catch (_) {}
 
-  // GASからチーム全体のフィードバックも取得（30件）
+  // GASからチーム全体のフィードバックも取得（30件、キャッシュ付き）
   let team = [];
-  try {
-    const res = await chrome.runtime.sendMessage({ type: 'getTeamFeedbacks' });
-    team = res?.feedbacks || [];
-  } catch (_) {}
+  if (_teamFeedbackCache.data && Date.now() - _teamFeedbackCache.ts < TEAM_FEEDBACK_CACHE_MS) {
+    team = _teamFeedbackCache.data;
+  } else {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'getTeamFeedbacks' });
+      team = res?.feedbacks || [];
+      _teamFeedbackCache = { data: team, ts: Date.now() };
+    } catch (_) {}
+  }
 
   // スカウトメール文面のような汚染データを few-shot 対象から除外
   local = local.filter(f => !isContaminatedFeedback(f));
