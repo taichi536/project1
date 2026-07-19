@@ -196,8 +196,16 @@ chrome.alarms.get('snowWeGasQueueFlush', (existing) => {
   }
 });
 
+// 直近で送信失敗が起きた時刻。連続失敗中は再送の間隔を広げ、GAS側が混雑している
+// ときに拡張機能側からさらにリクエストを畳みかけて悪化させるのを防ぐ
+let _lastGasFailureTs = 0;
+
 async function flushGasScoutQueue() {
   return withQueueLock(async () => {
+    // 直近30秒以内に失敗している場合は今回はスキップする（1分おきのアラームで
+    // 自然に間隔が空くのを待つ。4秒デバウンスでの即時再送で連打しない）
+    if (_lastGasFailureTs && Date.now() - _lastGasFailureTs < 30000) return;
+
     const { gasSettings, gasScoutQueue } = await chrome.storage.local.get(['gasSettings', 'gasScoutQueue']);
     const queue = gasScoutQueue || [];
     if (queue.length === 0) return;
@@ -209,16 +217,38 @@ async function flushGasScoutQueue() {
     // 積まれた分は、空になった新しいキューに独立して溜まっていく
     await chrome.storage.local.set({ gasScoutQueue: [] });
 
+    // フェッチがハングし続けて次のリクエストが積み重なるのを防ぐため、
+    // 25秒でタイムアウトさせる（GASのLockService待ち最大30秒より少し短く設定）
     const body = JSON.stringify({ secret, action: 'recordScoutBatch', items: queue });
-    const results = await Promise.allSettled(urls.map(url => fetch(url, { method: 'POST', body }).then(r => r.json())));
+    const results = await Promise.allSettled(urls.map(async url => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 25000);
+      try {
+        const r = await fetch(url, { method: 'POST', body, signal: controller.signal });
+        return await r.json();
+      } finally {
+        clearTimeout(timer);
+      }
+    }));
     const anySuccess = results.some(r => r.status === 'fulfilled' && r.value?.ok !== false);
 
     if (anySuccess) {
+      _lastGasFailureTs = 0;
       for (const item of queue) {
         if (item.candidateId) await patchScoutHistoryEntry(item.candidateId, { gasSent: true });
       }
       console.log(`[Snow-we] スカウト記録バッチ送信成功: ${queue.length}件`);
     } else {
+      _lastGasFailureTs = Date.now();
+      // 失敗の実際の理由を記録する（原因調査のため。rejectedならエラー内容、
+      // fulfilledでもok:falseならGASが返したエラーメッセージを出す）
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') {
+          console.warn('[Snow-we] スカウト記録送信失敗の詳細 url=' + urls[i] + ':', r.reason?.message || r.reason);
+        } else if (r.value?.ok === false) {
+          console.warn('[Snow-we] スカウト記録送信、GASがエラーを返却 url=' + urls[i] + ':', r.value?.error || '(詳細不明)');
+        }
+      });
       console.warn('[Snow-we] スカウト記録バッチ送信、全URLで失敗。キューに戻します');
       const retried = queue.map(it => ({ ...it, _attempts: (it._attempts || 0) + 1 }));
       const giveUp = retried.filter(it => it._attempts >= 8); // 8回(約8分〜)失敗し続けたら諦めて人の確認に回す
