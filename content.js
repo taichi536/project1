@@ -161,12 +161,18 @@ function deriveRDSPickListUrl(href) {
 
 async function recordScoutQueueEntry({ candidateId, platform, position, info, reason, verdict, fullProfile }) {
   if (!candidateId) return;
+  // location.hrefは関数の最初で同期的に取得しておく。以前はawait chrome.storage.local.get()の
+  // 後で読んでいたため、そのわずかな待ち時間の間にバッチ処理が次の部屋・ページへ遷移して
+  // しまうと、location.hrefが既に別の（間違った）部屋のURLになってしまい、room_urlが実際に
+  // 候補者を見つけた部屋と食い違って記録される事故が実機で発生した（後からRPA/拡張機能が
+  // その候補者を探しに行っても本人が存在しない部屋を開いてしまう原因になっていた）。
+  const hrefAtCallTime = location.href;
   let recruiterName = '';
   try {
     const s = await chrome.storage.local.get(['recruiterName']);
     recruiterName = s.recruiterName || '';
   } catch (_) {}
-  const roomUrl = platform === 'rds' ? deriveRDSPickListUrl(location.href) : '';
+  const roomUrl = platform === 'rds' ? deriveRDSPickListUrl(hrefAtCallTime) : '';
   await supabaseUpsert('scout_queue', {
     candidate_id: candidateId,
     platform,
@@ -187,7 +193,7 @@ async function recordScoutQueueEntry({ candidateId, platform, position, info, re
     // （分類ロジックの複製・二重メンテナンスを避けるため）
     industry: gicsAutoClassify(info?.company || ''),
     status: 'pending_review',
-    source_url: location.href,
+    source_url: hrefAtCallTime,
     room_url: roomUrl,
   }, 'candidate_id,platform');
 }
@@ -1221,6 +1227,17 @@ function extractBasicInfo(cardEl) {
     company = lines[0] || '';
   }
 
+  // company抽出は「大学」「病院」も会社名キーワードとして許容している（「◯◯大学病院」の
+  // ような実在の勤務先を拾うため）。しかし学歴欄に単独で「京都大学」とだけ書かれている行
+  // （卒業・修了等の語句が同じ行に無く、isEduLineの除外をすり抜ける）が誤って会社名として
+  // 拾われる事故を実機で確認した（company="京都大学", univ="京都大学"の重複＝会社名不明の
+  // まま大学名で埋まってしまい、後続のRPA検索が誤った候補者に一致・誤送信する原因になった）。
+  // 「大学」「大学院」で終わり、かつ「病院」を含まない＝実在の勤務先ではなく単なる大学名
+  // だけの場合は、会社名として採用しない（空欄のままにする方が、誤った値を使うより安全）
+  if (/(?:大学院|大学)$/.test(company) && !company.includes('病院')) {
+    company = '';
+  }
+
   return {
     age: ageMatch ? `${ageMatch[1]}歳` : '',
     company,
@@ -1767,7 +1784,14 @@ async function snowweFindAndHighlightCandidate({ company, age, univ }) {
   const wantAge = String(age || '').replace(/[^0-9]/g, '');
   const wantUniv = String(univ || '').trim();
 
-  const deadline = Date.now() + 20000; // 20秒まで自動探索（それ以上は人手で探してもらう）
+  // 見つからない間、画面を強制的に最下部までスクロール→「さらに読み込む」を繰り返すため、
+  // アニメーションなしで瞬間移動が繰り返されカクカクして見える。以前は最大20秒間続けて
+  // いたが、見つからない場合は大抵「room_urlが間違っている（対象候補者がそもそもこの
+  // 部屋にいない）」等の理由で何秒粘っても見つからないため、短く切り上げて人手に委ねる
+  // 方が体験として良い。あわせて、諦めた場合は画面に分かりやすく伝える（今までは
+  // console.warnのみで、ユーザーからは「固まった」ようにしか見えなかった）
+  showAutoStatus(`🔍 ${core}さんを探しています...`);
+  const deadline = Date.now() + 8000;
   for (;;) {
     const found = snowweFindCandidateButton({ strictVariants, core, wantAge, wantUniv });
     if (found) {
@@ -1781,6 +1805,7 @@ async function snowweFindAndHighlightCandidate({ company, age, univ }) {
         highlightTarget.style.outline = '';
         highlightTarget.style.outlineOffset = '';
       }, 8000);
+      showAutoStatus(`✅ ${core}さんを見つけました`, 3000);
 
       // 候補者詳細（レジュメ）画面まで自動で開く。startは会社名+年齢を含んでいた
       // 候補者情報側の要素（スカウトボタンとは別カラム）なので、これをクリックしても
@@ -1793,7 +1818,13 @@ async function snowweFindAndHighlightCandidate({ company, age, univ }) {
       } catch (_) {}
       return true;
     }
-    if (Date.now() >= deadline) return false;
+    if (Date.now() >= deadline) {
+      showAutoStatus(
+        `⚠️ ${core}さんを自動で見つけられませんでした。手動でスクロールして探してください`,
+        6000
+      );
+      return false;
+    }
     await snowweFindScrollForLoadMore();
   }
 }
