@@ -181,6 +181,11 @@ async function recordScoutQueueEntry({ candidateId, platform, position, info, re
     // 短いAI要約だけでは判断材料が足りないという課題があったため、承認パネル側で
     // 「詳細を見る」として展開表示できるようにする（RDSに行かなくても中身が見える）
     full_profile: (fullProfile || '').substring(0, 3000),
+    // gicsAutoClassify()はscoutsテーブルへの手動記録時(recordScoutSent)と同じ分類器。
+    // RPA(taichi536/scout)は自ブラウザにこの分類ロジックを持たないため、ここで先に
+    // 計算して保存しておき、RPA送信時にはこの値をそのままscoutsテーブルへ引き継ぐ
+    // （分類ロジックの複製・二重メンテナンスを避けるため）
+    industry: gicsAutoClassify(info?.company || ''),
     status: 'pending_review',
     source_url: location.href,
     room_url: roomUrl,
