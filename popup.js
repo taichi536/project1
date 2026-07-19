@@ -1692,6 +1692,12 @@ async function snowweOpenOrReuseFindTab(roomUrl, targetUrl, find) {
   await chrome.storage.local.set({ snowweFindTabId: newTab.id });
 }
 
+// 承認待ちキューは全チームメンバー分が混在して表示されるため、担当者で絞り込めないと
+// 見づらいという指摘を受けて追加。フィルターの切り替えだけなら再取得せず即座に
+// 反映できるよう、直近取得分をキャッシュしておく
+let _approvalAllRows = [];
+let _approvalPositions = [];
+
 async function renderApprovalQueue() {
   const listEl = $('approval-list');
   const countEl = $('approval-count-label');
@@ -1709,7 +1715,37 @@ async function renderApprovalQueue() {
     return;
   }
 
-  countEl.textContent = `${rows.length}件が承認待ち`;
+  _approvalAllRows = rows;
+  _approvalPositions = positions;
+
+  // 担当者フィルターの選択肢を、実際に承認待ちにいる担当者名から組み立てる。
+  // 前回選んでいた担当者がまだ選択肢にいれば維持し、初回は自分の名前
+  // （設定済みなら）をデフォルトにする（「全員」を見たい場合は手動で切り替える）
+  const filterSelect = $('approval-recruiter-filter');
+  const recruiters = Array.from(new Set(rows.map(r => (r.recruiter || '').trim()).filter(Boolean))).sort();
+  const prevValue = filterSelect.value;
+  const { recruiterName } = await chrome.storage.local.get(['recruiterName']).catch(() => ({}));
+  const recruitersHtml = recruiters.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
+  filterSelect.innerHTML = `<option value="">全員</option>${recruitersHtml}`;
+  if (recruiters.includes(prevValue)) {
+    filterSelect.value = prevValue;
+  } else if (recruiterName && recruiters.includes(recruiterName)) {
+    filterSelect.value = recruiterName;
+  }
+
+  renderApprovalCardsFromCache();
+}
+
+function renderApprovalCardsFromCache() {
+  const listEl = $('approval-list');
+  const countEl = $('approval-count-label');
+  const filterValue = $('approval-recruiter-filter').value;
+  const rows = filterValue
+    ? _approvalAllRows.filter(r => (r.recruiter || '').trim() === filterValue)
+    : _approvalAllRows;
+  const positions = _approvalPositions;
+
+  countEl.textContent = approvalCountText();
   if (rows.length === 0) {
     listEl.innerHTML = '<div style="padding:20px; text-align:center; color:#aaa; font-size:12px;">承認待ちの候補者はいません</div>';
     return;
@@ -1784,7 +1820,8 @@ async function renderApprovalQueue() {
       try {
         await updateScoutQueueEntry(id, { status: 'approved', position: select.value, reviewed_at: new Date().toISOString() });
         card.remove();
-        countEl.textContent = `${listEl.querySelectorAll('.approval-card').length}件が承認待ち`;
+        _approvalAllRows = _approvalAllRows.filter(r => String(r.id) !== String(id));
+        countEl.textContent = approvalCountText();
       } catch (err) {
         btn.disabled = false;
         alert('承認処理に失敗しました: ' + (err.message || ''));
@@ -1796,7 +1833,8 @@ async function renderApprovalQueue() {
       try {
         await updateScoutQueueEntry(id, { status: 'rejected', reviewed_at: new Date().toISOString() });
         card.remove();
-        countEl.textContent = `${listEl.querySelectorAll('.approval-card').length}件が承認待ち`;
+        _approvalAllRows = _approvalAllRows.filter(r => String(r.id) !== String(id));
+        countEl.textContent = approvalCountText();
       } catch (err) {
         btn.disabled = false;
         alert('却下処理に失敗しました: ' + (err.message || ''));
@@ -1805,7 +1843,20 @@ async function renderApprovalQueue() {
   });
 }
 
+// 承認待ちカード数の表示テキストを、フィルター適用状態に応じて組み立てる
+// （renderApprovalCardsFromCache初期表示・承認/却下による1件減算のどちらでも使う）
+function approvalCountText() {
+  const filterValue = $('approval-recruiter-filter').value;
+  const rows = filterValue
+    ? _approvalAllRows.filter(r => (r.recruiter || '').trim() === filterValue)
+    : _approvalAllRows;
+  return filterValue
+    ? `${rows.length}件が承認待ち（全${_approvalAllRows.length}件中、${filterValue}さんの分）`
+    : `${rows.length}件が承認待ち`;
+}
+
 $('approval-refresh-btn').addEventListener('click', renderApprovalQueue);
+$('approval-recruiter-filter').addEventListener('change', renderApprovalCardsFromCache);
 
 // CSVエクスポート
 $('history-export-btn').addEventListener('click', async () => {
