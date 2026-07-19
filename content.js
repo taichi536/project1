@@ -722,7 +722,12 @@ const RESCOUNT_DAYS = 7; // 1週間 = 7日
 // 会社名キーワードから業界を簡易判定（GASのgicsAutoClassifyを移植）
 function gicsAutoClassify(companyName) {
   if (!companyName) return '';
-  const n = companyName.replace(/[株式会社　\s]/g, '').toLowerCase();
+  // 全角英数字（例:「ＮＴＴ東日本株式会社」）を半角に正規化してから判定する。
+  // これをしないと、以下の半角前提の正規表現（/ntt.../ 等）が一致せず、
+  // 実際に全角表記の会社名で業界が空欄になる事例があった
+  const toHalfWidth = s => s.replace(/[Ａ-Ｚａ-ｚ０-９]/g, c =>
+    String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  const n = toHalfWidth(companyName).replace(/[株式会社　\s]/g, '').toLowerCase();
 
   // コンサルティング・専門サービス
   if (/accenture|アクセンチュア/.test(n))                                  return 'コンサルティングサービス';
@@ -862,7 +867,7 @@ function gicsAutoClassify(companyName) {
   // 物流・運輸
   if (/ヤマト|yamato|佐川|sagawa|日本郵便|jppost/.test(n))                  return '航空貨物・物流サービス';
   if (/jal|ana|日本航空|全日空|航空/.test(n))                               return '旅客航空輸送';
-  if (/jr.*(東日本|西日本|東海|九州|北海道)|鉄道|railway/.test(n))         return '陸上運輸';
+  if (/jr.*(東日本|西日本|東海|九州|北海道)|鉄道|地下鉄|メトロ|railway|subway/.test(n)) return '陸上運輸';
   if (/商船三井|日本郵船|川崎汽船|海運/.test(n))                            return '海上運輸';
 
   // エネルギー・化学
