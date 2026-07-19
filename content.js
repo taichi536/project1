@@ -1259,7 +1259,7 @@ document.addEventListener('click', e => {
     if (card) {
       const id = getCandidateId(card);
       console.log('[Snow-we] 1回目クリック candidateId:', id);
-      console.log('[Snow-we] カードテキスト行:', (card.innerText || '').split('\n').map(l=>l.trim()).filter(Boolean).slice(0,10));
+      console.log('[Snow-we] カードテキスト行:', (card.innerText || '').split('\n').map(l=>l.trim()).filter(Boolean).slice(0,40));
       if (id) {
         // フォールバック用ポジションは、以前は非同期でchrome.storageから読み込んでから
         // 追記していたが、RDSの一括送信等で候補者が高速に連続処理されると、次の候補者の
