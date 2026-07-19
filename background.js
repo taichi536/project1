@@ -185,7 +185,10 @@ function scheduleQuickFlush() {
   _quickFlushTimer = setTimeout(() => {
     _quickFlushTimer = null;
     flushGasScoutQueue();
-  }, 4000); // 4秒デバウンス：連続する候補者処理をまとめて1回で送る
+  }, 12000); // 12秒デバウンス：連続する候補者処理をより大きな1回のバッチにまとめて
+             // GASへのリクエスト本数自体を減らし、同時実行数の圧迫を緩和する
+             // （以前は4秒だったが、複数メンバーが同時にスカウト送信する時間帯に
+             // リクエストが集中し、GAS側の同時実行数上限に近づいていたと考えられるため延長）
 }
 
 chrome.alarms.get('snowWeGasQueueFlush', (existing) => {
