@@ -1365,7 +1365,11 @@ document.addEventListener('click', e => {
           pending.templateName = matched;
           console.log('[Snow-we] テンプレート名からポジション照合成功:', matched);
         } else {
-          console.log('[Snow-we] テンプレート名照合失敗。templateRaw として保存:', tmplName);
+          // マスターリストと一致しなくても、実際に選択されたテンプレート名の方が
+          // 無関係な古いドロップダウン値（fallbackPosition）より正しい記録になるため、
+          // 生のテンプレート名をそのまま採用する
+          pending.templateName = tmplName;
+          console.log('[Snow-we] テンプレート名照合失敗。生のテンプレート名をそのまま採用:', tmplName);
         }
         sessionStorage.setItem('pendingScout', JSON.stringify(pending));
       } catch (err) {
@@ -1502,8 +1506,13 @@ document.addEventListener('click', e => {
         if (matched) {
           pending.templateName = matched;
           console.log('[Snow-we] ポジション照合成功:', matched);
+        } else if (tmplRaw) {
+          // マスターリストと一致しなくても、無関係な古いドロップダウン値
+          // （fallbackPosition）に頼るよりは、実際のテンプレート名の方が正しい
+          pending.templateName = tmplRaw;
+          console.log('[Snow-we] ポジション照合できず。生のテンプレート名をそのまま採用:', tmplRaw);
         } else {
-          console.log('[Snow-we] ポジション照合できず。templateRaw:', tmplRaw || 'なし');
+          console.log('[Snow-we] ポジション照合できず。templateRawもなし');
         }
         sessionStorage.setItem('pendingScout', JSON.stringify(pending));
       } catch (_) {}
@@ -4860,6 +4869,13 @@ async function initPositionIndicator() {
       aiResults.style.display = 'block';
       aiResults.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:#94a3b8;font-family:sans-serif;">プロフィールを読み取り中...</div>';
       try {
+        // RDSでスカウト履歴タブが開いたままだと、過去に送信したスカウト文面を
+        // 候補者プロフィールとして誤って読み込んでしまう（ポジション提案も
+        // それに引っ張られる）ため、レジュメタブへの切り替えを試みてから取得する
+        if (getPlatform() === 'rds') {
+          await tryClickRDSResumeTab();
+          await sleep(500);
+        }
         const profile = extractProfile();
         if (!profile || profile.trim().length < 50) throw new Error('候補者プロフィールが読み取れませんでした。詳細パネルを開いてください。');
 
