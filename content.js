@@ -1591,32 +1591,43 @@ document.addEventListener('click', e => {
           // ネイティブ<select>ではなく<span class="vs__selected">の中に入る（実機DOM調査で確認済み）
           if (getPlatform() === 'dodax' && !pending.templateName) {
             const selectedSpan = document.querySelector('.vs__selected');
-            const tmplVal = selectedSpan ? (selectedSpan.textContent || '').trim() : '';
+            // 長いテンプレート名だと、vue-selectの表示上の省略により<span>のtextContent自体が
+            // 末尾で欠けることが実機で確認された（例:「オープンポジション）」の閉じ括弧が消える）。
+            // title属性に完全なテキストが入っている場合はそちらを優先する
+            const tmplVal = selectedSpan
+              ? (selectedSpan.getAttribute('title') || selectedSpan.textContent || '').trim()
+              : '';
             if (tmplVal) {
               if (!pending.templateRaw) pending.templateRaw = tmplVal;
-              if (/^[AB]C[）(]/.test(tmplVal)) {
+              // AC）/BC(形式でも、上記の表示切れで末尾が欠けている可能性があるため、
+              // 直接採用する前にマスターリストとの照合を試みる（前方一致も含む）
+              const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+              const positionList = res?.positions || [];
+              const sorted = [...positionList].sort((a, b) => b.length - a.length);
+              const normStr = s => s.replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim();
+              const stripSuffix4 = p => p.replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '').replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '').trim();
+              const nTmpl = normStr(tmplVal);
+              const exactHits = sorted.filter(p => p && nTmpl === normStr(p));
+              const stripHits = exactHits.length === 0
+                ? sorted.filter(p => { const t = stripSuffix4(p); return t.length >= 8 && nTmpl === normStr(t); })
+                : [];
+              // 表示切れ対策：候補者名が基準の前方一致（先頭が一致し、末尾だけ欠けている）で
+              // 一意に絞れる場合も採用する
+              const prefixHits = (exactHits.length === 0 && stripHits.length === 0 && nTmpl.length >= 10)
+                ? sorted.filter(p => p && normStr(p).startsWith(nTmpl))
+                : [];
+              const candidates3 = exactHits.length > 0 ? exactHits : (stripHits.length > 0 ? stripHits : prefixHits);
+              if (candidates3.length === 1) {
+                pending.templateName = candidates3[0];
+                console.log('[Snow-we] doda-x テンプレート名からポジション照合成功:', candidates3[0]);
+              } else if (/^[AB]C[）(]/.test(tmplVal)) {
                 pending.templateName = tmplVal;
                 console.log('[Snow-we] doda-x AC/BC形式テンプレートを直接採用:', tmplVal);
               } else {
-                const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
-                const positionList = res?.positions || [];
-                const sorted = [...positionList].sort((a, b) => b.length - a.length);
-                const normStr = s => s.replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim();
-                const stripSuffix4 = p => p.replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '').replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '').trim();
-                const exactHits = sorted.filter(p => p && normStr(tmplVal) === normStr(p));
-                const stripHits = exactHits.length === 0
-                  ? sorted.filter(p => { const t = stripSuffix4(p); return t.length >= 8 && normStr(tmplVal) === normStr(t); })
-                  : [];
-                const candidates3 = exactHits.length > 0 ? exactHits : stripHits;
-                if (candidates3.length === 1) {
-                  pending.templateName = candidates3[0];
-                  console.log('[Snow-we] doda-x テンプレート名からポジション照合成功:', candidates3[0]);
-                } else {
-                  // マスターリストと一致しなくても、無関係な古いドロップダウン値
-                  // （fallbackPosition）より実際のテンプレート名の方が正しい記録になる
-                  pending.templateName = tmplVal;
-                  console.log('[Snow-we] doda-x テンプレート名照合できず。生のテンプレート名をそのまま採用:', tmplVal);
-                }
+                // マスターリストと一致しなくても、無関係な古いドロップダウン値
+                // （fallbackPosition）より実際のテンプレート名の方が正しい記録になる
+                pending.templateName = tmplVal;
+                console.log('[Snow-we] doda-x テンプレート名照合できず。生のテンプレート名をそのまま採用:', tmplVal);
               }
             }
           }
