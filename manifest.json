@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Snow-we スカウト パーソナライズ生成",
-  "version": "1.18.262",
+  "version": "1.18.263",
   "description": "候補者プロフィールからパーソナライズ文を1〜2文で自動生成します",
   "permissions": [
     "activeTab",
@@ -10,7 +10,8 @@
     "unlimitedStorage",
     "clipboardWrite",
     "alarms",
-    "tabs"
+    "tabs",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://raw.githubusercontent.com/*",
@@ -42,8 +43,10 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_popup": "popup.html",
-    "default_title": "パーソナライズ文を生成"
+    "default_title": "パーソナライズ文を生成（サイドパネルで開く）"
+  },
+  "side_panel": {
+    "default_path": "popup.html"
   },
   "content_scripts": [
     {
