@@ -67,6 +67,28 @@ result = verify(returns, periods_per_year=12)
 print(result["dsr"], result["pbo_analysis"]["pbo"])
 ```
 
+## Beyond finance: model selection verification
+
+The same question - "is the best of N candidates real, or just the luckiest?" -
+appears everywhere in machine learning and experimentation: hyperparameter
+sweeps, A/B test variants, feature sets. Pass a score matrix
+(rows = CV folds or evaluation units, columns = candidates):
+
+```bash
+backtest-verify cv_scores.csv --selection                     # accuracy etc.
+backtest-verify cv_scores.csv --selection --lower-is-better   # RMSE, logloss
+```
+
+```python
+from backtest_verify import verify_selection
+res = verify_selection(scores_df)          # {"selection_p_value": ..., "pbo": ...}
+```
+
+It runs a permutation luck test (the null: no candidate is truly better,
+row difficulty preserved) and a metric-agnostic CSCV rank test. Typical ML
+selection traps it catches: reporting the best of 500 hyperparameter configs
+as if it were one trial, and winners that collapse on held-out folds.
+
 ## Reading the verdict
 
 | Metric | Pass | Borderline | Fail |

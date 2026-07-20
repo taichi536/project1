@@ -7,6 +7,43 @@ import numpy as np
 import pandas as pd
 
 from .core import verify
+from .selection import verify_selection
+
+
+def print_selection_report(res: dict):
+    print("\n" + "=" * 62)
+    print("  backtest-verify : model/variant selection check")
+    print("=" * 62)
+    if "error" in res:
+        print(f"  ERROR: {res['error']}")
+        print("=" * 62 + "\n")
+        return
+    print(f"  Data:              {res['n_units']} evaluation units x "
+          f"{res['n_candidates']} candidates")
+    print(f"  Winner:            {res['best_candidate']} "
+          f"(mean {res['best_mean']} vs others {res['others_mean']})")
+    print()
+    p = res["selection_p_value"]
+    verdict = "PASS  (winner is unlikely to be luck)" if p < 0.05 else \
+              "WARN  (borderline)" if p < 0.20 else \
+              "FAIL  (winner is consistent with pure luck)"
+    print(f"  -- Permutation luck test ------------------------------")
+    print(f"  Selection p-value: {p:.4f}  {verdict}")
+    print(f"     -> probability that shuffled no-difference candidates")
+    print(f"        produce a winner this good")
+    if res.get("pbo") is not None:
+        pbo = res["pbo"]
+        verdict2 = "PASS  (low overfitting risk)" if pbo < 0.2 else \
+                   "WARN  (borderline)" if pbo < 0.5 else \
+                   "FAIL  (likely overfit)"
+        print()
+        print(f"  -- CSCV rank test ({res['n_splits']} splits) ----------------")
+        print(f"  PBO:               {pbo:.3f}  {verdict2}")
+        print(f"     -> probability the in-sample winner falls into the")
+        print(f"        bottom half out-of-sample")
+    print("=" * 62)
+    print("  This tool performs statistical verification only.")
+    print("=" * 62 + "\n")
 
 
 def print_report(res: dict):
@@ -82,6 +119,11 @@ def main():
                    default="monthly", help="data frequency (default: monthly)")
     p.add_argument("--demo", action="store_true",
                    help="run the random-strategy demo")
+    p.add_argument("--selection", action="store_true",
+                   help="treat the CSV as a model-selection score matrix "
+                        "(rows = CV folds / evaluation units, columns = candidates)")
+    p.add_argument("--lower-is-better", action="store_true",
+                   help="with --selection: metric is a loss (RMSE, logloss, ...)")
     args = p.parse_args()
 
     if args.demo:
@@ -101,6 +143,11 @@ def main():
             pass
     df = df.apply(pd.to_numeric, errors="coerce").dropna(how="all")
     df = df.dropna(axis=1, how="all")
+
+    if args.selection:
+        res = verify_selection(df, higher_is_better=not args.lower_is_better)
+        print_selection_report(res)
+        return
 
     if args.equity:
         df = df.pct_change().dropna(how="all")
