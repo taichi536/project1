@@ -142,7 +142,7 @@ with st.sidebar:
         st.caption(f"選択中: **{_ct_display}**　← 全ページで共通")
     st.markdown("---")
 
-    _PAGES = ["🏠 ダッシュボード", "🔭 銘柄スキャン", "📊 テクニカル分析", "📋 ファンダメンタル分析", "🌐 市場環境", "🔬 バックテスト", "📐 ポートフォリオ", "📔 投資日記", "🔔 通知設定", "🤖 自動売買", "📖 トレードガイド"]
+    _PAGES = ["🏠 ダッシュボード", "🔭 銘柄スキャン", "📊 テクニカル分析", "📋 ファンダメンタル分析", "🌐 市場環境", "🔬 バックテスト", "📐 ポートフォリオ", "📔 投資日記", "🔮 予測ノート", "🔔 通知設定", "🤖 自動売買", "📖 トレードガイド"]
     if "_nav_target" in st.session_state:
         _target = st.session_state.pop("_nav_target")
         if _target in _PAGES:
@@ -3167,6 +3167,101 @@ elif page == "📔 投資日記":
 
 
 # ─── 通知設定 ─────────────────────────────────────────────────────────────────
+elif page == "🔮 予測ノート":
+    from datetime import datetime
+    from modules import forecasts as fc
+
+    st.title("🔮 予測ノート")
+    st.caption(
+        "予測を**結果が出る前に**記録し、後から答え合わせします。"
+        "記録はハッシュチェーンで連結され、後からの書き換えは検出されます。"
+        "「自分の予測はどれくらい当たるのか・確信度は較正されているか」を測る道具です。"
+    )
+
+    ok, n_verified = fc.verify_chain()
+    if not ok:
+        st.error(f"⚠️ 記録の改ざんを検出しました（{n_verified + 1}件目でチェーン不整合）")
+
+    # ── 新規登録 ─────────────────────────────────────────────────────────
+    with st.form("fc_add", clear_on_submit=True):
+        st.markdown("#### 予測を登録する")
+        fc_text = st.text_area(
+            "予測（後から検証可能な形で書く）",
+            placeholder="例: 2026年末の日経平均は55,000円を上回っている / 〇〇社の内定が出る",
+            height=80,
+        )
+        c1, c2, c3 = st.columns(3)
+        fc_due = c1.date_input("判定期限")
+        fc_conf = c2.slider("確信度（%）", 5, 95, 60, step=5,
+                            help="この予測が当たると思う確率。正直に。")
+        fc_cat = c3.selectbox("カテゴリ", ["相場", "仕事・就活", "その他"])
+        if st.form_submit_button("🔒 登録（変更不可になります）", type="primary"):
+            if fc_text.strip():
+                e = fc.add_forecast(fc_text, str(fc_due), fc_conf, fc_cat)
+                st.success(f"登録しました（#{e['id']} / hash: {e['hash']}）")
+                st.rerun()
+            else:
+                st.error("予測を入力してください")
+
+    entries = fc.list_forecasts()
+    open_es = [e for e in entries if e["結果"] is None]
+    done_es = [e for e in entries if e["結果"] is not None]
+
+    # ── 未判定の予測 ─────────────────────────────────────────────────────
+    st.markdown(f"#### ⏳ 判定待ち（{len(open_es)}件）")
+    if not open_es:
+        st.caption("判定待ちの予測はありません")
+    for e in open_es:
+        overdue = str(e["期限"]) <= datetime.now().strftime("%Y-%m-%d")
+        with st.expander(
+            f"#{e['id']} {'🔔 ' if overdue else ''}{e['予測'][:40]}"
+            f"（確信度{e['確信度']}% / 期限 {e['期限']}）",
+            expanded=overdue,
+        ):
+            st.caption(f"登録: {e['登録日時']} / hash: {e['hash']} / {e['カテゴリ']}")
+            if overdue:
+                st.markdown("**期限が来ています。結果を判定してください：**")
+            rc1, rc2, rc3 = st.columns([1, 1, 2])
+            if rc1.button("✅ 的中", key=f"hit_{e['id']}"):
+                fc.resolve_forecast(e["id"], True)
+                st.rerun()
+            if rc2.button("❌ 外れ", key=f"miss_{e['id']}"):
+                fc.resolve_forecast(e["id"], False)
+                st.rerun()
+
+    # ── 成績 ─────────────────────────────────────────────────────────────
+    stats = fc.calibration_stats()
+    st.markdown(f"#### 📊 成績（判定済み {stats['n']}件）")
+    if stats["n"] == 0:
+        st.caption("判定済みの予測が貯まると、的中率と較正グラフが表示されます")
+    else:
+        m1, m2, m3 = st.columns(3)
+        m1.metric("的中率", f"{stats['hit_rate']}%")
+        m2.metric("Brierスコア", f"{stats['brier']:.3f}",
+                  help="確信度の質の総合点。0=完璧、0.25=常に50%と答えるのと同じ。低いほど良い")
+        verdict = "✅ 良好" if stats["brier"] < 0.20 else \
+                  "─ 五分五分と同等" if stats["brier"] <= 0.27 else "⚠️ 過信気味"
+        m3.metric("較正の評価", verdict)
+
+        calib_df = pd.DataFrame(stats["calibration"])
+        calib_df["ズレ(pt)"] = calib_df["実際の的中率"] - calib_df["申告平均"]
+        st.dataframe(calib_df, hide_index=True, use_container_width=True)
+        st.caption(
+            "ズレがマイナス = 過信（言ったほど当たっていない）/ "
+            "プラス = 過小評価。投資判断の質は、この較正力とほぼ同義です。"
+        )
+
+        if done_es:
+            hist_df = pd.DataFrame([
+                {"ID": e["id"], "予測": e["予測"], "確信度": f"{e['確信度']}%",
+                 "結果": "✅" if e["結果"] else "❌",
+                 "登録": e["登録日時"][:10], "判定": (e["判定日時"] or "")[:10]}
+                for e in reversed(done_es)
+            ])
+            with st.expander("判定済みの履歴", expanded=False):
+                st.dataframe(hist_df, hide_index=True, use_container_width=True)
+
+
 elif page == "🔔 通知設定":
     st.title("🔔 通知設定")
     st.markdown("シグナルをスマホに届けます。**Telegram**（推奨）または **Slack** を設定してください。")
