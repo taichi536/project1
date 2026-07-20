@@ -95,9 +95,9 @@ def main():
     print("  📊 総括")
     print("-" * 66)
     print(f"  最も動きが似た複製: {best[0]}（相関{best[2]:+.2f}）")
-    gap = fund_cum - best[3]
-    years = len(common) / 12
-    print(f"  累積リターン差: {gap:+.1f}pt / {years:.1f}年 ＝ 年率約{gap / years:+.1f}pt")
+    for label, s, corr, cum in results:
+        print(f"  年率差（CAGR）: ファンド {s_fund['ann_ret']:+.2f}% − {label.split(':')[0]} "
+              f"{s['ann_ret']:+.2f}% ＝ {s_fund['ann_ret'] - s['ann_ret']:+.2f}pt/年")
     print()
     print(f"  → この年率差が「ファンドでしか取れない部分」の実測値。")
     print(f"    その対価として受け入れるもの: 月次でしか解約できない流動性、")
