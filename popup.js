@@ -617,7 +617,7 @@ ${positionDescription ? `募集要件:\n${positionDescription.substring(0, 800)}
 ${profileText}`;
 
   const data = await claudeFetch(apiKey, {
-    model: 'claude-sonnet-4-6',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 200,
     messages: [{ role: 'user', content: prompt }]
   });
@@ -799,7 +799,7 @@ ${profileText}
   // マッチできなかった場合はStep1をスキップして全件渡す
   const top15 = matched.length >= 3 ? matched : positions;
 
-  // ── Step 2: Sonnetで詳細ランキング ──
+  // ── Step 2: Haikuで詳細ランキング ──
   setStatus('suggest', 'loading', `Step2: ${top15.length}件を詳細分析中...`);
   const detailList = top15
     .map(p => p.description ? `${p.name}: ${p.description}` : p.name)
@@ -844,7 +844,7 @@ ${profileText}
 ※必ず守ること: reasonは1文で簡潔に。ダブルクォート・改行・バックスラッシュを含めないこと。`;
 
   const data = await claudeFetch(apiKey, {
-    model: 'claude-sonnet-4-6',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 1500,
     messages: [{ role: 'user', content: prompt }]
   });
