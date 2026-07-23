@@ -2827,13 +2827,14 @@ async function tryClickRDSResumeTab() {
     || document.querySelector('[class*="dialog" i]');
   if (!panel) return false;
 
-  const panelText = (panel.innerText || '').trim();
-  // 先頭付近だけを見る（スカウト履歴タブ内のメッセージ本文に「職務経歴」という語が
-  // 含まれるケースがあり、パネル全体をincludes()すると誤検知して切り替えをスキップしてしまうため）
-  const headText = panelText.slice(0, 200);
-  const hasScoutHistoryTab = headText.includes('スカウト履歴') && !headText.includes('職務経歴');
-  if (!hasScoutHistoryTab) return false; // すでにレジュメ表示中なら何もしない
-
+  // 以前は「パネル内に『職務経歴』の文字があれば既にレジュメ表示中」とみなして
+  // 切り替えをスキップしていたが、タブバー自体に「職務経歴」というタブ名が常に
+  // 含まれているため、スカウト履歴タブが表示されている状態でもこの語がパネルの
+  // 先頭付近（タブバー）に存在してしまい、判定が常に「切り替え不要」と誤判定して
+  // 文生成機能がスカウト履歴（過去に送信した本文）を候補者プロフィールと誤認して
+  // 抽出してしまう事故が実機で発生した。文字列でタブの現在状態を判定するのは
+  // 信頼できないため、判定をやめて毎回無条件でタブ切り替えを試みる（既にそのタブが
+  // 選択されている場合にクリックしても実害はない）
   const tabLabels = ['レジュメ', 'プロフィール', '基本情報', '職務経歴'];
   for (const label of tabLabels) {
     const tab = Array.from(panel.querySelectorAll('button, [role="tab"], li, span, a'))
