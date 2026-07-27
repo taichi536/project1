@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snow-we スカウト送信記録</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --surface-2: #ffffff;
+    --page: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --gridline: #e1e0d9;
+    --border: rgba(11,11,11,0.10);
+    --accent: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --surface-2: #202020;
+      --page: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --gridline: #2c2c2a;
+      --border: rgba(255,255,255,0.10);
+      --accent: #3987e5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page);
+    color: var(--text-primary);
+    font-size: 14px;
+  }
+  header {
+    padding: 20px 24px 16px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  h1 { font-size: 18px; margin: 0; font-weight: 700; }
+  #updated { color: var(--text-muted); font-size: 12px; }
+  main { padding: 0 24px 32px; max-width: 1400px; margin: 0 auto; }
+
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .tile {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+  }
+  .tile .label { color: var(--text-secondary); font-size: 12px; }
+  .tile .value { font-size: 24px; font-weight: 700; font-variant-numeric: proportional-nums; margin-top: 2px; }
+
+  .breakdown {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-primary);
+    white-space: nowrap;
+  }
+  .badge .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .badge .count { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: end;
+    margin-bottom: 14px;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .filters .field { display: flex; flex-direction: column; gap: 4px; }
+  .filters label { font-size: 11px; color: var(--text-secondary); }
+  .filters select, .filters input {
+    background: var(--surface-2);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .filters input[type="search"] { min-width: 220px; }
+  .filters button {
+    background: var(--surface-2);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .filters button:hover { border-color: var(--accent); }
+
+  .table-wrap {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: auto;
+    max-height: 70vh;
+  }
+  table { border-collapse: collapse; width: 100%; min-width: 1100px; }
+  thead th {
+    position: sticky;
+    top: 0;
+    background: var(--surface-1);
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--gridline);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  thead th:hover { color: var(--text-primary); }
+  thead th .arrow { opacity: 0.5; font-size: 10px; margin-left: 3px; }
+  tbody td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--gridline);
+    vertical-align: top;
+    color: var(--text-primary);
+  }
+  tbody tr:hover td { background: rgba(128,128,128,0.06); }
+  td.num { font-variant-numeric: tabular-nums; }
+  td.msg {
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    color: var(--text-secondary);
+  }
+  td.msg:hover { color: var(--text-primary); text-decoration: underline dotted; }
+  .platform-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .platform-badge .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+
+  #state {
+    padding: 40px 0;
+    text-align: center;
+    color: var(--text-muted);
+  }
+  #state.error { color: #d03b3b; }
+
+  /* 全文表示モーダル */
+  #modal-bg {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.4);
+    align-items: center; justify-content: center;
+    z-index: 100;
+  }
+  #modal-bg.open { display: flex; }
+  #modal {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    overflow: auto;
+    padding: 20px;
+    white-space: pre-wrap;
+    line-height: 1.6;
+  }
+  #modal-close {
+    float: right;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 16px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Snow-we スカウト送信記録</h1>
+  <span id="updated"></span>
+</header>
+<main>
+  <div class="tiles" id="tiles"></div>
+  <div class="breakdown" id="breakdown"></div>
+
+  <div class="filters">
+    <div class="field">
+      <label for="f-recruiter">担当者</label>
+      <select id="f-recruiter"><option value="">すべて</option></select>
+    </div>
+    <div class="field">
+      <label for="f-platform">媒体</label>
+      <select id="f-platform"><option value="">すべて</option></select>
+    </div>
+    <div class="field">
+      <label for="f-period">期間</label>
+      <select id="f-period">
+        <option value="">すべて</option>
+        <option value="today">今日</option>
+        <option value="7">過去7日</option>
+        <option value="30">過去30日</option>
+        <option value="month">今月</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-search">キーワード検索</label>
+      <input type="search" id="f-search" placeholder="候補者名・会社・ポジション…">
+    </div>
+    <button id="f-reset">リセット</button>
+    <button id="f-reload">再読み込み</button>
+  </div>
+
+  <div class="table-wrap">
+    <table id="tbl">
+      <thead>
+        <tr>
+          <th data-key="sent_at">送信日時</th>
+          <th data-key="recruiter_name">担当者</th>
+          <th data-key="platform">媒体</th>
+          <th data-key="candidate_name">候補者名</th>
+          <th data-key="candidate_age">年齢</th>
+          <th data-key="company_name">会社</th>
+          <th data-key="university">大学</th>
+          <th data-key="candidate_industry">業界</th>
+          <th data-key="position_name">ポジション</th>
+          <th data-key="scout_message">スカウト文</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div id="state"></div>
+</main>
+
+<div id="modal-bg">
+  <div id="modal">
+    <button id="modal-close">×</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://ovwnyivqnqqiagutjxoo.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_tEQ4TOve0uCydsGiEm1cDA_D1LQ49wN';
+
+// カテゴリカラー（色覚多様性に配慮した固定順・常にラベル併記）
+const PLATFORM_META = {
+  rds:      { label: 'RDS',      color: '#2a78d6' },
+  dodax:    { label: 'doda X',   color: '#eb6834' },
+  bizreach: { label: 'Bizreach', color: '#1baf7a' },
+  ambi:     { label: 'AMBI',     color: '#eda100' },
+  green:    { label: 'Green',    color: '#e87ba4' },
+  mynavi:   { label: 'マイナビ',  color: '#008300' },
+};
+function platformMeta(p) {
+  return PLATFORM_META[p] || { label: p || '(不明)', color: '#898781' };
+}
+
+let allRows = [];
+let sortKey = 'sent_at';
+let sortDir = 'desc';
+
+const $ = id => document.getElementById(id);
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function loadData() {
+  $('state').textContent = '読み込み中…';
+  $('state').className = '';
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/scouts?select=*&order=sent_at.desc&limit=5000`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+    );
+    if (!res.ok) throw new Error(`APIエラー (${res.status})`);
+    allRows = await res.json();
+    $('state').textContent = allRows.length === 0 ? 'まだ記録がありません' : '';
+    $('updated').textContent = `最終更新: ${fmtDate(new Date().toISOString())}（直近${allRows.length}件を取得）`;
+    populateFilterOptions();
+    render();
+  } catch (e) {
+    $('state').textContent = `読み込みエラー: ${e.message}（ネットワーク接続を確認するか、再読み込みボタンを押してください）`;
+    $('state').className = 'error';
+  }
+}
+
+function populateFilterOptions() {
+  const recruiters = [...new Set(allRows.map(r => r.recruiter_name).filter(Boolean))].sort();
+  const platforms = [...new Set(allRows.map(r => r.platform).filter(Boolean))];
+  const recSel = $('f-recruiter'), platSel = $('f-platform');
+  const prevRec = recSel.value, prevPlat = platSel.value;
+  recSel.innerHTML = '<option value="">すべて</option>' + recruiters.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
+  platSel.innerHTML = '<option value="">すべて</option>' + platforms.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(platformMeta(p).label)}</option>`).join('');
+  recSel.value = prevRec;
+  platSel.value = prevPlat;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function periodCutoff(period) {
+  const now = new Date();
+  if (period === 'today') {
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  }
+  if (period === '7') return now.getTime() - 7 * 86400000;
+  if (period === '30') return now.getTime() - 30 * 86400000;
+  if (period === 'month') return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  return null;
+}
+
+function filteredRows() {
+  const recruiter = $('f-recruiter').value;
+  const platform = $('f-platform').value;
+  const period = $('f-period').value;
+  const kw = $('f-search').value.trim().toLowerCase();
+  const cutoff = periodCutoff(period);
+
+  return allRows.filter(r => {
+    if (recruiter && r.recruiter_name !== recruiter) return false;
+    if (platform && r.platform !== platform) return false;
+    if (cutoff !== null) {
+      const t = new Date(r.sent_at).getTime();
+      if (isNaN(t) || t < cutoff) return false;
+    }
+    if (kw) {
+      const hay = [r.candidate_name, r.company_name, r.position_name, r.university, r.candidate_industry]
+        .map(v => (v || '').toLowerCase()).join(' ');
+      if (!hay.includes(kw)) return false;
+    }
+    return true;
+  });
+}
+
+function sortRows(rows) {
+  const dir = sortDir === 'asc' ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    let av = a[sortKey], bv = b[sortKey];
+    if (sortKey === 'sent_at') { av = new Date(av || 0).getTime(); bv = new Date(bv || 0).getTime(); }
+    if (sortKey === 'candidate_age') { av = av ?? -1; bv = bv ?? -1; }
+    if (typeof av === 'string') av = av.toLowerCase();
+    if (typeof bv === 'string') bv = bv.toLowerCase();
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    return 0;
+  });
+}
+
+function render() {
+  const rows = sortRows(filteredRows());
+  renderTiles(rows);
+  renderBreakdown(rows);
+  renderTable(rows);
+  renderSortArrows();
+}
+
+function renderTiles(rows) {
+  const now = new Date();
+  const todayCutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const weekCutoff = now.getTime() - 7 * 86400000;
+  const today = rows.filter(r => new Date(r.sent_at).getTime() >= todayCutoff).length;
+  const week = rows.filter(r => new Date(r.sent_at).getTime() >= weekCutoff).length;
+  const tiles = [
+    { label: '表示中の件数', value: rows.length },
+    { label: '今日', value: today },
+    { label: '過去7日', value: week },
+    { label: '全記録数', value: allRows.length },
+  ];
+  $('tiles').innerHTML = tiles.map(t => `
+    <div class="tile"><div class="label">${t.label}</div><div class="value">${t.value.toLocaleString()}</div></div>
+  `).join('');
+}
+
+function renderBreakdown(rows) {
+  const counts = {};
+  for (const r of rows) counts[r.platform] = (counts[r.platform] || 0) + 1;
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  $('breakdown').innerHTML = entries.map(([p, c]) => {
+    const m = platformMeta(p);
+    return `<span class="badge"><span class="dot" style="background:${m.color}"></span>${escapeHtml(m.label)} <span class="count">${c}</span></span>`;
+  }).join('');
+}
+
+function renderTable(rows) {
+  $('tbody').innerHTML = rows.map(r => {
+    const m = platformMeta(r.platform);
+    const msg = r.scout_message || '';
+    return `<tr>
+      <td>${fmtDate(r.sent_at)}</td>
+      <td>${escapeHtml(r.recruiter_name)}</td>
+      <td><span class="platform-badge"><span class="dot" style="background:${m.color}"></span>${escapeHtml(m.label)}</span></td>
+      <td>${escapeHtml(r.candidate_name)}</td>
+      <td class="num">${r.candidate_age ?? ''}</td>
+      <td>${escapeHtml(r.company_name)}</td>
+      <td>${escapeHtml(r.university)}</td>
+      <td>${escapeHtml(r.candidate_industry)}</td>
+      <td>${escapeHtml(r.position_name)}</td>
+      <td class="msg" data-full="${escapeHtml(msg)}">${escapeHtml(msg)}</td>
+    </tr>`;
+  }).join('');
+  if (rows.length === 0 && allRows.length > 0) {
+    $('state').textContent = '条件に一致する記録がありません';
+    $('state').className = '';
+  } else if (allRows.length > 0) {
+    $('state').textContent = '';
+  }
+}
+
+function renderSortArrows() {
+  document.querySelectorAll('thead th').forEach(th => {
+    th.querySelector('.arrow')?.remove();
+    if (th.dataset.key === sortKey) {
+      const span = document.createElement('span');
+      span.className = 'arrow';
+      span.textContent = sortDir === 'asc' ? '▲' : '▼';
+      th.appendChild(span);
+    }
+  });
+}
+
+document.querySelectorAll('thead th').forEach(th => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.key;
+    if (sortKey === key) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    else { sortKey = key; sortDir = key === 'sent_at' ? 'desc' : 'asc'; }
+    render();
+  });
+});
+
+$('tbody').addEventListener('click', e => {
+  const cell = e.target.closest('td.msg');
+  if (!cell) return;
+  const full = cell.dataset.full;
+  if (!full) return;
+  $('modal-body').textContent = full;
+  $('modal-bg').classList.add('open');
+});
+$('modal-close').addEventListener('click', () => $('modal-bg').classList.remove('open'));
+$('modal-bg').addEventListener('click', e => { if (e.target === $('modal-bg')) $('modal-bg').classList.remove('open'); });
+
+['f-recruiter', 'f-platform', 'f-period'].forEach(id => $(id).addEventListener('change', render));
+$('f-search').addEventListener('input', () => { clearTimeout(window._searchT); window._searchT = setTimeout(render, 150); });
+$('f-reset').addEventListener('click', () => {
+  $('f-recruiter').value = ''; $('f-platform').value = ''; $('f-period').value = ''; $('f-search').value = '';
+  render();
+});
+$('f-reload').addEventListener('click', loadData);
+
+loadData();
+</script>
+</body>
+</html>
