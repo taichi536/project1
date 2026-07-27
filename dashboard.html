@@ -87,6 +87,85 @@
   .badge .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
   .badge .count { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
 
+  .charts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  @media (max-width: 900px) {
+    .charts { grid-template-columns: 1fr; }
+  }
+  .chart-panel {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .chart-panel h2 {
+    font-size: 13px;
+    font-weight: 700;
+    margin: 0 0 4px;
+    color: var(--text-primary);
+  }
+  .chart-panel .sub { font-size: 11px; color: var(--text-muted); margin-bottom: 10px; }
+  .chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+  .chart-legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .chart-legend .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .hbar-row {
+    display: grid;
+    grid-template-columns: 110px 1fr 40px;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .hbar-row .rlabel {
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .hbar-row .rtotal {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+  .hbar-track {
+    display: flex;
+    align-items: stretch;
+    height: 18px;
+    gap: 2px;
+  }
+  .hbar-seg {
+    height: 18px;
+    background: var(--accent);
+    cursor: default;
+  }
+  .hbar-seg:last-child { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
+  .hbar-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; }
+
+  #viz-tooltip {
+    position: fixed;
+    display: none;
+    background: var(--text-primary);
+    color: var(--page);
+    font-size: 12px;
+    padding: 5px 9px;
+    border-radius: 6px;
+    pointer-events: none;
+    z-index: 200;
+    white-space: nowrap;
+  }
+
   .filters {
     display: flex;
     flex-wrap: wrap;
@@ -217,6 +296,20 @@
   <div class="tiles" id="tiles"></div>
   <div class="breakdown" id="breakdown"></div>
 
+  <div class="charts">
+    <div class="chart-panel">
+      <h2>担当者別 送信数（媒体内訳）</h2>
+      <div class="sub">バーの色は媒体を表します。フィルターの条件が反映されます</div>
+      <div class="chart-legend" id="recruiter-chart-legend"></div>
+      <div id="recruiter-chart"></div>
+    </div>
+    <div class="chart-panel">
+      <h2>ポジション別 送信数</h2>
+      <div class="sub">送信数の多い順（上位12件、それ以外は「その他」）</div>
+      <div id="position-chart"></div>
+    </div>
+  </div>
+
   <div class="filters">
     <div class="field">
       <label for="f-recruiter">担当者</label>
@@ -265,6 +358,8 @@
   </div>
   <div id="state"></div>
 </main>
+
+<div id="viz-tooltip"></div>
 
 <div id="modal-bg">
   <div id="modal">
@@ -391,8 +486,105 @@ function render() {
   const rows = sortRows(filteredRows());
   renderTiles(rows);
   renderBreakdown(rows);
+  renderRecruiterChart(rows);
+  renderPositionChart(rows);
   renderTable(rows);
   renderSortArrows();
+}
+
+// ── ツールチップ（担当者別チャート・ポジション別チャート共通） ──
+function showTip(evt, html) {
+  const tip = $('viz-tooltip');
+  tip.innerHTML = html;
+  tip.style.display = 'block';
+  const x = evt.clientX + 14;
+  const y = evt.clientY + 14;
+  tip.style.left = Math.min(x, window.innerWidth - tip.offsetWidth - 10) + 'px';
+  tip.style.top = Math.min(y, window.innerHeight - tip.offsetHeight - 10) + 'px';
+}
+function hideTip() { $('viz-tooltip').style.display = 'none'; }
+
+// ── 担当者別 送信数（媒体内訳・横棒の積み上げ） ──
+function renderRecruiterChart(rows) {
+  const byRecruiter = {};
+  for (const r of rows) {
+    const name = r.recruiter_name || '(未設定)';
+    const platform = r.platform || '';
+    if (!byRecruiter[name]) byRecruiter[name] = {};
+    byRecruiter[name][platform] = (byRecruiter[name][platform] || 0) + 1;
+  }
+  const entries = Object.entries(byRecruiter)
+    .map(([name, counts]) => ({ name, counts, total: Object.values(counts).reduce((a, b) => a + b, 0) }))
+    .sort((a, b) => b.total - a.total);
+
+  const usedPlatforms = [...new Set(rows.map(r => r.platform).filter(Boolean))];
+  $('recruiter-chart-legend').innerHTML = usedPlatforms.map(p => {
+    const m = platformMeta(p);
+    return `<span><span class="dot" style="background:${m.color}"></span>${escapeHtml(m.label)}</span>`;
+  }).join('');
+
+  if (entries.length === 0) {
+    $('recruiter-chart').innerHTML = '<div class="hbar-empty">データがありません</div>';
+    return;
+  }
+  const max = entries[0].total;
+  $('recruiter-chart').innerHTML = entries.map(e => {
+    const segs = Object.entries(e.counts).sort((a, b) => b[1] - a[1]).map(([p, c]) => {
+      const m = platformMeta(p);
+      const widthPct = (c / max) * 100;
+      return `<div class="hbar-seg" data-name="${escapeHtml(e.name)}" data-platform="${escapeHtml(m.label)}" data-count="${c}" style="background:${m.color};width:${widthPct}%"></div>`;
+    }).join('');
+    return `<div class="hbar-row">
+      <div class="rlabel">${escapeHtml(e.name)}</div>
+      <div class="hbar-track">${segs}</div>
+      <div class="rtotal">${e.total}</div>
+    </div>`;
+  }).join('');
+
+  $('recruiter-chart').querySelectorAll('.hbar-seg').forEach(seg => {
+    seg.addEventListener('mousemove', evt => {
+      showTip(evt, `${escapeHtml(seg.dataset.name)}<br>${escapeHtml(seg.dataset.platform)}: <b>${seg.dataset.count}件</b>`);
+    });
+    seg.addEventListener('mouseleave', hideTip);
+  });
+}
+
+// ── ポジション別 送信数（横棒・上位12件+その他） ──
+function renderPositionChart(rows) {
+  const counts = {};
+  for (const r of rows) {
+    const name = r.position_name || '(未設定)';
+    counts[name] = (counts[name] || 0) + 1;
+  }
+  let entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const TOP_N = 12;
+  if (entries.length > TOP_N) {
+    const head = entries.slice(0, TOP_N);
+    const restTotal = entries.slice(TOP_N).reduce((sum, [, c]) => sum + c, 0);
+    entries = [...head, ['その他', restTotal]];
+  }
+
+  if (entries.length === 0) {
+    $('position-chart').innerHTML = '<div class="hbar-empty">データがありません</div>';
+    return;
+  }
+  const total = rows.length || 1;
+  const max = entries[0][1];
+  $('position-chart').innerHTML = entries.map(([name, c]) => {
+    const widthPct = (c / max) * 100;
+    return `<div class="hbar-row">
+      <div class="rlabel">${escapeHtml(name)}</div>
+      <div class="hbar-track"><div class="hbar-seg" data-name="${escapeHtml(name)}" data-count="${c}" data-pct="${((c / total) * 100).toFixed(1)}" style="background:var(--accent);width:${widthPct}%"></div></div>
+      <div class="rtotal">${c}</div>
+    </div>`;
+  }).join('');
+
+  $('position-chart').querySelectorAll('.hbar-seg').forEach(seg => {
+    seg.addEventListener('mousemove', evt => {
+      showTip(evt, `${escapeHtml(seg.dataset.name)}<br><b>${seg.dataset.count}件</b>（全体の${seg.dataset.pct}%）`);
+    });
+    seg.addEventListener('mouseleave', hideTip);
+  });
 }
 
 function renderTiles(rows) {
