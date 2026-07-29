@@ -162,6 +162,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'snowWeAutoRun') startAutoRun();
   if (alarm.name === 'snowWeAnomalyCheck') checkAnomalies();
   if (alarm.name === 'snowWeGasQueueFlush') flushGasScoutQueue();
+  if (alarm.name === 'snowWeSupabaseQueueFlush') flushSupabaseScoutQueue();
 });
 
 // ── スカウト記録のバッチ送信キュー ──────────────────────────────────────
@@ -295,6 +296,138 @@ async function flushGasScoutQueue() {
   });
 }
 
+// ── Supabase(scoutsテーブル)への記録キュー ──────────────────────────────
+// GASと同じ「背景でキューに積んで自動リトライ」の考え方をSupabaseにも適用する。
+// ただしGASのバッチ方式（複数件を1リクエストにまとめる）はあえて採用しない。
+// 過去にGASで「1件のデータ不備でリクエスト全体がエラー扱いになり、既に成功
+// していた分まで含めて丸ごと再送され重複した」事故が起きたため、Supabaseでは
+// 1件ずつ完全に独立したリクエストとして送信する。ある1件が失敗しても他の件には
+// 一切影響しないので、束ねることで生まれる「巻き込まれ」の構造そのものがない。
+const SUPABASE_URL = 'https://ovwnyivqnqqiagutjxoo.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_tEQ4TOve0uCydsGiEm1cDA_D1LQ49wN';
+
+let _supabaseQueueChain = Promise.resolve();
+function withSupabaseQueueLock(fn) {
+  const result = _supabaseQueueChain.then(fn, fn);
+  _supabaseQueueChain = result.catch(() => {});
+  return result;
+}
+
+async function enqueueSupabaseScout(payload) {
+  return withSupabaseQueueLock(async () => {
+    const { supabaseScoutQueue } = await chrome.storage.local.get(['supabaseScoutQueue']);
+    const queue = supabaseScoutQueue || [];
+    queue.push(payload);
+    await chrome.storage.local.set({ supabaseScoutQueue: queue });
+  });
+}
+
+let _supabaseQuickFlushTimer = null;
+function scheduleSupabaseQuickFlush() {
+  if (_supabaseQuickFlushTimer) return;
+  _supabaseQuickFlushTimer = setTimeout(() => {
+    _supabaseQuickFlushTimer = null;
+    flushSupabaseScoutQueue();
+  }, 12000);
+}
+
+chrome.alarms.get('snowWeSupabaseQueueFlush', (existing) => {
+  if (!existing) {
+    chrome.alarms.create('snowWeSupabaseQueueFlush', { delayInMinutes: 1, periodInMinutes: 1 });
+  }
+});
+
+// GASのサーキットブレーカーと同じ考え方だが、状態は別のキーで独立管理する
+// （Supabase側の不調がGAS送信を止めたり、その逆が起きたりしないようにするため）
+async function getSupabaseBackoffUntil() {
+  const { supabaseBackoff } = await chrome.storage.local.get(['supabaseBackoff']);
+  return supabaseBackoff?.nextRetryTs || 0;
+}
+async function recordSupabaseSuccess() {
+  await chrome.storage.local.set({ supabaseBackoff: { consecutiveFailures: 0, nextRetryTs: 0 } });
+}
+async function recordSupabaseFailure() {
+  const { supabaseBackoff } = await chrome.storage.local.get(['supabaseBackoff']);
+  const consecutiveFailures = (supabaseBackoff?.consecutiveFailures || 0) + 1;
+  const waitMs = Math.min(30000 * Math.pow(2, consecutiveFailures - 1), 15 * 60 * 1000);
+  await chrome.storage.local.set({
+    supabaseBackoff: { consecutiveFailures, nextRetryTs: Date.now() + waitMs }
+  });
+  console.warn(`[Snow-we] Supabaseサーキットブレーカー作動: 連続失敗${consecutiveFailures}回、次回再送まで約${Math.round(waitMs / 1000)}秒待機`);
+}
+
+async function flushSupabaseScoutQueue() {
+  return withSupabaseQueueLock(async () => {
+    // バックオフ期間中は今回のフラッシュをスキップ（キューの中身はそのまま残る）
+    const backoffUntil = await getSupabaseBackoffUntil();
+    if (Date.now() < backoffUntil) return;
+
+    const { supabaseScoutQueue } = await chrome.storage.local.get(['supabaseScoutQueue']);
+    const queue = supabaseScoutQueue || [];
+    if (queue.length === 0) return;
+
+    // 送信対象をこの場でキューから確保する。ネットワーク待ちの間に新しく
+    // 積まれた分は、空になった新しいキューに独立して溜まっていく
+    await chrome.storage.local.set({ supabaseScoutQueue: [] });
+
+    // 1件ずつ独立したリクエストとして送る（束ねない）。ある1件が失敗しても
+    // Promise.allSettledなので他の件の成否には一切影響しない
+    const results = await Promise.allSettled(queue.map(async item => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/scouts`, {
+          method: 'POST',
+          headers: {
+            apikey: SUPABASE_KEY,
+            Authorization: `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            Prefer: 'return=minimal',
+          },
+          body: JSON.stringify(item.data),
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      } finally {
+        clearTimeout(timer);
+      }
+    }));
+
+    const succeeded = [];
+    const failed = [];
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') succeeded.push(queue[i]);
+      else failed.push({ item: queue[i], reason: r.reason });
+    });
+
+    for (const item of succeeded) {
+      if (item.candidateId) await patchScoutHistoryEntry(item.candidateId, { supabaseSent: true });
+    }
+
+    // 1件でも成功していれば疎通は問題ないと判断し、バックオフはリセットする
+    // （個別のデータ不備でリトライが必要な場合でも、他の送信まで遅らせない）
+    if (succeeded.length > 0) await recordSupabaseSuccess();
+    // 全件失敗した場合のみ、Supabase側/ネットワーク側の不調とみなしてバックオフを効かせる
+    if (failed.length > 0 && failed.length === queue.length) await recordSupabaseFailure();
+
+    if (failed.length > 0) {
+      failed.forEach(f => console.warn('[Snow-we] Supabase scouts保存失敗:', f.item.candidateId, f.reason?.message || f.reason));
+      const retried = failed.map(f => ({ ...f.item, _attempts: (f.item._attempts || 0) + 1 }));
+      const giveUp = retried.filter(it => it._attempts >= 8); // 8回失敗し続けたら諦めて人の確認に回す
+      const keep = retried.filter(it => it._attempts < 8);
+      for (const it of giveUp) {
+        if (it.candidateId) await patchScoutHistoryEntry(it.candidateId, { supabaseSent: false, supabaseRetryCount: 8 });
+        console.warn('[Snow-we] Supabase scouts保存を諦めました(8回失敗):', it.candidateId);
+      }
+      // このタイミングまでに新規追加された分と合流させて書き戻す（withSupabaseQueueLock内なので安全）
+      const { supabaseScoutQueue: currentQueue } = await chrome.storage.local.get(['supabaseScoutQueue']);
+      await chrome.storage.local.set({ supabaseScoutQueue: [...keep, ...(currentQueue || [])] });
+    } else if (succeeded.length > 0) {
+      console.log(`[Snow-we] Supabase scouts保存成功: ${succeeded.length}件`);
+    }
+  });
+}
+
 // scoutHistoryの1件だけを、書き込み直前に読み直してから安全に更新する
 // （content.js側の同名ヘルパーと同じ考え方。詳細はそちらのコメント参照）
 async function patchScoutHistoryEntry(candidateId, patch) {
@@ -364,7 +497,12 @@ async function checkAnomalies() {
       .filter(h => h.gasSent === false && h.date && h.date < tenMinAgo && (h.retryCount || 0) >= 8)
       .map(h => ({ ts: h.date, recruiter: '', company: h.company || '', missing: 'GAS未送信(自動リトライ失敗)', sheet: '' }));
 
-    const anomalies = [...serverAnomalies, ...undelivered].sort((a, b) => b.ts - a.ts);
+    // ③ Supabaseに一度も届かなかったケース（ダッシュボードに表示されない記録）
+    const supabaseUndelivered = Object.values(scoutHistory || {})
+      .filter(h => h.supabaseSent === false && h.date && h.date < tenMinAgo && (h.supabaseRetryCount || 0) >= 8)
+      .map(h => ({ ts: h.date, recruiter: '', company: h.company || '', missing: 'Supabase未送信(自動リトライ失敗)', sheet: '' }));
+
+    const anomalies = [...serverAnomalies, ...undelivered, ...supabaseUndelivered].sort((a, b) => b.ts - a.ts);
     await chrome.storage.local.set({ recordAnomalies: { items: anomalies, checkedAt: Date.now() } });
     updateAnomalyBadge(anomalies.length);
   } catch (_) {
@@ -540,6 +678,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'queueGasScout') {
     enqueueGasScout(msg.payload)
       .then(() => { scheduleQuickFlush(); sendResponse({ ok: true }); })
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  // スカウト記録をSupabase送信キューに追加（content.jsの候補者処理から呼ばれる）
+  if (msg.type === 'queueSupabaseScout') {
+    enqueueSupabaseScout(msg.payload)
+      .then(() => { scheduleSupabaseQuickFlush(); sendResponse({ ok: true }); })
       .catch(() => sendResponse({ ok: false }));
     return true;
   }

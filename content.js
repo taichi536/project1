@@ -946,6 +946,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     position: positionName,
     industry,
     gasSent: false,
+    supabaseSent: false,
   });
 
   // ② GASへの記録はバックグラウンドのバッチキューに積むだけ（サブ・失敗してもローカル記録には影響しない）。
@@ -980,7 +981,9 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     }
   })();
 
-  // ③ Supabaseへの保存
+  // ③ Supabaseへの保存は背景のバッチキューに積むだけ（サブ・失敗してもローカル記録には影響しない）。
+  // GASと同じ「1件ずつ独立して送信・失敗時は自動リトライ・サーキットブレーカー」の
+  // 仕組みをbackground.js側で流用している（詳細はbackground.jsのコメント参照）
   ;(async () => {
     let recruiter = '';
     let currentPosition = '';
@@ -990,19 +993,30 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
       currentPosition = s.currentPosition || '';
     } catch (_) {}
     const ageNum = parseInt((info.age || '').replace(/[歳才]/g, '')) || null;
-    await supabaseInsert('scouts', {
-      platform,
-      platform_candidate_id: candidateId,
-      candidate_name: info.name || '',
-      candidate_age: ageNum,
-      candidate_industry: industry,
-      company_name: info.company || '',
-      university: info.univ || '',
-      position_name: positionName || currentPosition,
-      recruiter_name: recruiter,
-      sent_at: new Date(now).toISOString(),
-      scout_message: templateRaw || ''
-    });
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'queueSupabaseScout',
+        payload: {
+          candidateId,
+          data: {
+            platform,
+            platform_candidate_id: candidateId,
+            candidate_name: info.name || '',
+            candidate_age: ageNum,
+            candidate_industry: industry,
+            company_name: info.company || '',
+            university: info.univ || '',
+            position_name: positionName || currentPosition,
+            recruiter_name: recruiter,
+            sent_at: new Date(now).toISOString(),
+            scout_message: templateRaw || ''
+          },
+        },
+      });
+    } catch (e) {
+      if (!e.message?.includes('Extension context invalidated'))
+        console.warn('[Snow-we] Supabase記録キューへの追加失敗:', e.message);
+    }
   })();
 }
 
