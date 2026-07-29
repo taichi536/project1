@@ -1606,7 +1606,16 @@ document.addEventListener('click', e => {
                   ? sorted.filter(p => { const t = stripSuffix3(p); return t.length >= 8 && normStr(tmplVal) === normStr(t); })
                   : [];
                 const candidates2 = exactHits.length > 0 ? exactHits : stripHits;
-                pending.templateName = candidates2.length === 1 ? candidates2[0] : '';
+                if (candidates2.length === 1) {
+                  pending.templateName = candidates2[0];
+                  console.log('[Snow-we] AMBI: ポジション照合成功:', candidates2[0]);
+                } else {
+                  // RDS/doda-Xと同様、マスターリストと一致しなくても生のテンプレート名を
+                  // フォールバックとして採用する（以前はここが空欄になり記録から
+                  // ポジションが完全に抜け落ちていた）
+                  pending.templateName = tmplVal;
+                  console.log('[Snow-we] AMBI: ポジション照合できず。生のテンプレート名をそのまま採用:', tmplVal);
+                }
               }
             }
             // 確認ステップがないため送信時にメール本文を取得
