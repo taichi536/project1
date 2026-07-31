@@ -1596,7 +1596,15 @@ document.addEventListener('click', e => {
           if (getPlatform() === 'ambi') {
             // テンプレート名からポジション照合
             if (!pending.templateName) {
-              const tmplSel = document.querySelector('select');
+              // 実機DOM調査で判明: ページには「絞り込み」「200件表示」「並び順」等の
+              // 一覧用<select>が複数あり、無条件のquerySelector('select')だとそれらの
+              // どれかを誤って掴む(実機で「最終ログイン日（降順）」が記録される事故を
+              // 確認済み)。テンプレート選択は.js_template_select内の<select>で一意に
+              // 特定できる(.js_rescoutは再送信フロー用の別要素なので除外)
+              const tmplSel = document.querySelector('select.js_template_select:not(.js_rescout)')
+                || document.querySelector('.js_template_select:not(.js_rescout) select')
+                || document.querySelector('select.js_template_select')
+                || document.querySelector('.js_template_select select');
               const tmplVal = tmplSel ? (tmplSel.options[tmplSel.selectedIndex]?.text || '').trim() : '';
               if (tmplVal && tmplVal !== 'テンプレートの選択') {
                 if (!pending.templateRaw) pending.templateRaw = tmplVal;
