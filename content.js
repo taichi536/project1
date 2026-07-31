@@ -1268,15 +1268,19 @@ document.addEventListener('click', e => {
   const btn = e.target.closest('button, a');
   if (!btn) return;
   const text = (btn.innerText || '').trim();
+  // AMBIの送信ボタンは実際のDOMが「送 信」のように文字間にスペースを挟んで表示される
+  // （字間デザイン）ため、素の完全一致だとずっと素通りしていた。空白（半角・全角）を
+  // 除去した文字列で判定することで、こうした字間デザインの差異を吸収する
+  const textCompact = text.replace(/[\s　]/g, '');
 
-  const isScoutBtn           = text === 'スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする') || text.includes('スカウトを作成');
-  const isConfirmBtn         = text === '確認';
-  const isSendBtn            = text === '送信' || text === '送信する';
-  const isTemplateConfirmBtn = text === '確定';
+  const isScoutBtn           = textCompact === 'スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする') || text.includes('スカウトを作成');
+  const isConfirmBtn         = textCompact === '確認';
+  const isSendBtn            = textCompact === '送信' || textCompact === '送信する';
+  const isTemplateConfirmBtn = textCompact === '確定';
   if (!isScoutBtn && !isConfirmBtn && !isSendBtn && !isTemplateConfirmBtn) {
     // スカウト関連らしきボタンなのに上の固定パターンに一致しないものを検知する診断ログ
     // （記録漏れの原因調査用。ここではpendingScoutの状態には一切手を触れない）
-    if (/スカウト|送信|確認|確定/.test(text) && text.length < 30) {
+    if (/スカウト|送信|確認|確定/.test(textCompact) && textCompact.length < 30) {
       console.log('[Snow-we] 未認識のスカウト系ボタン（記録トリガー対象外）:', JSON.stringify(text));
     }
     return;
