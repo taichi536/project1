@@ -1272,18 +1272,23 @@ document.addEventListener('click', e => {
   // （字間デザイン）ため、素の完全一致だとずっと素通りしていた。空白（半角・全角）を
   // 除去した文字列で判定することで、こうした字間デザインの差異を吸収する
   const textCompact = text.replace(/[\s　]/g, '');
+  // それでも「スカウト」ボタンだけ検知漏れが実機で再現したため、より頑丈にする：
+  // 日本語の文字（ひらがな・カタカナ・漢字）以外を全て除去してから比較する。
+  // アイコンのテキスト化・ゼロ幅文字・特殊な空白など、目に見えない形で紛れ込む
+  // 文字をまとめて吸収できる
+  const textCore = textCompact.replace(/[^぀-ヿ一-鿿]/g, '');
 
   // AMBIは既にスカウト済みの候補者だとボタン表示が「スカウト」ではなく「再スカウト」に
   // 変わる(実機で確認)。以前はこの文言が一切マッチせず、再スカウト操作は検知そのものが
   // 起きていなかった(pendingScoutが作られないため、送信しても記録処理に進めなかった)
-  const isScoutBtn           = textCompact === 'スカウト' || textCompact === '再スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする') || text.includes('スカウトを作成');
-  const isConfirmBtn         = textCompact === '確認';
-  const isSendBtn            = textCompact === '送信' || textCompact === '送信する';
-  const isTemplateConfirmBtn = textCompact === '確定';
+  const isScoutBtn           = textCore === 'スカウト' || textCore === '再スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする') || text.includes('スカウトを作成');
+  const isConfirmBtn         = textCore === '確認';
+  const isSendBtn            = textCore === '送信' || textCore === '送信する';
+  const isTemplateConfirmBtn = textCore === '確定';
   if (!isScoutBtn && !isConfirmBtn && !isSendBtn && !isTemplateConfirmBtn) {
     // スカウト関連らしきボタンなのに上の固定パターンに一致しないものを検知する診断ログ
     // （記録漏れの原因調査用。ここではpendingScoutの状態には一切手を触れない）
-    if (/スカウト|送信|確認|確定/.test(textCompact) && textCompact.length < 30) {
+    if (/スカウト|送信|確認|確定/.test(textCore) && textCore.length < 30) {
       console.log('[Snow-we] 未認識のスカウト系ボタン（記録トリガー対象外）:', JSON.stringify(text));
     }
     return;
