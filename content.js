@@ -5913,12 +5913,24 @@ function extractProfile() {
     ], ambiRoot);
     console.log('[Snow-we] AMBI抽出診断 byKeyword長さ=', byKeyword.length, '冒頭50字=', byKeyword.slice(0, 50));
     console.log('[Snow-we] AMBI抽出診断 bySelector長さ=', bySelector.length, '冒頭50字=', bySelector.slice(0, 50));
-    text = byKeyword.length >= bySelector.length ? byKeyword : bySelector;
-    if (text) text = removeNonProfileSections(text);
-    console.log('[Snow-we] AMBI抽出診断 removeNonProfileSections後 長さ=', text.length, '冒頭50字=', text.slice(0, 50));
+    // 生の長さではなく、不要セクション除去後の長さで比較する。.leftCellは先頭に
+    // 「プロフィール/興味あり履歴/スカウト履歴/エントリー履歴/見た求人」という
+    // タブ見出しが並ぶ構造で、byKeywordがこの見出し込みでパネル全体を拾って
+    // しまうと、除去ロジックがタブ名の「スカウト履歴」だけを見てそれ以降を
+    // 全部切り捨ててしまい、実際の職歴本文（bySelectorには含まれている）が
+    // 失われる事故が実機で確認された
+    const cleanedKeyword = byKeyword ? removeNonProfileSections(byKeyword) : '';
+    const cleanedSelector = bySelector ? removeNonProfileSections(bySelector) : '';
+    console.log('[Snow-we] AMBI抽出診断 除去後 byKeyword=', cleanedKeyword.length, '/ bySelector=', cleanedSelector.length);
+    text = cleanedKeyword.length >= cleanedSelector.length ? cleanedKeyword : cleanedSelector;
     if (!text || text.trim().length < 100) {
       console.log('[Snow-we] AMBI抽出診断 → フォールバック(extractMainText)へ');
-      text = detailPanel ? removeNonProfileSections(extractMainText(detailPanel, 2500)) : '';
+      // タブ見出しの直後に来る「ユーザー情報」を起点にすることで、フォールバック側でも
+      // 同じタブ見出し起因の誤カットを避ける
+      let mainText = extractMainText(detailPanel, 3000);
+      const anchorIdx = mainText.indexOf('ユーザー情報');
+      if (anchorIdx > 0 && anchorIdx < 100) mainText = mainText.slice(anchorIdx);
+      text = detailPanel ? removeNonProfileSections(mainText).slice(0, 2500) : '';
       console.log('[Snow-we] AMBI抽出診断 extractMainText後 長さ=', text.length, '冒頭50字=', text.slice(0, 50));
     }
 
