@@ -5894,6 +5894,8 @@ function extractProfile() {
 
   } else if (host.includes('ambi') || host.includes('en-ambi')) {
     detailPanel = findAMBIDetailPanel();
+    console.log('[Snow-we] AMBI抽出診断 detailPanel:', !!detailPanel,
+      detailPanel ? (detailPanel.innerText || '').trim().length + '文字 冒頭50字=' + (detailPanel.innerText || '').trim().slice(0, 50) : '');
     const ambiRoot = detailPanel || null;
     const byKeyword = extractByKeywords([
       '職務経歴', '職歴', '業務内容', '仕事内容',
@@ -5909,10 +5911,15 @@ function extractProfile() {
       '[class*="profile"]', '[class*="skill"]',
       '[class*="history"]', 'section', 'article'
     ], ambiRoot);
+    console.log('[Snow-we] AMBI抽出診断 byKeyword長さ=', byKeyword.length, '冒頭50字=', byKeyword.slice(0, 50));
+    console.log('[Snow-we] AMBI抽出診断 bySelector長さ=', bySelector.length, '冒頭50字=', bySelector.slice(0, 50));
     text = byKeyword.length >= bySelector.length ? byKeyword : bySelector;
     if (text) text = removeNonProfileSections(text);
+    console.log('[Snow-we] AMBI抽出診断 removeNonProfileSections後 長さ=', text.length, '冒頭50字=', text.slice(0, 50));
     if (!text || text.trim().length < 100) {
+      console.log('[Snow-we] AMBI抽出診断 → フォールバック(extractMainText)へ');
       text = detailPanel ? removeNonProfileSections(extractMainText(detailPanel, 2500)) : '';
+      console.log('[Snow-we] AMBI抽出診断 extractMainText後 長さ=', text.length, '冒頭50字=', text.slice(0, 50));
     }
 
   } else if (host.includes('mynavi')) {
