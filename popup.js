@@ -536,6 +536,15 @@ async function runGenerate() {
     return;
   }
 
+  // プロフィール本文が極端に短い(候補者番号・更新日等のメタ情報しか取れていない)場合、
+  // AIに渡すと実在しない経歴をそれらしく作文してしまう(実機で確認済みの事故)。
+  // 情報不足を明示してエラーにし、AIの作文に頼らないようにする
+  if ((profileData.profileText || '').trim().length < 200) {
+    setStatus('generate', 'error', `プロフィール情報が不足しています(${(profileData.profileText || '').trim().length}文字)。詳細パネルを正しく開いた状態で再度お試しください`);
+    $('generate-btn').disabled = false;
+    return;
+  }
+
   // 選択中のポジション情報を取得
   const positionName = $('position-select').value || '';
   let positionDescription = '';
@@ -557,7 +566,7 @@ async function runGenerate() {
     } catch (_) {}
   }
 
-  setStatus('generate', 'loading', `パーソナライズ文を生成中... (取得: ${profileData.length || 0}文字)`);
+  setStatus('generate', 'loading', `パーソナライズ文を生成中... (取得: ${(profileData.profileText || '').length}文字)`);
 
   try {
     const result = await generatePersonalizedLine(apiKey, profileData.profileText, positionName, positionDescription);
@@ -663,6 +672,13 @@ async function runSuggestPosition() {
     } else {
       setStatus('suggest', 'error', 'プロフィール情報が取得できませんでした');
     }
+    $('suggest-btn').disabled = false;
+    return;
+  }
+
+  // generatePersonalizedLineと同じ理由(情報不足でのAI作文事故を防ぐ)の安全策
+  if ((profileData.profileText || '').trim().length < 200) {
+    setStatus('suggest', 'error', `プロフィール情報が不足しています(${(profileData.profileText || '').trim().length}文字)。詳細パネルを正しく開いた状態で再度お試しください`);
     $('suggest-btn').disabled = false;
     return;
   }
