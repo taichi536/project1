@@ -1278,6 +1278,30 @@ document.addEventListener('click', e => {
   // 文字をまとめて吸収できる
   const textCore = textCompact.replace(/[^぀-ヿ一-鿿]/g, '');
 
+  // AMBI: 「送信」を押した後に「スカウトを送信しますか？」という確認ダイアログが
+  // 出ることがある(実機で確認)。pendingScoutConfirmが無い場合は無関係な別のダイアログの
+  // 可能性が高いので何もしない(はい/いいえは他の場面でも使われがちな一般的な文言のため)
+  if ((textCore === 'はい' || textCore === 'いいえ') && getPlatform() === 'ambi') {
+    const confirmRaw = sessionStorage.getItem('pendingScoutConfirm');
+    if (confirmRaw) {
+      sessionStorage.removeItem('pendingScoutConfirm');
+      if (textCore === 'はい') {
+        (async () => {
+          try {
+            const pending = JSON.parse(confirmRaw);
+            if (pending && pending.id && Date.now() - (pending.confirmTs || 0) < 5 * 60 * 1000) {
+              console.log('[Snow-we] AMBI: 送信確認「はい」→ recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし');
+              recordScoutSent(pending.id, pending.info || {}, pending.templateName || '', pending.bodyText || '', pending.fallbackPosition || '');
+            }
+          } catch (_) {}
+        })();
+      } else {
+        console.log('[Snow-we] AMBI: 送信確認「いいえ」でキャンセルされたため記録しません');
+      }
+      return;
+    }
+  }
+
   // AMBIは既にスカウト済みの候補者だとボタン表示が「スカウト」ではなく「再スカウト」に
   // 変わる(実機で確認)。以前はこの文言が一切マッチせず、再スカウト操作は検知そのものが
   // 起きていなかった(pendingScoutが作られないため、送信しても記録処理に進めなかった)
@@ -1697,6 +1721,31 @@ document.addEventListener('click', e => {
           // 変更してしまうことがあり、その場合Aに本来の位置ではなくBの位置が記録される
           // バグになっていた（スカウト時点で捕まえた値こそが、この候補者にとって正しい値）
           const latestPosition = pending.fallbackPosition || '';
+
+          // AMBI: 「送信」を押した直後に「スカウトを送信しますか？」という確認
+          // ダイアログが出ることがある(実機で確認)。以前はここで即座に記録していた
+          // ため、万が一「いいえ」でキャンセルしても記録されてしまう恐れがあった。
+          // ダイアログの出現を少し待ち、出ていれば「はい」クリックまで記録を保留する
+          if (getPlatform() === 'ambi') {
+            let hasConfirmDialog = false;
+            for (let i = 0; i < 6; i++) {
+              if ((document.body.innerText || '').includes('スカウトを送信しますか')) { hasConfirmDialog = true; break; }
+              await sleep(150);
+            }
+            if (hasConfirmDialog) {
+              sessionStorage.setItem('pendingScoutConfirm', JSON.stringify({
+                id: pending.id,
+                info: pending.info || {},
+                templateName: pending.templateName || '',
+                bodyText: pending.bodyText || '',
+                fallbackPosition: latestPosition,
+                confirmTs: Date.now(),
+              }));
+              console.log('[Snow-we] AMBI: 確認ダイアログを検知。「はい」クリックまで記録を保留します');
+              return;
+            }
+          }
+
           console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし', '/ fallback:', latestPosition || 'なし');
           recordScoutSent(pending.id, pending.info || {}, pending.templateName || '', pending.bodyText || '', latestPosition);
         }
