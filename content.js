@@ -5639,12 +5639,21 @@ function findDodaxDetailPanel() {
 // AMBI詳細パネルを特定する
 // -------------------------------------------------------
 function findAMBIDetailPanel() {
+  // 実機DOM調査で判明：スカウト送信スライドパネル内の.leftCellに実際の職歴等の
+  // プロフィール本文が入っている（隣の.rightCellは送信フォーム側で無関係）。
+  // このパネルは幅が256px程度しかなく、下の座標ヒューリスティックが要求していた
+  // 「幅300px以上」を満たさないため、これまで一度も検出できていなかった
+  const specific = document.querySelector('.slide_desc_scout .leftCell')
+    || document.querySelector('.leftCell.ui-resizable');
+  if (specific && (specific.innerText || '').trim().length > 100) return specific;
+
+  // フォールバック：上記のクラス名が見つからない画面状態向けの座標ヒューリスティック
   const viewportWidth = window.innerWidth;
   const candidates = [];
   document.querySelectorAll('div, section, article, main').forEach(el => {
     const rect = el.getBoundingClientRect();
     const t = (el.innerText || '').trim();
-    if (rect.left > viewportWidth * 0.3 && rect.width > 300 && t.length > 200 && t.length < 15000) {
+    if (rect.left > viewportWidth * 0.3 && rect.width > 200 && t.length > 200 && t.length < 15000) {
       const hasKeyword = ['職務経歴', '職歴', 'スキル', '経験職種', '学歴', '語学'].some(kw => t.includes(kw));
       if (hasKeyword) candidates.push({ el, score: t.length });
     }
