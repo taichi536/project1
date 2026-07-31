@@ -6089,11 +6089,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             scrollTarget.scrollTop = scrollTarget.scrollHeight;
             await sleep(1000);
           }
+        } else if (getPlatform() === 'ambi') {
+          // AMBIの候補者スライドパネルは中身が非同期に読み込まれるため、開いた直後だと
+          // .leftCellがまだ空(またはメタ情報だけ)のことがある。実機で「文生成」直後に
+          // ページ共通メニューのテキストを誤って抽出する事故を確認したため、内容が
+          // ある程度の長さになるまで最大3秒ほど待ってから抽出する
+          for (let i = 0; i < 10; i++) {
+            const p = findAMBIDetailPanel();
+            if (p && (p.innerText || '').trim().length > 200) break;
+            await sleep(300);
+          }
         } else {
           await scrollRightPanelToBottom();
         }
         const profileText = extractProfile();
-        const panel = findRDSDetailPanel();
+        // デバッグ表示用のパネル取得もプラットフォームに合わせる（以前は常にRDS用の
+        // 関数を呼んでいたため、AMBI等では中身があっても常に「なし」と誤表示していた）
+        const panel = isRDS ? findRDSDetailPanel() : (getPlatform() === 'ambi' ? findAMBIDetailPanel() : findRDSDetailPanel());
         console.log('[Snow-we] extractProfile 結果:', profileText.length, '文字');
         console.log('[Snow-we] detailPanel:', panel ? `あり (${(panel.innerText||'').trim().length}文字)` : 'なし');
         console.log('[Snow-we] プロフィール先頭100文字:', profileText.substring(0, 100));
