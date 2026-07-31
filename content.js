@@ -1273,7 +1273,10 @@ document.addEventListener('click', e => {
   // 除去した文字列で判定することで、こうした字間デザインの差異を吸収する
   const textCompact = text.replace(/[\s　]/g, '');
 
-  const isScoutBtn           = textCompact === 'スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする') || text.includes('スカウトを作成');
+  // AMBIは既にスカウト済みの候補者だとボタン表示が「スカウト」ではなく「再スカウト」に
+  // 変わる(実機で確認)。以前はこの文言が一切マッチせず、再スカウト操作は検知そのものが
+  // 起きていなかった(pendingScoutが作られないため、送信しても記録処理に進めなかった)
+  const isScoutBtn           = textCompact === 'スカウト' || textCompact === '再スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする') || text.includes('スカウトを作成');
   const isConfirmBtn         = textCompact === '確認';
   const isSendBtn            = textCompact === '送信' || textCompact === '送信する';
   const isTemplateConfirmBtn = textCompact === '確定';
