@@ -505,6 +505,25 @@ async function getProfileSafe(tab) {
   }
 }
 
+// プロフィールらしいテキストか判定する（文字数だけでなく、職歴系キーワードの
+// 有無も見る。ページ共通メニュー等の無関係なテキストを誤って抽出した場合、
+// 文字数は稼げてしまうがキーワードは一切含まれないため、これで弾ける）
+const PROFILE_LIKELY_KEYWORDS = [
+  '職務経歴', '職歴', 'スキル', '経験職種', '経験業種', '業務内容', '仕事内容',
+  '学歴', '最終学歴', '資格', '自己PR', '語学', '転職理由', '希望条件', '希望職種', '希望年収',
+];
+function isLikelyProfileText(text) {
+  const trimmed = (text || '').trim();
+  if (trimmed.length < 200) {
+    return { ok: false, reason: `${trimmed.length}文字` };
+  }
+  const hasKeyword = PROFILE_LIKELY_KEYWORDS.some(kw => trimmed.includes(kw));
+  if (!hasKeyword) {
+    return { ok: false, reason: '職歴らしい内容が見当たりません' };
+  }
+  return { ok: true };
+}
+
 async function runGenerate() {
   const apiKey = sanitizeApiKey($('api-key').value);
   if (!apiKey) {
@@ -536,11 +555,14 @@ async function runGenerate() {
     return;
   }
 
-  // プロフィール本文が極端に短い(候補者番号・更新日等のメタ情報しか取れていない)場合、
-  // AIに渡すと実在しない経歴をそれらしく作文してしまう(実機で確認済みの事故)。
-  // 情報不足を明示してエラーにし、AIの作文に頼らないようにする
-  if ((profileData.profileText || '').trim().length < 200) {
-    setStatus('generate', 'error', `プロフィール情報が不足しています(${(profileData.profileText || '').trim().length}文字)。詳細パネルを正しく開いた状態で再度お試しください`);
+  // プロフィール本文が極端に短い、または職歴らしいキーワードを一切含まない
+  // (ページ共通メニュー等の無関係なテキストを誤って抽出した)場合、AIに渡すと
+  // 実在しない経歴をそれらしく作文してしまう(実機で確認済みの事故。文字数だけの
+  // チェックだと「長いが中身がメニュー等のゴミ」なケースを見逃すため、キーワードの
+  // 有無も併せて見る)。情報不足を明示してエラーにし、AIの作文に頼らないようにする
+  const genProfileCheck = isLikelyProfileText(profileData.profileText || '');
+  if (!genProfileCheck.ok) {
+    setStatus('generate', 'error', `プロフィール情報を正しく取得できていません(${genProfileCheck.reason})。候補者の詳細画面を開いた状態で再度お試しください`);
     $('generate-btn').disabled = false;
     return;
   }
@@ -676,9 +698,10 @@ async function runSuggestPosition() {
     return;
   }
 
-  // generatePersonalizedLineと同じ理由(情報不足でのAI作文事故を防ぐ)の安全策
-  if ((profileData.profileText || '').trim().length < 200) {
-    setStatus('suggest', 'error', `プロフィール情報が不足しています(${(profileData.profileText || '').trim().length}文字)。詳細パネルを正しく開いた状態で再度お試しください`);
+  // generatePersonalizedLineと同じ理由(情報不足・無関係テキストでのAI作文事故を防ぐ)の安全策
+  const suggestProfileCheck = isLikelyProfileText(profileData.profileText || '');
+  if (!suggestProfileCheck.ok) {
+    setStatus('suggest', 'error', `プロフィール情報を正しく取得できていません(${suggestProfileCheck.reason})。候補者の詳細画面を開いた状態で再度お試しください`);
     $('suggest-btn').disabled = false;
     return;
   }
