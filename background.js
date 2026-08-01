@@ -487,6 +487,28 @@ async function flushGasScoutQueue() {
 const SUPABASE_URL = 'https://ovwnyivqnqqiagutjxoo.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_tEQ4TOve0uCydsGiEm1cDA_D1LQ49wN';
 
+// ポジションマスタ（名称・募集要件）。スプレッドシート手動運用から脱却するため、
+// GASの「ポジション」シートではなくSupabaseの positions テーブルを正として参照する。
+// nameForFilter を渡すとその名称と完全一致する1件だけを取得する。
+async function fetchSupabasePositions(nameForFilter) {
+  const cols = 'name,business_overview,required_skills,preferred_skills,desired_profile';
+  const filter = nameForFilter ? `&name=eq.${encodeURIComponent(nameForFilter)}` : '&order=name.asc';
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/positions?select=${cols}${filter}`, {
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+  });
+  if (!res.ok) throw new Error(`Supabase positions取得失敗: ${res.status}`);
+  return res.json();
+}
+
+function buildPositionRequirementsText(row) {
+  const parts = [];
+  if (row.business_overview) parts.push('【業務概要】' + row.business_overview);
+  if (row.required_skills)   parts.push('【必須スキル・経験】' + row.required_skills);
+  if (row.preferred_skills)  parts.push('【歓迎スキル・経験】' + row.preferred_skills);
+  if (row.desired_profile)   parts.push('【求める人物像】' + row.desired_profile);
+  return parts.join(' / ').substring(0, 2000);
+}
+
 let _supabaseQueueChain = Promise.resolve();
 function withSupabaseQueueLock(fn) {
   const result = _supabaseQueueChain.then(fn, fn);
@@ -922,79 +944,70 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  // ポジション要件をGASから取得
+  // ポジション要件をSupabaseから取得（会社別採用基準のみ、引き続きGAS「条件」シートから取得）
   if (msg.type === 'getPositionRequirements') {
     const { position } = msg;
-    chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {
+    (async () => {
+      let requirements = '';
+      try {
+        const rows = await fetchSupabasePositions(position);
+        if (rows[0]) requirements = buildPositionRequirementsText(rows[0]);
+      } catch (e) {
+        console.warn('[Snow-we] getPositionRequirements: Supabase取得失敗', e.message);
+      }
+
+      const { gasSettings } = await chrome.storage.local.get(['gasSettings']);
       const url    = gasSettings?.positionUrl || gasSettings?.url || gasSettings?.dbUrl;
       const secret = gasSettings?.secret || 'snowwe2024';
       if (!url) {
-        sendResponse({ ok: false, requirements: '', companyCriteria: '' });
+        sendResponse({ ok: !!requirements, requirements, companyCriteria: '' });
         return;
       }
-      fetch(url, {
-        method: 'POST',
-        body: JSON.stringify({ secret, action: 'getPositionRequirements', position }),
-      })
-        .then(r => r.json())
-        .then(data => sendResponse(data))
-        .catch(() => sendResponse({ ok: false, requirements: '', companyCriteria: '' }));
-    });
+      try {
+        const gasData = await fetch(url, {
+          method: 'POST',
+          body: JSON.stringify({ secret, action: 'getPositionRequirements', position }),
+        }).then(r => r.json());
+        sendResponse({
+          ok: !!requirements || !!gasData.ok,
+          requirements: requirements || gasData.requirements || '',
+          companyCriteria: gasData.companyCriteria || '',
+        });
+      } catch (e) {
+        sendResponse({ ok: !!requirements, requirements, companyCriteria: '' });
+      }
+    })();
     return true;
   }
 
-  // ポジション一覧を返す（GASスプレッドシートから取得、失敗時はハードコードで代替）
+  // ポジション一覧を返す（Supabaseの positions テーブルから取得、失敗時はハードコードで代替）
   if (msg.type === 'getPositionList') {
-    chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {
-      const positionUrl = gasSettings?.positionUrl || gasSettings?.url || gasSettings?.dbUrl;
-      const secret = gasSettings?.secret || 'snowwe2024';
-      if (!positionUrl) {
-        sendResponse({ positions: POSITION_LIST });
-        return;
-      }
-      fetch(positionUrl, {
-        method: 'POST',
-        body: JSON.stringify({ secret, action: 'getPositions' }),
-      })
-        .then(r => r.json())
-        .then(data => {
-          if (data.ok && data.positions?.length > 0) {
-            console.log('[Snow-we] getPositionList: GASから取得成功', data.positions.length, '件');
-            sendResponse({ positions: data.positions.map(p => typeof p === 'string' ? p : p.name) });
-          } else {
-            console.warn('[Snow-we] getPositionList: GAS応答が空/NG。ハードコード一覧にフォールバック', JSON.stringify(data).slice(0, 200));
-            sendResponse({ positions: POSITION_LIST });
-          }
-        })
-        .catch(e => {
-          console.warn('[Snow-we] getPositionList: GAS取得失敗。ハードコード一覧にフォールバック', e.message);
+    fetchSupabasePositions()
+      .then(rows => {
+        if (rows.length > 0) {
+          console.log('[Snow-we] getPositionList: Supabaseから取得成功', rows.length, '件');
+          sendResponse({ positions: rows.map(r => r.name) });
+        } else {
+          console.warn('[Snow-we] getPositionList: Supabase応答が空。ハードコード一覧にフォールバック');
           sendResponse({ positions: POSITION_LIST });
-        });
-    });
+        }
+      })
+      .catch(e => {
+        console.warn('[Snow-we] getPositionList: Supabase取得失敗。ハードコード一覧にフォールバック', e.message);
+        sendResponse({ positions: POSITION_LIST });
+      });
     return true;
   }
 
   // ポジション一覧（説明付き）を返す — AI提案機能用
   if (msg.type === 'getPositionListWithDesc') {
-    chrome.storage.local.get(['gasSettings']).then(({ gasSettings }) => {
-      // positionUrl → url → dbUrl の優先順でフォールバック
-      const positionUrl = gasSettings?.positionUrl || gasSettings?.url || gasSettings?.dbUrl;
-      const secret = gasSettings?.secret || 'snowwe2024';
-      if (!positionUrl) { sendResponse({ positions: [] }); return; }
-      fetch(positionUrl, {
-        method: 'POST',
-        body: JSON.stringify({ secret, action: 'getPositions' }),
+    fetchSupabasePositions()
+      .then(rows => {
+        sendResponse({
+          positions: rows.map(r => ({ name: r.name, description: buildPositionRequirementsText(r).substring(0, 1500) })),
+        });
       })
-        .then(r => r.json())
-        .then(data => {
-          if (data.ok && data.positions?.length > 0) {
-            sendResponse({ positions: data.positions });
-          } else {
-            sendResponse({ positions: [] });
-          }
-        })
-        .catch(() => sendResponse({ positions: [] }));
-    });
+      .catch(() => sendResponse({ positions: [] }));
     return true;
   }
 });
