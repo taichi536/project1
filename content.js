@@ -4235,6 +4235,10 @@ const SCOUT_BOILERPLATE_MARKERS = [
   'ご経歴を拝見し', '採用担当者からのメッセージ', 'メッセージ履歴',
   '送信済みテンプレート', '前回スカウト', 'スカウト送信日', '送信日時',
   'スカウト済み', '選考ステータス', 'エージェントメモ', '社内メモ',
+  // RDSの再送（既にスカウト済み）候補者は詳細パネル先頭に過去のスカウト送信
+  // 履歴（他エージェントの送信文面）が「スカウト送信 [ポジション] [日付] ...」
+  // という見出しで入り込む。これが未検知だと丸ごとプロフィールとして誤抽出される。
+  'スカウト送信', '候補者様',
 ];
 
 // フィードバックのprofileSummaryがスカウトメール文面等の汚染データでないかを判定
@@ -5924,8 +5928,13 @@ function extractProfile() {
         'section', 'article', 'table'
       ], detailPanel);
 
-      text = byKeyword.length >= bySelector.length ? byKeyword : bySelector;
-      text = removeNonProfileSections(text);
+      // 再送（既にスカウト済み）の候補者は詳細パネルの先頭に過去のスカウト送信
+      // 履歴が入り込むことがあり、素の文字数だけでbyKeyword/bySelectorを選ぶと
+      // 汚染データの方が長くて選ばれてしまう。AMBIと同様、クリーンアップ後に
+      // 実際に残るプロフィール本文の量で比較する。
+      const cleanedKeyword  = byKeyword  ? removeNonProfileSections(byKeyword)  : '';
+      const cleanedSelector = bySelector ? removeNonProfileSections(bySelector) : '';
+      text = cleanedKeyword.length >= cleanedSelector.length ? cleanedKeyword : cleanedSelector;
 
       if (text.length < 100) {
         text = removeNonProfileSections(extractMainText(detailPanel, 5000));
