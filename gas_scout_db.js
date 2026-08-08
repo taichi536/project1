@@ -281,27 +281,33 @@ function doPost(e) {
     if (data.action === 'getAllDailySheetHistory') {
       const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
       const records = [];
+      // シート1枚につきメンバー数分(4回)読み込んでいると、シート数が多いと
+      // Apps Script側の実行時間を圧迫して6分のタイムアウトに掛かりかねないため、
+      // シート1枚につき全メンバー分の列を1回のgetValuesでまとめて読む
+      const maxCol = Math.max(...Object.values(MEMBER_MAP)) + 6;
       ss.getSheets().forEach(sheet => {
         if (!datePattern.test(sheet.getName())) return;
         const lastRow = sheet.getLastRow();
         if (lastRow < 3) return;
         const numRows = lastRow - 2;
+        const allValues = sheet.getRange(3, 1, numRows, maxCol).getValues();
 
         Object.entries(MEMBER_MAP).forEach(([recruiter, startCol]) => {
-          const values = sheet.getRange(3, startCol, numRows, 7).getValues();
-          values.forEach(row => {
-            const [age, company, univ, position, media, industry, ts] = row;
+          const off = startCol - 1; // 0-indexed
+          allValues.forEach(row => {
+            const company = row[off + 1];
             if (!company) return;
+            const ts = row[off + 6];
             const dateMs = ts instanceof Date ? ts.getTime() : (ts ? new Date(ts).getTime() : 0);
             if (!dateMs) return;
             records.push({
               date: dateMs,
               recruiter,
-              age: String(age || ''),
+              age: String(row[off] || ''),
               company: String(company || ''),
-              univ: String(univ || ''),
-              position: String(position || ''),
-              platform: String(media || ''),
+              univ: String(row[off + 2] || ''),
+              position: String(row[off + 3] || ''),
+              platform: String(row[off + 4] || ''),
               status: '',
             });
           });
