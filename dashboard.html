@@ -256,6 +256,25 @@
   }
   #state.error { color: #d03b3b; }
 
+  /* 記録漏れチェック状態バナー */
+  #sync-health {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  #sync-health.show { display: flex; }
+  #sync-health.ok { background: rgba(43,161,101,0.10); border-color: rgba(43,161,101,0.35); color: #1f8a56; }
+  #sync-health.warn { background: rgba(224,151,26,0.12); border-color: rgba(224,151,26,0.4); color: #a86a0a; }
+  #sync-health .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  #sync-health.ok .dot { background: #2ba165; }
+  #sync-health.warn .dot { background: #e0971a; }
+  #sync-health .detail { color: var(--text-muted); }
+
   /* 全文表示モーダル */
   #modal-bg {
     display: none;
@@ -293,6 +312,7 @@
   <span id="updated"></span>
 </header>
 <main>
+  <div id="sync-health"></div>
   <div class="tiles" id="tiles"></div>
   <div class="breakdown" id="breakdown"></div>
 
@@ -399,9 +419,41 @@ function fmtDate(iso) {
   return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// ── 記録漏れチェック状態バナー（sync_gas_to_supabase.pyの定期実行結果を表示） ──
+async function loadSyncHealth() {
+  const el = $('sync-health');
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/sync_health?select=*&order=checked_at.desc&limit=20`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+    );
+    if (!res.ok) { el.classList.remove('show'); return; } // テーブル未作成等は静かに非表示
+    const rows = await res.json();
+    if (!rows.length) { el.classList.remove('show'); return; }
+
+    const latestCheckedAt = rows[0].checked_at;
+    const latest = rows.filter(r => r.checked_at === latestCheckedAt);
+    const totalRemaining = latest.reduce((s, r) => s + (r.remaining_missing || 0), 0);
+    const problemPlatforms = latest.filter(r => (r.remaining_missing || 0) > 0)
+      .map(r => `${platformMeta(r.platform).label}: ${r.remaining_missing}件`);
+
+    el.className = 'sync-health show ' + (totalRemaining > 0 ? 'warn' : 'ok');
+    el.innerHTML = `
+      <span class="dot"></span>
+      <span>${totalRemaining > 0
+        ? `記録漏れの疑いあり（${totalRemaining}件）`
+        : '全媒体でスプレッドシートとの記録漏れなし'}</span>
+      <span class="detail">最終チェック: ${fmtDate(latestCheckedAt)}${problemPlatforms.length ? ' ／ ' + problemPlatforms.join('、') : ''}</span>
+    `;
+  } catch (e) {
+    el.classList.remove('show');
+  }
+}
+
 async function loadData() {
   $('state').textContent = '読み込み中…';
   $('state').className = '';
+  loadSyncHealth();
   try {
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/scouts?select=*&order=sent_at.desc&limit=5000`,
