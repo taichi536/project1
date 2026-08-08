@@ -273,6 +273,43 @@ function doPost(e) {
       return json({ ok: true, records });
     }
 
+    // ── 全日付シート横断の記録取得 ──
+    // 「スカウト管理DB」は拡張機能経由の自動記録のみが書き込まれる集計シートだが、
+    // 日付ごとのシート（例:「2026年7月19日(土)」）には自動化前の手入力データも
+    // 含まれており、こちらの方が全媒体を通じた完全な履歴になっている。
+    // ダッシュボードとの同期チェック（記録漏れ確認）用。
+    if (data.action === 'getAllDailySheetHistory') {
+      const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+      const records = [];
+      ss.getSheets().forEach(sheet => {
+        if (!datePattern.test(sheet.getName())) return;
+        const lastRow = sheet.getLastRow();
+        if (lastRow < 3) return;
+        const numRows = lastRow - 2;
+
+        Object.entries(MEMBER_MAP).forEach(([recruiter, startCol]) => {
+          const values = sheet.getRange(3, startCol, numRows, 7).getValues();
+          values.forEach(row => {
+            const [age, company, univ, position, media, industry, ts] = row;
+            if (!company) return;
+            const dateMs = ts instanceof Date ? ts.getTime() : (ts ? new Date(ts).getTime() : 0);
+            if (!dateMs) return;
+            records.push({
+              date: dateMs,
+              recruiter,
+              age: String(age || ''),
+              company: String(company || ''),
+              univ: String(univ || ''),
+              position: String(position || ''),
+              platform: String(media || ''),
+              status: '',
+            });
+          });
+        });
+      });
+      return json({ ok: true, records });
+    }
+
     // ── 記録不備一覧取得（拡張機能のpopupがバッジ表示のために定期取得） ──
     if (data.action === 'getAnomalies') {
       const anSheet = ss.getSheetByName(SHEET_ANOMALY);
