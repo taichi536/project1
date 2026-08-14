@@ -1057,11 +1057,27 @@ function getCandidateId(cardEl) {
 
   // Bizreach: cardEl が ess-resume-list-item 自身（新セレクタ）または祖先に持つ場合
   if (getPlatform() === 'bizreach') {
-    // BizreachはSPAルーティングのURLに現在表示中の候補者IDが直接埋め込まれる
-    // （例: /v1/resumes/{jobId}/list/{candidateId}）。スカウト送信ボタンは常に
-    // その候補者の詳細パネルを開いた状態でのみ現れるため、URLは常にクリック対象の
-    // 候補者と一致する。詳細パネル要素からはresume-XXXXX形式のidが見つからない
-    // ことが多く、DOM探索よりURLの方が確実なため最優先で使う
+    // 詳細パネル自身に表示されている会員番号(例:「BU3258517」)を最優先で使う。
+    // 以前はURLから候補者IDを取得していたが、BizreachはSPAルーティングのため
+    // 候補者を切り替えた瞬間にURLは即座に切り替わる一方、詳細パネルの表示内容
+    // (プロフィール)が追いつくまでにわずかな時間差がある。この間にボタンを
+    // クリックすると、IDだけ新しい候補者のものになり、一緒に記録される会社名・
+    // 年齢等のプロフィール内容は表示が追いついていない前の候補者のまま、という
+    // 事故が実機で確認された(会員IDで検索すると全く無関係な候補者名になっていた)。
+    // 詳細パネル自身のテキストから会員番号を取れば、プロフィール内容の抽出と
+    // 完全に同じタイミング・同じDOM要素からの取得になるためズレが起こらない
+    let buMatch = (cardEl.innerText || '').match(/\bBU(\d{5,})\b/);
+    if (!buMatch) {
+      // 詳細パネルの検出範囲が会員番号のヘッダー行を含まないことがあるため、
+      // 祖先を数階層遡って再検索する(リスト側の内容まで拾わないよう範囲は絞る)
+      let el = cardEl.parentElement;
+      for (let i = 0; i < 4 && el && !buMatch; i++) {
+        buMatch = (el.innerText || '').match(/\bBU(\d{5,})\b/);
+        el = el.parentElement;
+      }
+    }
+    if (buMatch) return `bizreach_resume-${buMatch[1]}`;
+    // 会員番号が見つからない場合のフォールバックとしてURLを使う
     const urlMatch = location.pathname.match(/\/list\/(\d+)(?:[/?#]|$)/);
     if (urlMatch) return `bizreach_resume-${urlMatch[1]}`;
     // 直接 id を持つ場合
