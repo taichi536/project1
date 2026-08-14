@@ -1057,6 +1057,13 @@ function getCandidateId(cardEl) {
 
   // Bizreach: cardEl が ess-resume-list-item 自身（新セレクタ）または祖先に持つ場合
   if (getPlatform() === 'bizreach') {
+    // BizreachはSPAルーティングのURLに現在表示中の候補者IDが直接埋め込まれる
+    // （例: /v1/resumes/{jobId}/list/{candidateId}）。スカウト送信ボタンは常に
+    // その候補者の詳細パネルを開いた状態でのみ現れるため、URLは常にクリック対象の
+    // 候補者と一致する。詳細パネル要素からはresume-XXXXX形式のidが見つからない
+    // ことが多く、DOM探索よりURLの方が確実なため最優先で使う
+    const urlMatch = location.pathname.match(/\/list\/(\d+)(?:[/?#]|$)/);
+    if (urlMatch) return `bizreach_resume-${urlMatch[1]}`;
     // 直接 id を持つ場合
     if (cardEl.id && cardEl.id.startsWith('resume-')) return `bizreach_${cardEl.id}`;
     // 子要素の bui-drawer-trigger に id がある（実際のBizreach構造）
@@ -1356,6 +1363,20 @@ document.addEventListener('click', e => {
     // RDS: ボタンが詳細パネル内にある場合は詳細パネルを優先（リストカードと混同しない）
     if (getPlatform() === 'rds') {
       const detailPanel = findRDSDetailPanel();
+      if (detailPanel && detailPanel.contains(btn)) {
+        card = detailPanel;
+      }
+    }
+
+    // Bizreach: 「スカウトを作成」ボタンは常に右側の詳細パネル内にあり、左のリストカード
+    // には含まれない（cards.find(c => c.contains(btn))が常に失敗する）。以前はこの場合
+    // 直前にリストでクリックした_selectedCardにフォールバックしていたが、Bizreachでは
+    // 候補者間の切り替えがリストの再クリックを伴わないこともあり、_selectedCardが古い
+    // ままだと無関係な別候補者の会社名・年齢等を誤って記録してしまう事故が実機で確認
+    // された（プロフィール本文は正しい候補者のものなのに、会社名だけ別人になっていた）。
+    // 詳細パネルを会社名・年齢等の抽出元として使う（候補者IDはURLベースで別途特定する）
+    if (getPlatform() === 'bizreach') {
+      const detailPanel = findBizreachDetailPanel();
       if (detailPanel && detailPanel.contains(btn)) {
         card = detailPanel;
       }
