@@ -1117,8 +1117,13 @@ function extractBasicInfo(cardEl) {
   // 「4年制大学」「国公立大学」等、応募資格・学歴要件としての一般名詞であり
   // 実際の大学名ではないものを除外する（実在の大学名は固有名詞を含むため、
   // 「年制」「公立」「私立」等の一般語のみで構成されるものはここで弾く）
+  // 「学歴：大学卒 / 広島国際大学」のような文字列では、正規表現のバックトラックにより
+  // 本来拾うべき「広島国際大学」より先に「学歴：大学」（「歴：大学」の部分が偶然
+  // "(?:大学院|大学)"にマッチしてしまう）が誤って抽出されることが実機で確認された。
+  // 実在の大学名に「学歴」という文字列が含まれることはないため、これを含む候補は除外する
   const isGenericUnivPhrase = s => /^(?:[0-9０-９]{1,2}|[一二三四五六七八九十]{1,2})年制(?:大学院|大学)?$/.test(s)
-    || /^(?:国公立|国立|公立|私立|有名|難関|一般)(?:大学院|大学)$/.test(s);
+    || /^(?:国公立|国立|公立|私立|有名|難関|一般)(?:大学院|大学)$/.test(s)
+    || s.includes('学歴');
   const extractUnivFromText = (t) => {
     // 「学歴」「最終学歴」セクション以降から優先的に抽出
     const eduIdx = t.search(/学歴|最終学歴/);
@@ -1235,6 +1240,22 @@ function extractBasicInfo(cardEl) {
       if (p) {
         const pLines = (p.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
         company = pLines.find(l => !isEduLine(l) && companyRe2.test(l))?.split(/[／/]/)[0].trim() || '';
+      }
+    }
+  } else if (getPlatform() === 'bizreach') {
+    // Bizreachのカードは 年齢/新着タグ → 都道府県 → 年収 → 経過時間 → 送信通数(N通) →
+    // 会社名 → 部署名 → 学歴… という固定順序で並ぶ(実機で確認)。以前は company = lines[0]
+    // という汎用フォールバックを使っていたため、会社名ではなく「38歳」「新着」といった
+    // 先頭行がそのまま会社名として記録されていた
+    const isEduLine3 = l => /学歴|卒業|修了|在学|入学/.test(l);
+    const companyRe3 = /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,|ホールディングス|グループ|銀行|証券|保険/;
+    company = lines.find(l => !isEduLine3(l) && companyRe3.test(l)) || '';
+    if (!company) {
+      // キーワードに一致しない会社名表記（例:「JFEエンジニアリング」）の場合、
+      // 「N通」行の直後の行を会社名として採用する
+      const sentIdx = lines.findIndex(l => /^\d+通$/.test(l));
+      if (sentIdx >= 0 && lines[sentIdx + 1] && !isEduLine3(lines[sentIdx + 1])) {
+        company = lines[sentIdx + 1];
       }
     }
   } else {
