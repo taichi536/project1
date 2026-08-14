@@ -1307,7 +1307,11 @@ document.addEventListener('click', e => {
   // 起きていなかった(pendingScoutが作られないため、送信しても記録処理に進めなかった)
   const isScoutBtn           = textCore === 'スカウト' || textCore === '再スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする') || text.includes('スカウトを作成');
   const isConfirmBtn         = textCore === '確認';
-  const isSendBtn            = textCore === '送信' || textCore === '送信する';
+  // Bizreach: モーダル内の最終送信ボタンは「スカウトを送信」という文言で、
+  // 単独の「送信」「送信する」とは一致しない（実機で確認）。このボタンは
+  // 「スカウトを作成」で開いたモーダルの最終送信であり、以前は未認識ボタン扱いで
+  // recordScoutSentまで到達せず、Bizreachだけ自動記録が一切行われていなかった
+  const isSendBtn            = textCore === '送信' || textCore === '送信する' || textCore === 'スカウトを送信';
   const isTemplateConfirmBtn = textCore === '確定';
   if (!isScoutBtn && !isConfirmBtn && !isSendBtn && !isTemplateConfirmBtn) {
     // スカウト関連らしきボタンなのに上の固定パターンに一致しないものを検知する診断ログ
