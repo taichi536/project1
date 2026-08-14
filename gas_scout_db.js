@@ -279,7 +279,7 @@ function doPost(e) {
     // 含まれており、こちらの方が全媒体を通じた完全な履歴になっている。
     // ダッシュボードとの同期チェック（記録漏れ確認）用。
     if (data.action === 'getAllDailySheetHistory') {
-      const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+      const datePattern = /^\s*\d{4}年\d{1,2}月\d{1,2}日\s*[（(][日月火水木金土][）)]\s*$/;
       const records = [];
       // シート1枚につきメンバー数分(4回)読み込んでいると、シート数が多いと
       // Apps Script側の実行時間を圧迫して6分のタイムアウトに掛かりかねないため、
@@ -629,7 +629,7 @@ function applyIndustryDropdown(sheet, row, col) {
 // GASエディタから手動で1回実行してください
 function updateAllIndustryDropdowns() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+  const datePattern = /^\s*\d{4}年\d{1,2}月\d{1,2}日\s*[（(][日月火水木金土][）)]\s*$/;
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(GICS_INDUSTRIES, true)
     .setAllowInvalid(true).build();
@@ -706,7 +706,7 @@ function findNextRow(sheet, startCol) {
 // ClaudeのAPI呼び出しは行わず、マスターシートとキーワードのみで適用します（高速）。
 function reclassifyAllIndustries() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+  const datePattern = /^\s*\d{4}年\d{1,2}月\d{1,2}日\s*[（(][日月火水木金土][）)]\s*$/;
   const norm = s => s.replace(/[　\s]/g, '').toLowerCase();
 
   // Step 1: マスターシートを読み込む
@@ -900,7 +900,7 @@ function claudeBatchClassify() {
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+  const datePattern = /^\s*\d{4}年\d{1,2}月\d{1,2}日\s*[（(][日月火水木金土][）)]\s*$/;
 
   // 未分類の会社名を収集（重複排除）
   const unclassified = new Set();
@@ -1387,7 +1387,7 @@ function batchClassify() {
   const apiKey = props.getProperty('ANTHROPIC_API_KEY');
   if (!apiKey) { SpreadsheetApp.getUi().alert('ANTHROPIC_API_KEY が未設定です。'); return; }
 
-  const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+  const datePattern = /^\s*\d{4}年\d{1,2}月\d{1,2}日\s*[（(][日月火水木金土][）)]\s*$/;
   const allSheetNames = ss.getSheets().map(s => s.getName()).filter(n => datePattern.test(n));
   const doneSheets    = new Set(JSON.parse(props.getProperty('BATCH_DONE_SHEETS') || '[]'));
   const pendingSheets = allSheetNames.filter(n => !doneSheets.has(n));
@@ -1479,7 +1479,7 @@ function batchClassify() {
 // ── 送信日時の表示形式を「yyyy/MM/dd HH:mm」に統一（一度だけ実行）──
 function fixTimestampFormat() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+  const datePattern = /^\s*\d{4}年\d{1,2}月\d{1,2}日\s*[（(][日月火水木金土][）)]\s*$/;
   const fmt = 'yyyy/MM/dd HH:mm';
   let count = 0;
 
@@ -1517,7 +1517,7 @@ function setupOnEditTrigger() {
 function onEditIndustry(e) {
   try {
     const sheet = e.range.getSheet();
-    const datePattern = /^\d{4}年\d{1,2}月\d{1,2}日[（(][日月火水木金土][）)]$/;
+    const datePattern = /^\s*\d{4}年\d{1,2}月\d{1,2}日\s*[（(][日月火水木金土][）)]\s*$/;
     if (!datePattern.test(sheet.getName())) return;
     const col = e.range.getColumn();
     const row = e.range.getRow();
