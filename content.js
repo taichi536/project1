@@ -1673,8 +1673,11 @@ document.addEventListener('click', e => {
       try {
         const pending = JSON.parse(raw);
         if (pending && pending.id && Date.now() - pending.ts < 30 * 60 * 1000) {
-          // AMBIはテンプレートドロップダウンからポジションを取得、本文も送信時に取得
-          if (getPlatform() === 'ambi') {
+          // AMBIはテンプレートドロップダウンからポジションを取得、本文も送信時に取得。
+          // getPositionList等の非同期呼び出しが失敗した場合でも、外側のcatchまで例外が
+          // 伝播してrecordScoutSent自体が一切呼ばれなくなる（記録が完全に消える）事故を
+          // 防ぐため、テンプレート照合はここだけで失敗を吸収し、記録処理は必ず続行する
+          try { if (getPlatform() === 'ambi') {
             // テンプレート名からポジション照合
             if (!pending.templateName) {
               // 実機DOM調査で判明: ページには「絞り込み」「200件表示」「並び順」等の
@@ -1718,11 +1721,11 @@ document.addEventListener('click', e => {
                 pending.bodyText = ta.value.substring(0, 2000);
               }
             }
-          }
+          } } catch (err) { console.warn('[Snow-we] AMBIテンプレート照合中にエラー（記録は続行します）:', err.message); }
           // doda-Xも確認ステップがないため送信時にテンプレート名を取得する。
           // 「テンプレート」欄はvue-select製のカスタムコンポーネントで、選択済みの値は
           // ネイティブ<select>ではなく<span class="vs__selected">の中に入る（実機DOM調査で確認済み）
-          if (getPlatform() === 'dodax' && !pending.templateName) {
+          try { if (getPlatform() === 'dodax' && !pending.templateName) {
             const selectedSpan = document.querySelector('.vs__selected');
             // 長いテンプレート名だと、vue-selectの表示上の省略により<span>のtextContent自体が
             // 末尾で欠けることが実機で確認された（例:「オープンポジション）」の閉じ括弧が消える）。
@@ -1763,11 +1766,11 @@ document.addEventListener('click', e => {
                 console.log('[Snow-we] doda-x テンプレート名照合できず。生のテンプレート名をそのまま採用:', tmplVal);
               }
             }
-          }
+          } } catch (err) { console.warn('[Snow-we] doda-xテンプレート照合中にエラー（記録は続行します）:', err.message); }
           // Bizreachも確認ステップがないため送信時にテンプレート名を取得する。
           // 「テンプレートを選択」欄はb-ui-select製のカスタムコンポーネントで、選択済みの値は
           // ネイティブ<select>ではなく<span class="bui-select-box-label">の中に入る（実機DOM調査で確認済み）
-          if (getPlatform() === 'bizreach' && !pending.templateName) {
+          try { if (getPlatform() === 'bizreach' && !pending.templateName) {
             const selectedLabel = document.querySelector('[data-templates-dropdown] .bui-select-box-label');
             const tmplVal = selectedLabel ? (selectedLabel.textContent || '').trim() : '';
             if (tmplVal) {
@@ -1796,7 +1799,7 @@ document.addEventListener('click', e => {
                 console.log('[Snow-we] Bizreach テンプレート名照合できず。生のテンプレート名をそのまま採用:', tmplVal);
               }
             }
-          }
+          } } catch (err) { console.warn('[Snow-we] Bizreachテンプレート照合中にエラー（記録は続行します）:', err.message); }
           // fallbackPositionは「スカウト」ボタン押下時点でこの候補者用に固定済みの値をそのまま使う。
           // 以前はここで送信直前にドロップダウンの「今の」値を読み直していたが、複数候補者を
           // 連続処理する運用では、候補者Aの送信が完了する前に次の候補者B用にドロップダウンを
