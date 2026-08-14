@@ -949,25 +949,35 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     supabaseSent: false,
   });
 
+  // 担当者名・現在ポジション名は②③どちらのブロックでも使うため、ここで一度だけ読み込み、
+  // 両方で使い回す。以前は②③がそれぞれ独立に chrome.storage.local.get() を呼んでおり、
+  // 実機ログで「②(GAS)は正しい担当者名で記録できているのに③(Supabase)だけ担当者名が
+  // 空になる」というケースが確認された（RDSの一括送信等、短時間に大量の非同期読み込みが
+  // 走る状況で発生）。原因の特定に関わらず、同じ値を1回だけ読んで使い回せば、この種の
+  // 読み込みズレは構造的に起こりえなくなる
+  let sharedSettings = {};
+  try {
+    sharedSettings = await chrome.storage.local.get(['gasSettings', 'currentPosition', 'recruiterName']);
+  } catch (_) {}
+  const sharedGas = sharedSettings.gasSettings || {};
+  const sharedRecruiter = sharedGas.recruiter || sharedSettings.recruiterName || '';
+  const sharedCurrentPosition = sharedSettings.currentPosition || '';
+
   // ② GASへの記録はバックグラウンドのバッチキューに積むだけ（サブ・失敗してもローカル記録には影響しない）。
   // 以前はここで即座にPOSTしていたが、RDSの一括送信等で候補者が短時間に連続処理されると
   // GAS側・拡張機能側の両方で書き込みが競合しやすかったため、background.js側で
   // 数秒〜1分おきにまとめて1回のリクエストで送るバッチ方式に変更した
   ;(async () => {
-    let r2 = {};
-    try { r2 = await chrome.storage.local.get(['gasSettings', 'currentPosition', 'recruiterName']); } catch (_) {}
-    const gas = r2.gasSettings || {};
-    const recruiterForGas = gas.recruiter || r2.recruiterName || '';
-    if ((!gas.url && !gas.dbUrl) || !recruiterForGas || gas.scoutRecordEnabled === false) return;
+    if ((!sharedGas.url && !sharedGas.dbUrl) || !sharedRecruiter || sharedGas.scoutRecordEnabled === false) return;
     const ageNum = (info.age || '').replace(/[歳才]/, '');
     const payload = {
-      secret: gas.secret || 'snowwe2024',
-      recruiter: recruiterForGas,
+      secret: sharedGas.secret || 'snowwe2024',
+      recruiter: sharedRecruiter,
       company: info.company || '',
       age: ageNum,
       univ: info.univ || '',
       media: platform,
-      position: positionName || r2.currentPosition || '',
+      position: positionName || sharedCurrentPosition || '',
       industry,
       ts: now,
       candidateId, // 記録が空欄になった場合にGAS側から自動修復するための紐付けキー
@@ -985,13 +995,6 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
   // GASと同じ「1件ずつ独立して送信・失敗時は自動リトライ・サーキットブレーカー」の
   // 仕組みをbackground.js側で流用している（詳細はbackground.jsのコメント参照）
   ;(async () => {
-    let recruiter = '';
-    let currentPosition = '';
-    try {
-      const s = await chrome.storage.local.get(['gasSettings', 'currentPosition', 'recruiterName']);
-      recruiter = s.gasSettings?.recruiter || s.recruiterName || '';
-      currentPosition = s.currentPosition || '';
-    } catch (_) {}
     const ageNum = parseInt((info.age || '').replace(/[歳才]/g, '')) || null;
     try {
       await chrome.runtime.sendMessage({
@@ -1006,8 +1009,8 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
             candidate_industry: industry,
             company_name: info.company || '',
             university: info.univ || '',
-            position_name: positionName || currentPosition,
-            recruiter_name: recruiter,
+            position_name: positionName || sharedCurrentPosition,
+            recruiter_name: sharedRecruiter,
             sent_at: new Date(now).toISOString(),
             scout_message: templateRaw || ''
           },
