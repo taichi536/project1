@@ -450,19 +450,41 @@ async function loadSyncHealth() {
   }
 }
 
+async function fetchAllScouts() {
+  // SupabaseプロジェクトのAPI設定「Max Rows」により、limit指定だけでは1000件で
+  // 頭打ちになる。sync_gas_to_supabase.pyと同様、Rangeヘッダーで1000件ずつ
+  // ページングして取得しないと全件が表示できない
+  const pageSize = 1000;
+  let all = [];
+  let offset = 0;
+  while (true) {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/scouts?select=*&order=sent_at.desc`,
+      {
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          Range: `${offset}-${offset + pageSize - 1}`,
+        },
+      }
+    );
+    if (!res.ok) throw new Error(`APIエラー (${res.status})`);
+    const page = await res.json();
+    all = all.concat(page);
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
+  return all;
+}
+
 async function loadData() {
   $('state').textContent = '読み込み中…';
   $('state').className = '';
   loadSyncHealth();
   try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/scouts?select=*&order=sent_at.desc&limit=5000`,
-      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
-    );
-    if (!res.ok) throw new Error(`APIエラー (${res.status})`);
-    allRows = await res.json();
+    allRows = await fetchAllScouts();
     $('state').textContent = allRows.length === 0 ? 'まだ記録がありません' : '';
-    $('updated').textContent = `最終更新: ${fmtDate(new Date().toISOString())}（直近${allRows.length}件を取得）`;
+    $('updated').textContent = `最終更新: ${fmtDate(new Date().toISOString())}（全${allRows.length}件を取得）`;
     populateFilterOptions();
     render();
   } catch (e) {
