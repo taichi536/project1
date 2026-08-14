@@ -292,13 +292,24 @@ function doPost(e) {
         const numRows = lastRow - 2;
         const allValues = sheet.getRange(3, 1, numRows, maxCol).getValues();
 
+        // 「送信日時」列が未記入の古い行がある(2月〜4月26日頃のデータで判明。会社名等は
+        // 入っているのに送信日時だけ空欄で、以前はdateMs無しとして丸ごと記録から
+        // 落としていた)。行側にタイムスタンプが無い場合は、シート名自体に入っている
+        // 日付(例:「2026年2月3日(火)」)を代わりに使う。時刻までは分からないが、
+        // 記録を完全に失うより日付だけでも拾えたほうがよい
+        const sheetDateMatch = sheet.getName().match(/^(\d{4})年(\d{1,2})月(\d{1,2})日/);
+        const sheetFallbackDateMs = sheetDateMatch
+          ? new Date(Number(sheetDateMatch[1]), Number(sheetDateMatch[2]) - 1, Number(sheetDateMatch[3])).getTime()
+          : 0;
+
         Object.entries(MEMBER_MAP).forEach(([recruiter, startCol]) => {
           const off = startCol - 1; // 0-indexed
           allValues.forEach(row => {
             const company = row[off + 1];
             if (!company) return;
             const ts = row[off + 6];
-            const dateMs = ts instanceof Date ? ts.getTime() : (ts ? new Date(ts).getTime() : 0);
+            let dateMs = ts instanceof Date ? ts.getTime() : (ts ? new Date(ts).getTime() : 0);
+            if (!dateMs) dateMs = sheetFallbackDateMs;
             if (!dateMs) return;
             records.push({
               date: dateMs,
