@@ -1719,6 +1719,39 @@ document.addEventListener('click', e => {
               }
             }
           }
+          // Bizreachも確認ステップがないため送信時にテンプレート名を取得する。
+          // 「テンプレートを選択」欄はb-ui-select製のカスタムコンポーネントで、選択済みの値は
+          // ネイティブ<select>ではなく<span class="bui-select-box-label">の中に入る（実機DOM調査で確認済み）
+          if (getPlatform() === 'bizreach' && !pending.templateName) {
+            const selectedLabel = document.querySelector('[data-templates-dropdown] .bui-select-box-label');
+            const tmplVal = selectedLabel ? (selectedLabel.textContent || '').trim() : '';
+            if (tmplVal) {
+              if (!pending.templateRaw) pending.templateRaw = tmplVal;
+              const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+              const positionList = res?.positions || [];
+              const sorted = [...positionList].sort((a, b) => b.length - a.length);
+              const normStr = s => s.replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim();
+              const stripSuffix5 = p => p.replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '').replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '').trim();
+              const nTmpl = normStr(tmplVal);
+              const exactHits = sorted.filter(p => p && nTmpl === normStr(p));
+              const stripHits = exactHits.length === 0
+                ? sorted.filter(p => { const t = stripSuffix5(p); return t.length >= 8 && nTmpl === normStr(t); })
+                : [];
+              const candidates4 = exactHits.length > 0 ? exactHits : stripHits;
+              if (candidates4.length === 1) {
+                pending.templateName = candidates4[0];
+                console.log('[Snow-we] Bizreach テンプレート名からポジション照合成功:', candidates4[0]);
+              } else if (/^[AB]C[）(]/.test(tmplVal)) {
+                pending.templateName = tmplVal;
+                console.log('[Snow-we] Bizreach AC/BC形式テンプレートを直接採用:', tmplVal);
+              } else {
+                // マスターリストと一致しなくても、無関係な古いドロップダウン値
+                // （fallbackPosition）より実際のテンプレート名の方が正しい記録になる
+                pending.templateName = tmplVal;
+                console.log('[Snow-we] Bizreach テンプレート名照合できず。生のテンプレート名をそのまま採用:', tmplVal);
+              }
+            }
+          }
           // fallbackPositionは「スカウト」ボタン押下時点でこの候補者用に固定済みの値をそのまま使う。
           // 以前はここで送信直前にドロップダウンの「今の」値を読み直していたが、複数候補者を
           // 連続処理する運用では、候補者Aの送信が完了する前に次の候補者B用にドロップダウンを
