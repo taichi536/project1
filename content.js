@@ -1561,9 +1561,18 @@ document.addEventListener('click', e => {
           }
         }
         if (!tmplRaw) {
-          // テンプレート名ラベルを探す（selected/active な行のタイトル等）
+          // テンプレート名ラベルを探す（selected/active な行のタイトル等）。
+          // このセレクタは汎用的すぎて、RDSの候補者詳細パネル内にある「職務要約」等の
+          // プロフィール見出し（active/title系のクラス名を持つ）を誤って拾ってしまう
+          // 事故が実データで確認された（ポジション名が「職務要約」という明らかに
+          // おかしい値でRDS 74件記録されていた）。プロフィール見出しとして使われがちな
+          // 語句は明確に除外する
           const activeLabel = searchRoot.querySelector('[class*="selected"] [class*="title"], [class*="active"] [class*="title"], [class*="template"][class*="name"]');
-          if (activeLabel) tmplRaw = (activeLabel.textContent || '').trim();
+          const activeLabelText = activeLabel ? (activeLabel.textContent || '').trim() : '';
+          const PROFILE_SECTION_HEADINGS = ['職務要約', '職務経歴', 'スキル', 'プロフィール', '学歴', '資格', '自己PR', 'スカウト履歴'];
+          if (activeLabelText && !PROFILE_SECTION_HEADINGS.includes(activeLabelText)) {
+            tmplRaw = activeLabelText;
+          }
         }
 
         // 確定ボタン押下時点で既にポジション照合まで済んでいるなら、
