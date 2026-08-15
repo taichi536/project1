@@ -1384,6 +1384,22 @@ document.addEventListener('click', e => {
       }
     }
 
+    // doda X / AMBI: RDS・Bizreachと同じ理由（ボタンが詳細パネル内にあり、リストカード
+    // 側では見つからないケースがあると_selectedCardのフォールバックに落ち、候補者切り替え
+    // 直後だと別候補者の情報を誤って記録する事故につながる）で、詳細パネルを優先する
+    if (getPlatform() === 'dodax') {
+      const detailPanel = findDodaxDetailPanel();
+      if (detailPanel && detailPanel.contains(btn)) {
+        card = detailPanel;
+      }
+    }
+    if (getPlatform() === 'ambi') {
+      const detailPanel = findAMBIDetailPanel();
+      if (detailPanel && detailPanel.contains(btn)) {
+        card = detailPanel;
+      }
+    }
+
     // Bizreach: 「スカウトを作成」ボタンは常に右側の詳細パネル内にあり、左のリストカード
     // には含まれない（cards.find(c => c.contains(btn))が常に失敗する）。以前はこの場合
     // 直前にリストでクリックした_selectedCardにフォールバックしていたが、Bizreachでは
