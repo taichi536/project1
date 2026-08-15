@@ -298,8 +298,10 @@ function doPost(e) {
         // 日付(例:「2026年2月3日(火)」)を代わりに使う。時刻までは分からないが、
         // 記録を完全に失うより日付だけでも拾えたほうがよい
         const sheetDateMatch = sheet.getName().match(/^(\d{4})年(\d{1,2})月(\d{1,2})日/);
+        // 深夜0時をUTCに変換すると前日にずれてしまう(JSTは+9時間のため、日本時間0時=UTC前日15時)。
+        // 集計側がUTCで日付を判定しているため、正午を使ってUTC変換してもズレないようにする
         const sheetFallbackDateMs = sheetDateMatch
-          ? new Date(Number(sheetDateMatch[1]), Number(sheetDateMatch[2]) - 1, Number(sheetDateMatch[3])).getTime()
+          ? new Date(Number(sheetDateMatch[1]), Number(sheetDateMatch[2]) - 1, Number(sheetDateMatch[3]), 12, 0, 0).getTime()
           : 0;
 
         Object.entries(MEMBER_MAP).forEach(([recruiter, startCol]) => {
