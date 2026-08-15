@@ -1399,6 +1399,12 @@ document.addEventListener('click', e => {
         card = detailPanel;
       }
     }
+    if (getPlatform() === 'mynavi') {
+      const detailPanel = findMynaviDetailPanel();
+      if (detailPanel && detailPanel.contains(btn)) {
+        card = detailPanel;
+      }
+    }
 
     // Bizreach: 「スカウトを作成」ボタンは常に右側の詳細パネル内にあり、左のリストカード
     // には含まれない（cards.find(c => c.contains(btn))が常に失敗する）。以前はこの場合
