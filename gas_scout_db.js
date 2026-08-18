@@ -311,6 +311,20 @@ function doPost(e) {
             if (!company) return;
             const ts = row[off + 6];
             let dateMs = ts instanceof Date ? ts.getTime() : (ts ? new Date(ts).getTime() : 0);
+            // 送信日時は、手入力の場合「入力した瞬間の時刻」が記録される（onEditがnew Date()を
+            // 入れるため）。前日以前のシートに後からまとめて入力すると、送信日ではなく入力日が
+            // 入ってしまい、日別集計で別の日にカウントされる（実機では5/22のシートに5/23の
+            // 日時が入り、シートが存在しない5/23に1件計上されていた）。
+            // どのシートに書かれているかは動かない事実なので、日付はシート名を正とし、
+            // 行の時刻はその日のうちに記録された場合だけ「時刻」として採用する
+            if (dateMs && sheetFallbackDateMs) {
+              const tsDate = new Date(dateMs);
+              const sheetDate = new Date(sheetFallbackDateMs);
+              const sameDay = tsDate.getFullYear() === sheetDate.getFullYear()
+                && tsDate.getMonth() === sheetDate.getMonth()
+                && tsDate.getDate() === sheetDate.getDate();
+              if (!sameDay) dateMs = sheetFallbackDateMs;
+            }
             if (!dateMs) dateMs = sheetFallbackDateMs;
             if (!dateMs) return;
             records.push({
