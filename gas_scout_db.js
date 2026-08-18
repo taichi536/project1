@@ -315,15 +315,26 @@ function doPost(e) {
             // 入れるため）。前日以前のシートに後からまとめて入力すると、送信日ではなく入力日が
             // 入ってしまい、日別集計で別の日にカウントされる（実機では5/22のシートに5/23の
             // 日時が入り、シートが存在しない5/23に1件計上されていた）。
-            // どのシートに書かれているかは動かない事実なので、日付はシート名を正とし、
-            // 行の時刻はその日のうちに記録された場合だけ「時刻」として採用する
+            // どのシートに書かれているかは動かない事実なので、日付はシート名を正とする。
+            //
+            // ただし日付が食い違う理由には2種類あり、扱いを変える必要がある:
+            //   1. 深夜0時をまたいで作業を続けた（例: 7/13のシートに7/14 01:30の送信）
+            //      → 時刻は本物。時間帯分析で見たいデータなので、時刻はそのまま活かす
+            //   2. 翌朝以降にまとめて手入力した（例: 5/22のシートに5/23 09:32）
+            //      → 時刻は入力時刻であって送信時刻ではないので、時刻不明として扱う
+            // 「その日の作業の続き」とみなす範囲を、シート日付の0時から翌朝6時までとする
             if (dateMs && sheetFallbackDateMs) {
-              const tsDate = new Date(dateMs);
               const sheetDate = new Date(sheetFallbackDateMs);
-              const sameDay = tsDate.getFullYear() === sheetDate.getFullYear()
-                && tsDate.getMonth() === sheetDate.getMonth()
-                && tsDate.getDate() === sheetDate.getDate();
-              if (!sameDay) dateMs = sheetFallbackDateMs;
+              const dayStartMs = new Date(sheetDate.getFullYear(), sheetDate.getMonth(),
+                                          sheetDate.getDate()).getTime();
+              const sessionEndMs = dayStartMs + 30 * 60 * 60 * 1000; // 翌朝6時まで
+              if (dateMs < dayStartMs || dateMs >= sessionEndMs) {
+                // その日の作業とは見なせない時刻＝後日入力。時刻不明として正午に丸める
+                dateMs = sheetFallbackDateMs;
+              } else if (dateMs >= dayStartMs + 24 * 60 * 60 * 1000) {
+                // 深夜0時をまたいだ分。日付はシートの日付に寄せつつ、時刻はそのまま残す
+                dateMs -= 24 * 60 * 60 * 1000;
+              }
             }
             if (!dateMs) dateMs = sheetFallbackDateMs;
             if (!dateMs) return;
