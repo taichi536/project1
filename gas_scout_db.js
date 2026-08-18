@@ -311,35 +311,38 @@ function doPost(e) {
             if (!company) return;
             const ts = row[off + 6];
             let dateMs = ts instanceof Date ? ts.getTime() : (ts ? new Date(ts).getTime() : 0);
-            // 送信日時は、手入力の場合「入力した瞬間の時刻」が記録される（onEditがnew Date()を
-            // 入れるため）。前日以前のシートに後からまとめて入力すると、送信日ではなく入力日が
-            // 入ってしまい、日別集計で別の日にカウントされる（実機では5/22のシートに5/23の
-            // 日時が入り、シートが存在しない5/23に1件計上されていた）。
-            // どのシートに書かれているかは動かない事実なので、日付はシート名を正とする。
+            // 「何日の実績か」と「何時に送ったか」は別の情報なので、混ぜずに両方返す。
+            //   workDate  … その記録が属する営業日。シート名の日付をそのまま使う。
+            //               どのシートに書かれているかは人が意識して選んだ事実なので信頼できる
+            //   date      … 実際に送信した瞬間。時間帯分析用。事実を曲げない
+            //   timeEstimated … dateの時刻部分が信頼できないことを示す印
             //
-            // ただし日付が食い違う理由には2種類あり、扱いを変える必要がある:
-            //   1. 深夜0時をまたいで作業を続けた（例: 7/13のシートに7/14 01:30の送信）
-            //      → 時刻は本物。時間帯分析で見たいデータなので、時刻はそのまま活かす
-            //   2. 翌朝以降にまとめて手入力した（例: 5/22のシートに5/23 09:32）
-            //      → 時刻は入力時刻であって送信時刻ではないので、時刻不明として扱う
-            // 「その日の作業の続き」とみなす範囲を、シート日付の0時から翌朝6時までとする
-            if (dateMs && sheetFallbackDateMs) {
+            // 送信日時は手入力の場合「入力した瞬間の時刻」が入る（onEditがnew Date()を
+            // 入れるため）。翌朝以降にまとめて入力すると送信時刻ではなく入力時刻になり、
+            // 時間帯分析が狂う（実機では5/22のシートに5/23 09:32の日時が入っていた）。
+            // 一方、深夜0時をまたいだだけの分（例: 7/13のシートに7/14 01:30）は時刻自体は
+            // 本物なので、そのまま残す。両者を「シート日付の0時から翌朝6時まで」で区別する
+            let timeEstimated = false;
+            if (!dateMs) {
+              dateMs = sheetFallbackDateMs;
+              timeEstimated = true; // 送信日時が空欄。時刻は分からない
+            } else if (sheetFallbackDateMs) {
               const sheetDate = new Date(sheetFallbackDateMs);
               const dayStartMs = new Date(sheetDate.getFullYear(), sheetDate.getMonth(),
                                           sheetDate.getDate()).getTime();
               const sessionEndMs = dayStartMs + 30 * 60 * 60 * 1000; // 翌朝6時まで
               if (dateMs < dayStartMs || dateMs >= sessionEndMs) {
-                // その日の作業とは見なせない時刻＝後日入力。時刻不明として正午に丸める
                 dateMs = sheetFallbackDateMs;
-              } else if (dateMs >= dayStartMs + 24 * 60 * 60 * 1000) {
-                // 深夜0時をまたいだ分。日付はシートの日付に寄せつつ、時刻はそのまま残す
-                dateMs -= 24 * 60 * 60 * 1000;
+                timeEstimated = true; // 後日入力。記録されている時刻は入力時刻で送信時刻ではない
               }
             }
-            if (!dateMs) dateMs = sheetFallbackDateMs;
             if (!dateMs) return;
             records.push({
               date: dateMs,
+              workDate: sheetDateMatch
+                ? `${sheetDateMatch[1]}-${('0' + sheetDateMatch[2]).slice(-2)}-${('0' + sheetDateMatch[3]).slice(-2)}`
+                : '',
+              timeEstimated,
               recruiter,
               age: String(row[off] || ''),
               company: String(company || ''),
