@@ -80,7 +80,21 @@ function onEdit(e) {
     if (val === '' || val === null || val === undefined) return; // 年齢を消しても送信日時はそのまま
     const tsCell = sheet.getRange(row, col + 6); // 送信日時は年齢から6列後
     if (tsCell.getValue() === '' || tsCell.getValue() === null || tsCell.getValue() === undefined) {
-      tsCell.setValue(new Date()).setNumberFormat('yyyy/MM/dd HH:mm');
+      // 以前は常に new Date()（＝入力した瞬間の時刻）を入れていたが、前日以前の
+      // シートに後からまとめて手入力すると、送信日ではなく入力日が記録されてしまい、
+      // 日別集計で別の日にカウントされる事故が実機で確認された（5/22のシートに
+      // 5/23の日時が入り、シートが存在しない5/23に1件計上されていた）。
+      // 当日のシートなら入力時刻がそのまま送信時刻としてほぼ正しいのでそれを使い、
+      // 過去のシートに入力された場合は、そのシート自身の日付（正午）を使う
+      const m = name.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+      let stamp = new Date();
+      if (m) {
+        const y = Number(m[1]), mo = Number(m[2]) - 1, d = Number(m[3]);
+        const now = new Date();
+        const isToday = y === now.getFullYear() && mo === now.getMonth() && d === now.getDate();
+        if (!isToday) stamp = new Date(y, mo, d, 12, 0, 0);
+      }
+      tsCell.setValue(stamp).setNumberFormat('yyyy/MM/dd HH:mm');
     }
     return;
   }
