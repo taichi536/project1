@@ -279,30 +279,26 @@ function doPost(e) {
     // 含まれており、こちらの方が全媒体を通じた完全な履歴になっている。
     // ダッシュボードとの同期チェック（記録漏れ確認）用。
     if (data.action === 'getAllDailySheetHistory') {
-      const datePattern = /^\s*\d{4}年\d{1,2}月\d{1,2}日\s*[（(][日月火水木金土][）)]\s*$/;
+      const datePattern = /^\s*(\d{4})年(\d{1,2})月(\d{1,2})日\s*[（(][日月火水木金土][）)]\s*$/;
       const records = [];
       // シート1枚につきメンバー数分(4回)読み込んでいると、シート数が多いと
       // Apps Script側の実行時間を圧迫して6分のタイムアウトに掛かりかねないため、
       // シート1枚につき全メンバー分の列を1回のgetValuesでまとめて読む
       const maxCol = Math.max(...Object.values(MEMBER_MAP)) + 6;
       ss.getSheets().forEach(sheet => {
-        if (!datePattern.test(sheet.getName())) return;
+        const m = sheet.getName().match(datePattern);
+        if (!m) return;
         const lastRow = sheet.getLastRow();
         if (lastRow < 3) return;
         const numRows = lastRow - 2;
         const allValues = sheet.getRange(3, 1, numRows, maxCol).getValues();
 
-        // 「送信日時」列が未記入の古い行がある(2月〜4月26日頃のデータで判明。会社名等は
-        // 入っているのに送信日時だけ空欄で、以前はdateMs無しとして丸ごと記録から
-        // 落としていた)。行側にタイムスタンプが無い場合は、シート名自体に入っている
-        // 日付(例:「2026年2月3日(火)」)を代わりに使う。時刻までは分からないが、
-        // 記録を完全に失うより日付だけでも拾えたほうがよい
-        const sheetDateMatch = sheet.getName().match(/^(\d{4})年(\d{1,2})月(\d{1,2})日/);
-        // 深夜0時をUTCに変換すると前日にずれてしまう(JSTは+9時間のため、日本時間0時=UTC前日15時)。
-        // 集計側がUTCで日付を判定しているため、正午を使ってUTC変換してもズレないようにする
-        const sheetFallbackDateMs = sheetDateMatch
-          ? new Date(Number(sheetDateMatch[1]), Number(sheetDateMatch[2]) - 1, Number(sheetDateMatch[3]), 12, 0, 0).getTime()
-          : 0;
+        // 「送信日時」列が未記入の古い行がある(2月〜4月26日頃のデータで判明)。その場合は
+        // シート名の日付を代わりに使う。深夜0時をUTCに変換すると前日にずれてしまうため
+        // (JSTは+9時間のため日本時間0時=UTC前日15時)、正午を使ってズレないようにする
+        const sheetFallbackDateMs =
+          new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0).getTime();
+        const workDate = `${m[1]}-${('0' + m[2]).slice(-2)}-${('0' + m[3]).slice(-2)}`;
 
         Object.entries(MEMBER_MAP).forEach(([recruiter, startCol]) => {
           const off = startCol - 1; // 0-indexed
@@ -311,37 +307,34 @@ function doPost(e) {
             if (!company) return;
             const ts = row[off + 6];
             let dateMs = ts instanceof Date ? ts.getTime() : (ts ? new Date(ts).getTime() : 0);
+
             // 「何日の実績か」と「何時に送ったか」は別の情報なので、混ぜずに両方返す。
-            //   workDate  … その記録が属する営業日。シート名の日付をそのまま使う。
-            //               どのシートに書かれているかは人が意識して選んだ事実なので信頼できる
-            //   date      … 実際に送信した瞬間。時間帯分析用。事実を曲げない
+            //   workDate      … その記録が属する営業日。シート名の日付をそのまま使う。
+            //                   どのシートに書かれているかは人が意識して選んだ事実なので信頼できる
+            //   date          … 実際に送信した瞬間。時間帯分析用。事実を曲げない
             //   timeEstimated … dateの時刻部分が信頼できないことを示す印
             //
             // 送信日時は手入力の場合「入力した瞬間の時刻」が入る（onEditがnew Date()を
             // 入れるため）。翌朝以降にまとめて入力すると送信時刻ではなく入力時刻になり、
             // 時間帯分析が狂う（実機では5/22のシートに5/23 09:32の日時が入っていた）。
             // 一方、深夜0時をまたいだだけの分（例: 7/13のシートに7/14 01:30）は時刻自体は
-            // 本物なので、そのまま残す。両者を「シート日付の0時から翌朝6時まで」で区別する
+            // 本物なのでそのまま残す。両者を「シート日付の0時から翌朝6時まで」で区別する
             let timeEstimated = false;
             if (!dateMs) {
               dateMs = sheetFallbackDateMs;
               timeEstimated = true; // 送信日時が空欄。時刻は分からない
-            } else if (sheetFallbackDateMs) {
-              const sheetDate = new Date(sheetFallbackDateMs);
-              const dayStartMs = new Date(sheetDate.getFullYear(), sheetDate.getMonth(),
-                                          sheetDate.getDate()).getTime();
+            } else {
+              const dayStartMs = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime();
               const sessionEndMs = dayStartMs + 30 * 60 * 60 * 1000; // 翌朝6時まで
               if (dateMs < dayStartMs || dateMs >= sessionEndMs) {
                 dateMs = sheetFallbackDateMs;
-                timeEstimated = true; // 後日入力。記録されている時刻は入力時刻で送信時刻ではない
+                timeEstimated = true; // 後日入力。記録されているのは入力時刻で送信時刻ではない
               }
             }
-            if (!dateMs) return;
+
             records.push({
               date: dateMs,
-              workDate: sheetDateMatch
-                ? `${sheetDateMatch[1]}-${('0' + sheetDateMatch[2]).slice(-2)}-${('0' + sheetDateMatch[3]).slice(-2)}`
-                : '',
+              workDate,
               timeEstimated,
               recruiter,
               age: String(row[off] || ''),
