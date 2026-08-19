@@ -315,17 +315,23 @@ function doPost(e) {
             //   timeEstimated … dateの時刻部分が信頼できないことを示す印
             //
             // 送信日時は手入力の場合「入力した瞬間の時刻」が入る（onEditがnew Date()を
-            // 入れるため）。翌朝以降にまとめて入力すると送信時刻ではなく入力時刻になり、
+            // 入れるため）。後からまとめて入力すると送信時刻ではなく入力時刻になり、
             // 時間帯分析が狂う（実機では5/22のシートに5/23 09:32の日時が入っていた）。
             // 一方、深夜0時をまたいだだけの分（例: 7/13のシートに7/14 01:30）は時刻自体は
-            // 本物なのでそのまま残す。両者を「シート日付の0時から翌朝6時まで」で区別する
+            // 本物なのでそのまま残したい。
+            //
+            // 境界を翌朝6時にして実データを調べたところ、0時178件→1時145件→2時120件と
+            // 減っていくのに3時台が163件へ跳ね上がり、しかも日付が連休(4/29〜5/5)に
+            // 集中していた。深夜の送信ではなく、溜まった入力をまとめて処理した時刻が
+            // 混ざっている。運用上0時台・1時台の送信は実際にあるとのことなので、
+            // 境界は翌2時とし、それ以降は入力作業とみなして時刻不明として扱う
             let timeEstimated = false;
             if (!dateMs) {
               dateMs = sheetFallbackDateMs;
               timeEstimated = true; // 送信日時が空欄。時刻は分からない
             } else {
               const dayStartMs = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime();
-              const sessionEndMs = dayStartMs + 30 * 60 * 60 * 1000; // 翌朝6時まで
+              const sessionEndMs = dayStartMs + 26 * 60 * 60 * 1000; // 翌2時まで
               if (dateMs < dayStartMs || dateMs >= sessionEndMs) {
                 dateMs = sheetFallbackDateMs;
                 timeEstimated = true; // 後日入力。記録されているのは入力時刻で送信時刻ではない
