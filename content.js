@@ -1135,7 +1135,14 @@ function getCandidateId(cardEl) {
 // カードから基本情報を抽出（履歴保存用）
 function extractBasicInfo(cardEl) {
   const text = (cardEl.innerText || '');
-  const ageMatch = text.match(/(\d{2,3})歳/);
+  let ageMatch = text.match(/(\d{2,3})歳/);
+  // AMBI: 送信スライドパネルのプロフィール本文(.leftCell)には年齢が含まれず、
+  // 年齢はその外側のヘッダー部分にしかない。カード側で見つからなければ
+  // スライドパネル全体からも探す（送信時点の詳細パネル復元フォールバック用）
+  if (!ageMatch && getPlatform() === 'ambi') {
+    const slide = document.querySelector('.slide_desc_scout');
+    if (slide) ageMatch = (slide.innerText || '').match(/(\d{2,3})歳/);
+  }
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
   // 大学名を抽出（学歴セクション優先）
