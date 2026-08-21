@@ -360,11 +360,15 @@ function withQueueLock(fn) {
   return result;
 }
 
+function genQueueId() {
+  return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 async function enqueueGasScout(payload) {
   return withQueueLock(async () => {
     const { gasScoutQueue } = await chrome.storage.local.get(['gasScoutQueue']);
     const queue = gasScoutQueue || [];
-    queue.push(payload);
+    queue.push({ ...payload, _queueId: genQueueId() });
     await chrome.storage.local.set({ gasScoutQueue: queue });
   });
 }
@@ -427,12 +431,13 @@ async function flushGasScoutQueue() {
     const urls = [gasSettings?.url, gasSettings?.dbUrl].filter((u, i, arr) => u && arr.indexOf(u) === i);
     if (urls.length === 0) return; // GAS未設定。次回のアラームで再試行
 
-    // 送信対象をこの場でキューから確保する。ネットワーク待ちの間に新しく
-    // 積まれた分は、空になった新しいキューに独立して溜まっていく
-    await chrome.storage.local.set({ gasScoutQueue: [] });
-
-    // フェッチがハングし続けて次のリクエストが積み重なるのを防ぐため、
-    // 25秒でタイムアウトさせる（GASのLockService待ち最大30秒より少し短く設定）
+    // 送信対象をこの場でメモリ上に確保するだけで、保存領域からはまだ消さない。
+    // 以前は先にキューを空にしてから送信し、完了後に失敗分だけ書き戻していたが、
+    // 空にした直後〜書き戻す前にService Workerが強制終了されると、その回の
+    // 送信分がまるごと失われる（Manifest V3のService Workerはアイドル判定等で
+    // 処理の途中でも終了させられることがある）。実機でSupabase側の記録が原因不明で
+    // 大量欠落する事故があり、同じ構造の問題がこちらにも無いよう対策しておく。
+    // 取り除くのは結果が確定してから、かつ _queueId で個別に指定して行う
     const body = JSON.stringify({ secret, action: 'recordScoutBatch', items: queue });
     const results = await Promise.allSettled(urls.map(async url => {
       const controller = new AbortController();
@@ -446,11 +451,14 @@ async function flushGasScoutQueue() {
     }));
     const anySuccess = results.some(r => r.status === 'fulfilled' && r.value?.ok !== false);
 
+    let removeIds = [];
+    let requeueItems = [];
     if (anySuccess) {
       await recordGasSuccess();
       for (const item of queue) {
         if (item.candidateId) await patchScoutHistoryEntry(item.candidateId, { gasSent: true });
       }
+      removeIds = queue.map(it => it._queueId);
       console.log(`[Snow-we] スカウト記録バッチ送信成功: ${queue.length}件`);
     } else {
       await recordGasFailure();
@@ -463,17 +471,27 @@ async function flushGasScoutQueue() {
           console.warn('[Snow-we] スカウト記録送信、GASがエラーを返却 url=' + urls[i] + ':', r.value?.error || '(詳細不明)');
         }
       });
-      console.warn('[Snow-we] スカウト記録バッチ送信、全URLで失敗。キューに戻します');
+      console.warn('[Snow-we] スカウト記録バッチ送信、全URLで失敗。キューに残します');
       const retried = queue.map(it => ({ ...it, _attempts: (it._attempts || 0) + 1 }));
       const giveUp = retried.filter(it => it._attempts >= 8); // 8回(約8分〜)失敗し続けたら諦めて人の確認に回す
       const keep = retried.filter(it => it._attempts < 8);
       for (const it of giveUp) {
         if (it.candidateId) await patchScoutHistoryEntry(it.candidateId, { gasSent: false, retryCount: 8 });
       }
-      // このタイミングまでに新規追加された分と合流させて書き戻す（withQueueLock内なので安全）
-      const { gasScoutQueue: currentQueue } = await chrome.storage.local.get(['gasScoutQueue']);
-      await chrome.storage.local.set({ gasScoutQueue: [...keep, ...(currentQueue || [])] });
+      removeIds = giveUp.map(it => it._queueId);
+      requeueItems = keep; // _attempts更新後の内容で戻すため、対象を消してから追加し直す
     }
+
+    // このタイミングまでに新規追加された分と合流させる（withQueueLock内なので安全）。
+    // 今回処理した項目(成功・諦め)だけをidで取り除き、リトライする失敗分は更新後の
+    // 内容に差し替える
+    const removeSet = new Set(removeIds);
+    const requeueSet = new Set(requeueItems.map(it => it._queueId));
+    const { gasScoutQueue: currentQueue } = await chrome.storage.local.get(['gasScoutQueue']);
+    const merged = (currentQueue || [])
+      .filter(it => !removeSet.has(it._queueId) && !requeueSet.has(it._queueId))
+      .concat(requeueItems);
+    await chrome.storage.local.set({ gasScoutQueue: merged });
   });
 }
 
@@ -520,7 +538,7 @@ async function enqueueSupabaseScout(payload) {
   return withSupabaseQueueLock(async () => {
     const { supabaseScoutQueue } = await chrome.storage.local.get(['supabaseScoutQueue']);
     const queue = supabaseScoutQueue || [];
-    queue.push(payload);
+    queue.push({ ...payload, _queueId: genQueueId() });
     await chrome.storage.local.set({ supabaseScoutQueue: queue });
   });
 }
@@ -569,9 +587,13 @@ async function flushSupabaseScoutQueue() {
     const queue = supabaseScoutQueue || [];
     if (queue.length === 0) return;
 
-    // 送信対象をこの場でキューから確保する。ネットワーク待ちの間に新しく
-    // 積まれた分は、空になった新しいキューに独立して溜まっていく
-    await chrome.storage.local.set({ supabaseScoutQueue: [] });
+    // 送信対象をこの場でメモリ上に確保するだけで、保存領域からはまだ消さない。
+    // 以前は先にキューを空にしてから送信し、完了後に失敗分だけ書き戻していたが、
+    // 空にした直後〜書き戻す前にService Workerが強制終了されると、その回の
+    // 送信分がまるごと失われる（Manifest V3のService Workerはアイドル判定等で
+    // 処理の途中でも終了させられることがある）。実機でSupabase側の記録だけが
+    // 原因不明に大量欠落する現象が確認されており、これが原因だった可能性が高い。
+    // 取り除くのは結果が確定してから、かつ _queueId で個別に指定して行う
 
     // 1件ずつ独立したリクエストとして送る（束ねない）。ある1件が失敗しても
     // Promise.allSettledなので他の件の成否には一切影響しない
@@ -613,21 +635,31 @@ async function flushSupabaseScoutQueue() {
     // 全件失敗した場合のみ、Supabase側/ネットワーク側の不調とみなしてバックオフを効かせる
     if (failed.length > 0 && failed.length === queue.length) await recordSupabaseFailure();
 
+    let giveUp = [];
+    let keep = [];
     if (failed.length > 0) {
       failed.forEach(f => console.warn('[Snow-we] Supabase scouts保存失敗:', f.item.candidateId, f.reason?.message || f.reason));
       const retried = failed.map(f => ({ ...f.item, _attempts: (f.item._attempts || 0) + 1 }));
-      const giveUp = retried.filter(it => it._attempts >= 8); // 8回失敗し続けたら諦めて人の確認に回す
-      const keep = retried.filter(it => it._attempts < 8);
+      giveUp = retried.filter(it => it._attempts >= 8); // 8回失敗し続けたら諦めて人の確認に回す
+      keep = retried.filter(it => it._attempts < 8);
       for (const it of giveUp) {
         if (it.candidateId) await patchScoutHistoryEntry(it.candidateId, { supabaseSent: false, supabaseRetryCount: 8 });
         console.warn('[Snow-we] Supabase scouts保存を諦めました(8回失敗):', it.candidateId);
       }
-      // このタイミングまでに新規追加された分と合流させて書き戻す（withSupabaseQueueLock内なので安全）
-      const { supabaseScoutQueue: currentQueue } = await chrome.storage.local.get(['supabaseScoutQueue']);
-      await chrome.storage.local.set({ supabaseScoutQueue: [...keep, ...(currentQueue || [])] });
     } else if (succeeded.length > 0) {
       console.log(`[Snow-we] Supabase scouts保存成功: ${succeeded.length}件`);
     }
+
+    // このタイミングまでに新規追加された分と合流させる（withSupabaseQueueLock内なので安全）。
+    // 今回処理した項目(成功・諦め)だけをidで取り除き、リトライする失敗分は
+    // _attempts更新後の内容に差し替える
+    const removeSet = new Set([...succeeded, ...giveUp].map(it => it._queueId));
+    const keepSet = new Set(keep.map(it => it._queueId));
+    const { supabaseScoutQueue: currentQueue } = await chrome.storage.local.get(['supabaseScoutQueue']);
+    const merged = (currentQueue || [])
+      .filter(it => !removeSet.has(it._queueId) && !keepSet.has(it._queueId))
+      .concat(keep);
+    await chrome.storage.local.set({ supabaseScoutQueue: merged });
   });
 }
 
