@@ -1209,11 +1209,22 @@ function extractBasicInfo(cardEl) {
   // 会社名を抽出
   let company = '';
   if (getPlatform() === 'ambi') {
+    // 詳細パネル(.leftCell、「在籍企業」ラベルの次の行が会社名)は、リストカード
+    // (「業界 / 部署」行の直前が会社名)と全く違う構造をしている。送信時点の詳細
+    // パネルから候補者情報を復元するフォールバック経由だとリストカードではなく
+    // こちらの構造で渡ってくるため、性別や職歴等の無関係な行を会社名として誤って
+    // 拾ってしまっていた（実データで確認）。このラベルがあれば最優先で使う
+    const companyLabelIdx = lines.findIndex(l => l === '在籍企業');
+    if (companyLabelIdx >= 0 && companyLabelIdx + 1 < lines.length) {
+      company = lines[companyLabelIdx + 1];
+    }
     // AMBIカード: 「業界 / 部署」行の直前が会社名
-    const industryIdx = lines.slice().reverse().findIndex(l => l.includes(' / '));
-    if (industryIdx >= 0) {
-      const realIdx = lines.length - 1 - industryIdx;
-      if (realIdx > 0) company = lines[realIdx - 1];
+    if (!company) {
+      const industryIdx = lines.slice().reverse().findIndex(l => l.includes(' / '));
+      if (industryIdx >= 0) {
+        const realIdx = lines.length - 1 - industryIdx;
+        if (realIdx > 0) company = lines[realIdx - 1];
+      }
     }
     // フォールバック: 株式会社等を含む行
     if (!company) {
