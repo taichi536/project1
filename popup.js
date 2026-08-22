@@ -518,7 +518,11 @@ function isLikelyProfileText(text) {
     return { ok: false, reason: `${trimmed.length}文字` };
   }
   const hasKeyword = PROFILE_LIKELY_KEYWORDS.some(kw => trimmed.includes(kw));
-  if (!hasKeyword) {
+  // 「職務経歴」等の見出し語を使わず、経歴要約の文章だけで構成された実在の
+  // プロフィール（実データで確認）を誤って弾いてしまっていた。この長さの
+  // 自然な文章が無関係なメニュー等のゴミテキストである可能性は低いため、
+  // 十分に長ければ（800文字以上）キーワードが無くても許可する
+  if (!hasKeyword && trimmed.length < 800) {
     return { ok: false, reason: '職歴らしい内容が見当たりません' };
   }
   return { ok: true };
