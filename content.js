@@ -13,7 +13,27 @@ document.documentElement.setAttribute('data-snow-we-id', _INSTANCE_ID);
 // という不具合があったため、常に最新値をメモリ上に保持し同期的に読めるようにする
 let _cachedCurrentPosition = '';
 chrome.storage.local.get(['currentPosition']).then(r => { _cachedCurrentPosition = r.currentPosition || ''; }).catch(() => {});
+
+// 担当者名も同じ理由でキャッシュする。chrome.storage.local.get()は連続送信のように
+// 短時間に大量の読み込みが走る状況で、まれに空の結果を返すことが実データで確認された。
+// GAS送信側は「担当者名が空なら送らない」ガードがあるため症状が出なかったが、
+// Supabase側はガードが無く、担当者名が空欄のまま保存された行が実際に133件発生していた
+// （空欄だと「担当者×日」での照合が全て外れ、実在するのに未登録と誤判定される）。
+// 一度でも正しく読めた値を保持しておき、読み込みが空だった時の最後の拠り所にする
+let _cachedRecruiterName = '';
+chrome.storage.local.get(['gasSettings', 'recruiterName']).then(r => {
+  _cachedRecruiterName = (r.gasSettings && r.gasSettings.recruiter) || r.recruiterName || '';
+}).catch(() => {});
+
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && (changes.gasSettings || changes.recruiterName)) {
+    const next = (changes.gasSettings && changes.gasSettings.newValue && changes.gasSettings.newValue.recruiter)
+      || (changes.recruiterName && changes.recruiterName.newValue)
+      || '';
+    // 設定画面で担当者名を意図的に消した場合を除き、空で上書きしてキャッシュを
+    // 失わせない（空になる原因の大半は読み込み側の一時的な不調のため）
+    if (next) _cachedRecruiterName = next;
+  }
   if (area === 'local' && changes.currentPosition) {
     _cachedCurrentPosition = changes.currentPosition.newValue || '';
     // 「スカウトを作成」クリック後・送信前にポジションを選び直すケースがあるため
@@ -980,6 +1000,12 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
       }
     } catch (_) {}
   }
+  // 再読み込みでも空だった場合は、起動時等に読めていたキャッシュ値を使う。
+  // 空欄のまま記録するとSupabase側で担当者不明の行になり、集計・照合から漏れる
+  if (!sharedRecruiter && _cachedRecruiterName) {
+    sharedRecruiter = _cachedRecruiterName;
+    console.log('[Snow-we] 担当者名を再読み込みでも取得できなかったためキャッシュ値で補完:', sharedRecruiter);
+  }
 
   // ② GASへの記録はバックグラウンドのバッチキューに積むだけ（サブ・失敗してもローカル記録には影響しない）。
   // 以前はここで即座にPOSTしていたが、RDSの一括送信等で候補者が短時間に連続処理されると
@@ -1014,6 +1040,12 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
   // 仕組みをbackground.js側で流用している（詳細はbackground.jsのコメント参照）
   ;(async () => {
     const ageNum = parseInt((info.age || '').replace(/[歳才]/g, '')) || null;
+    // ここまでの復元(再読み込み・キャッシュ)を全てすり抜けて空だった場合は、記録自体は
+    // 残す（消えるより良い）が、後から原因を追えるよう必ずログに残す。担当者名が空だと
+    // 「担当者×日」の集計・GASとの照合から漏れ、実在するのに未登録として扱われる
+    if (!sharedRecruiter) {
+      console.warn('[Snow-we] 担当者名を特定できないままSupabaseに記録します（要確認）:', candidateId, info.company || '');
+    }
     try {
       await chrome.runtime.sendMessage({
         type: 'queueSupabaseScout',
@@ -1768,6 +1800,9 @@ document.addEventListener('click', e => {
       platform === 'ambi' ? findAMBIDetailPanel() :
       platform === 'rds' ? findRDSDetailPanel() :
       platform === 'dodax' ? findDodaxDetailPanel() :
+      // Bizreachもこのフォールバックの対象外だったため、開始クリックを取り逃すと
+      // 記録がまるごと消えていた（実データで未登録率85%を確認）
+      platform === 'bizreach' ? findBizreachDetailPanel() :
       null;
     if (detailPanel) {
       const id = getCandidateId(detailPanel);
