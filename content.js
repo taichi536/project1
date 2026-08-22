@@ -1062,7 +1062,14 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
             position_name: positionName || sharedCurrentPosition,
             recruiter_name: sharedRecruiter,
             sent_at: new Date(now).toISOString(),
-            scout_message: templateRaw || ''
+            scout_message: templateRaw || '',
+            // どのバージョンの拡張機能が記録したかを残す。メンバーごとに更新の
+            // タイミングが揃わず、記録漏れの原因が「古いバージョンのままだから」
+            // なのか「まだ直っていないバグがあるから」なのか切り分けられない、
+            // という問題が実際に起きたため（8/16〜8/22の大量欠落の調査で判明）
+            ext_version: (() => {
+              try { return chrome.runtime.getManifest().version; } catch (_) { return ''; }
+            })(),
           },
         },
       });

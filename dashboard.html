@@ -325,6 +325,11 @@
     <div class="chart-legend" id="sync-health-chart-legend"></div>
     <div id="sync-health-chart"></div>
   </div>
+  <div class="chart-panel" style="margin-bottom:16px;">
+    <h2>拡張機能のバージョン(担当者別・直近の記録)</h2>
+    <div class="sub">各担当者が最後にスカウトを記録した時点のバージョン。全員が同じ最新版になっていれば更新は行き渡っています</div>
+    <div id="ext-version-table"></div>
+  </div>
   <div class="tiles" id="tiles"></div>
   <div class="breakdown" id="breakdown"></div>
 
@@ -482,6 +487,67 @@ function fmtDate(iso) {
   return `${d.getFullYear()}/${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// ── 担当者ごとの拡張機能バージョン ──
+// メンバーごとに更新のタイミングが揃わず、記録漏れの原因が「古いバージョンのまま
+// だから」なのか「まだ直っていないバグがあるから」なのかを切り分けられない、という
+// 問題が実際に起きたため（8/16〜8/22の大量欠落の調査）。誰が未更新かを一目で分かるようにする
+async function loadExtVersions() {
+  const el = $('ext-version-table');
+  if (!el) return;
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/scouts?select=recruiter_name,ext_version,sent_at`
+      + `&ext_version=not.is.null&ext_version=neq.&order=sent_at.desc&limit=2000`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+    );
+    // ext_version列がまだ無い場合はエラーになるため、その時は静かに案内だけ出す
+    if (!res.ok) {
+      el.innerHTML = '<div class="hbar-empty">バージョン列がまだありません（Supabaseで ext_version 列を追加してください）</div>';
+      return;
+    }
+    const rows = await res.json();
+    if (!rows.length) {
+      el.innerHTML = '<div class="hbar-empty">まだバージョン付きの記録がありません（新しいバージョンを配布すると表示されます）</div>';
+      return;
+    }
+    // 担当者ごとに最新の1件だけを残す（取得時点でsent_at降順なので最初に出たものが最新）
+    const latestByRecruiter = new Map();
+    for (const r of rows) {
+      const name = (r.recruiter_name || '').trim() || '(担当者不明)';
+      if (!latestByRecruiter.has(name)) latestByRecruiter.set(name, r);
+    }
+    const entries = [...latestByRecruiter.entries()];
+    // 最も新しいバージョンを基準にして、それ以外を「未更新」として目立たせる
+    const cmp = (a, b) => {
+      const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+      for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const d = (pa[i] || 0) - (pb[i] || 0);
+        if (d) return d;
+      }
+      return 0;
+    };
+    const newest = entries.map(([, r]) => r.ext_version).sort(cmp).slice(-1)[0];
+    entries.sort((a, b) => cmp(b[1].ext_version, a[1].ext_version));
+    el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr>
+        <th style="text-align:left;padding:6px 8px;">担当者</th>
+        <th style="text-align:left;padding:6px 8px;">バージョン</th>
+        <th style="text-align:left;padding:6px 8px;">最終記録</th>
+      </tr></thead><tbody>
+      ${entries.map(([name, r]) => {
+        const old = cmp(r.ext_version, newest) < 0;
+        return `<tr>
+          <td style="padding:6px 8px;">${escapeHtml(name)}</td>
+          <td style="padding:6px 8px;${old ? 'color:#b45309;font-weight:600;' : ''}">${escapeHtml(r.ext_version)}${old ? ' ⚠️ 未更新' : ''}</td>
+          <td style="padding:6px 8px;color:#64748b;">${fmtDate(r.sent_at)}</td>
+        </tr>`;
+      }).join('')}
+      </tbody></table>`;
+  } catch (e) {
+    el.innerHTML = '<div class="hbar-empty">バージョン情報を取得できませんでした</div>';
+  }
+}
+
 // ── 記録漏れチェック状態バナー（sync_gas_to_supabase.pyの定期実行結果を表示） ──
 let syncHealthRows = [];
 async function loadSyncHealth() {
@@ -612,6 +678,7 @@ async function loadData() {
   $('state').textContent = '読み込み中…';
   $('state').className = '';
   loadSyncHealth();
+  loadExtVersions();
   try {
     allRows = await fetchAllScouts();
     $('state').textContent = allRows.length === 0 ? 'まだ記録がありません' : '';
