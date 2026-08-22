@@ -1758,16 +1758,22 @@ document.addEventListener('click', e => {
   console.log('[Snow-we] 送信クリック / pendingScout:', raw ? 'あり' : 'なし');
   sessionStorage.removeItem('pendingScout');
 
-  // AMBI: 開始の「スカウト」クリックが何らかの理由で検知できず pendingScout が
-  // 作られていなかった場合の保険。送信ボタンが押せている＝候補者のスライドパネルは
-  // 開いているはずなので、その場で候補者情報を組み立て直す（記録が完全に消えるより優先する）
-  if (!raw && getPlatform() === 'ambi') {
-    const detailPanel = findAMBIDetailPanel();
+  // 開始の「スカウト」クリックが何らかの理由で検知できず（例: RDSの一括送信のように
+  // 個別クリックを経由せず「送信」だけが実行されるフロー）pendingScoutが作られて
+  // いなかった場合の保険。送信ボタンが押せている＝候補者の詳細パネルは開いている
+  // はずなので、その場で候補者情報を組み立て直す（記録が完全に消えるより優先する）
+  if (!raw) {
+    const platform = getPlatform();
+    const detailPanel =
+      platform === 'ambi' ? findAMBIDetailPanel() :
+      platform === 'rds' ? findRDSDetailPanel() :
+      platform === 'dodax' ? findDodaxDetailPanel() :
+      null;
     if (detailPanel) {
       const id = getCandidateId(detailPanel);
       if (id) {
         raw = JSON.stringify({ id, info: extractBasicInfo(detailPanel), ts: Date.now(), fallbackPosition: _cachedCurrentPosition });
-        console.log('[Snow-we] AMBI: pendingScoutが無かったため送信時点の詳細パネルから復元:', id);
+        console.log(`[Snow-we] ${platform}: pendingScoutが無かったため送信時点の詳細パネルから復元:`, id);
       }
     }
   }
