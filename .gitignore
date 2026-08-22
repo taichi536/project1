@@ -6,3 +6,6 @@ node_modules/
 package.json
 package-lock.json
 .claude/
+
+# 拡張機能の署名鍵（絶対にコミットしない。紛失すると拡張機能IDが変わる）
+*.pem
