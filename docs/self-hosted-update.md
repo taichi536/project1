@@ -66,11 +66,11 @@ sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 ### 4. 各メンバーのMacにポリシーを設定する
 
 **各メンバーのMacで1回だけ**実行する（管理者パスワードが必要）。
-`<拡張機能ID>` は手順2で調べたものに置き換える。
+拡張機能IDは `dolbaepfcojfnanjeemkcogbbgopoici`（`project1.pem` から算出。鍵が同じ限り不変）。
 
 ```bash
 sudo defaults write /Library/Preferences/com.google.Chrome ExtensionInstallForcelist -array \
-  "<拡張機能ID>;https://ext.143-198-195-132.nip.io/updates.xml"
+  "dolbaepfcojfnanjeemkcogbbgopoici;https://ext.143-198-195-132.nip.io/updates.xml"
 
 sudo defaults write /Library/Preferences/com.google.Chrome ExtensionInstallSources -array \
   "https://ext.143-198-195-132.nip.io/*"
@@ -107,7 +107,7 @@ sudo defaults write /Library/Preferences/com.google.Chrome ExtensionInstallSourc
 ### updates.xml を作る
 
 ```bash
-python3 tools/make_updates_xml.py <拡張機能ID> https://ext.143-198-195-132.nip.io
+python3 tools/make_updates_xml.py dolbaepfcojfnanjeemkcogbbgopoici https://ext.143-198-195-132.nip.io
 ```
 
 `manifest.json` のバージョンを自動で読み取って `updates.xml` ができる。

@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>
+  <app appid='dolbaepfcojfnanjeemkcogbbgopoici'>
+    <updatecheck codebase='https://ext.143-198-195-132.nip.io/snowwe.crx' version='1.18.319' />
+  </app>
+</gupdate>
