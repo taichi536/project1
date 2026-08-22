@@ -1258,6 +1258,13 @@ function extractBasicInfo(cardEl) {
         if (realIdx > 0) company = lines[realIdx - 1];
       }
     }
+    // 「バックエンドエンジニア / 4年以上」「一般事務・営業事務 / 3年以上」のように
+    // 「A / B」形式の行が複数続く場合、その直前もまた「A / B」形式の行であり、
+    // 会社名ではない値が採用されていた（実データで確認）。会社名にこの形式が
+    // 使われることはないため、採用せず後続のフォールバックに任せる
+    if (company && / \/ /.test(company)) {
+      company = '';
+    }
     // フォールバック: 株式会社等を含む行
     if (!company) {
       company = lines.find(l => /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,/.test(l)) || '';
