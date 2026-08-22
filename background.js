@@ -298,48 +298,7 @@ async function recordApiCostInBackground(model, usage) {
   return stats;
 }
 
-// ── 自動更新チェック ────────────────────────────────────────────────────
-const GITHUB_MANIFEST_URL =
-  'https://raw.githubusercontent.com/taichi536/project1/main/manifest.json';
-
-async function checkForUpdate() {
-  try {
-    const res = await fetch(GITHUB_MANIFEST_URL + '?_=' + Date.now(), { cache: 'no-store' });
-    if (!res.ok) return;
-    const remote = await res.json();
-    const current = chrome.runtime.getManifest().version;
-    if (remote.version && remote.version !== current) {
-      // バッチ実行中は強制リロードを延期（コンテンツスクリプトが破棄されてバッチが止まるのを防ぐ）
-      // ただし30分以上前のバッチは異常終了とみなして延期しない（更新が永久にブロックされるのを防ぐ）
-      // 夜間自動実行は最大3スロット並列で動くため、進捗はスロットごとに別キーに保存されている
-      // （content.jsのautoAddProgressKey()参照）。どれか1つでも実行中ならリロードを延期する。
-      const progressKeys = ['autoAddProgress', 'autoAddProgress_slot0', 'autoAddProgress_slot1', 'autoAddProgress_slot2'];
-      const stored = await chrome.storage.local.get(progressKeys);
-      const isRecentBatch = progressKeys.some(k => {
-        const prog = stored[k];
-        return prog?.running && prog?.ts && (Date.now() - prog.ts) < 30 * 60 * 1000;
-      });
-      if (isRecentBatch) {
-        console.log(`[Snow-we] バッチ実行中のため更新を延期: ${current} → ${remote.version}`);
-        return;
-      }
-      console.log(`[Snow-we] 新バージョン検出: ${current} → ${remote.version} 自動リロード中...`);
-      chrome.runtime.reload();
-    }
-  } catch (_) {
-    // ネットワーク不可時は無視
-  }
-}
-
-// アラームが未登録の時だけ作成（サービスワーカー再起動のたびにリセットされるのを防ぐ）
-// → ポップアップを開くたびに6秒後にreloadが走りポップアップが閉じるバグを修正
-chrome.alarms.get('snowWeUpdateCheck', (existing) => {
-  if (!existing) {
-    chrome.alarms.create('snowWeUpdateCheck', { delayInMinutes: 5, periodInMinutes: 5 });
-  }
-});
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'snowWeUpdateCheck') checkForUpdate();
   if (alarm.name === 'snowWeAutoRun') startAutoRun();
   if (alarm.name === 'snowWeAnomalyCheck') checkAnomalies();
   if (alarm.name === 'snowWeGasQueueFlush') flushGasScoutQueue();
