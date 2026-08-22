@@ -338,6 +338,12 @@
 
   <h2 style="font-size:15px;margin:8px 0 2px;">送信統計</h2>
   <div class="sub" style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">担当者・媒体・キーワードのフィルターは反映されますが、「期間」フィルターの影響は受けません</div>
+  <div class="chart-panel" style="margin-bottom:12px;">
+    <h2>日別 送信数（直近30日）</h2>
+    <div class="sub">日ごとの送信数（媒体内訳）</div>
+    <div class="chart-legend" id="daily-chart-legend"></div>
+    <div id="daily-chart"></div>
+  </div>
   <div class="charts">
     <div class="chart-panel">
       <h2>月別 送信数</h2>
@@ -741,6 +747,20 @@ function monthKey(r) {
   const d = toJST(r.sent_at);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
+function dayKey(r) {
+  if (!r.sent_at) return null;
+  const d = toJST(r.sent_at);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+function dailyBucketOrder(days = 30) {
+  const today = toJST(new Date().toISOString());
+  const order = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today.getTime() - i * 86400000);
+    order.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`);
+  }
+  return order;
+}
 function weekdayKey(r) {
   if (!r.sent_at) return null;
   const names = ['日', '月', '火', '水', '木', '金', '土'];
@@ -857,6 +877,7 @@ function renderIndustryTop20(rows) {
 
 function renderStats() {
   const rows = statsRows();
+  renderStackedBucketChart('daily-chart', 'daily-chart-legend', dailyBucketOrder(30), dayKey, rows);
   renderStackedBucketChart('monthly-chart', 'monthly-chart-legend', monthlyBucketOrder(rows), monthKey, rows);
   renderStackedBucketChart('age-chart', 'age-chart-legend', ['～25', '25～30', '30～35', '35～40', '40～45', '45～'], ageKey, rows);
   renderStackedBucketChart('weekday-chart', 'weekday-chart-legend', ['月', '火', '水', '木', '金', '土', '日'], weekdayKey, rows);
