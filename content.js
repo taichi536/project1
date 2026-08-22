@@ -959,9 +959,27 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
   try {
     sharedSettings = await chrome.storage.local.get(['gasSettings', 'currentPosition', 'recruiterName']);
   } catch (_) {}
-  const sharedGas = sharedSettings.gasSettings || {};
-  const sharedRecruiter = sharedGas.recruiter || sharedSettings.recruiterName || '';
+  let sharedGas = sharedSettings.gasSettings || {};
+  let sharedRecruiter = sharedGas.recruiter || sharedSettings.recruiterName || '';
   const sharedCurrentPosition = sharedSettings.currentPosition || '';
+
+  // AMBIの連続送信等、chrome.storage.local.get()が短時間に大量に呼ばれる状況では、
+  // まれに担当者名が空で返ってくることが実データで確認された（GAS側は空なら書き込み
+  // 自体をスキップするため症状が出ないが、Supabase側は無条件に書き込むため、その回だけ
+  // 担当者名が空欄のまま記録されてしまっていた）。空だった場合は一度だけ読み直す
+  if (!sharedRecruiter) {
+    await new Promise(r => setTimeout(r, 80));
+    try {
+      const retrySettings = await chrome.storage.local.get(['gasSettings', 'recruiterName']);
+      const retryGas = retrySettings.gasSettings || {};
+      const retryRecruiter = retryGas.recruiter || retrySettings.recruiterName || '';
+      if (retryRecruiter) {
+        sharedGas = retryGas;
+        sharedRecruiter = retryRecruiter;
+        console.log('[Snow-we] 担当者名の読み込みが空だったため再読み込みで復元:', sharedRecruiter);
+      }
+    } catch (_) {}
+  }
 
   // ② GASへの記録はバックグラウンドのバッチキューに積むだけ（サブ・失敗してもローカル記録には影響しない）。
   // 以前はここで即座にPOSTしていたが、RDSの一括送信等で候補者が短時間に連続処理されると
