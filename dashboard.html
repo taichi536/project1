@@ -330,6 +330,50 @@
     </div>
   </div>
 
+  <h2 style="font-size:15px;margin:8px 0 2px;">送信統計</h2>
+  <div class="sub" style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">担当者・媒体・キーワードのフィルターは反映されますが、「期間」フィルターの影響は受けません</div>
+  <div class="charts">
+    <div class="chart-panel">
+      <h2>月別 送信数</h2>
+      <div class="sub">月ごとの送信数（媒体内訳）</div>
+      <div class="chart-legend" id="monthly-chart-legend"></div>
+      <div id="monthly-chart"></div>
+    </div>
+    <div class="chart-panel">
+      <h2>年齢別 送信数</h2>
+      <div class="sub">候補者の年齢層ごとの送信数（媒体内訳）</div>
+      <div class="chart-legend" id="age-chart-legend"></div>
+      <div id="age-chart"></div>
+    </div>
+  </div>
+  <div class="charts">
+    <div class="chart-panel">
+      <h2>曜日別 送信数</h2>
+      <div class="sub">送信した曜日ごとの件数（媒体内訳）</div>
+      <div class="chart-legend" id="weekday-chart-legend"></div>
+      <div id="weekday-chart"></div>
+    </div>
+    <div class="chart-panel">
+      <h2>時間帯別 送信数</h2>
+      <div class="sub">送信した時刻（時）ごとの件数（媒体内訳）</div>
+      <div class="chart-legend" id="hour-chart-legend"></div>
+      <div id="hour-chart"></div>
+    </div>
+  </div>
+  <div class="charts">
+    <div class="chart-panel">
+      <h2>業界別 送信数</h2>
+      <div class="sub">送信数の多い順（上位15件、それ以外は「その他」・媒体内訳）</div>
+      <div class="chart-legend" id="industry-chart-legend"></div>
+      <div id="industry-chart"></div>
+    </div>
+    <div class="chart-panel">
+      <h2>直近1週間の業界TOP20</h2>
+      <div class="sub">業界ごとの送信数と、その中で多く送った会社名（上位5社）</div>
+      <div id="industry-top20"></div>
+    </div>
+  </div>
+
   <div class="filters">
     <div class="field">
       <label for="f-recruiter">担当者</label>
@@ -564,6 +608,7 @@ function render() {
   renderPositionChart(rows);
   renderTable(rows);
   renderSortArrows();
+  renderStats();
 }
 
 // ── ツールチップ（担当者別チャート・ポジション別チャート共通） ──
@@ -659,6 +704,158 @@ function renderPositionChart(rows) {
     });
     seg.addEventListener('mouseleave', hideTip);
   });
+}
+
+// ── 送信統計（期間フィルターを除いた、担当者・媒体・キーワードのみで絞り込んだ全期間データ） ──
+function statsRows() {
+  const recruiter = $('f-recruiter').value;
+  const platform = $('f-platform').value;
+  const kw = $('f-search').value.trim().toLowerCase();
+  return allRows.filter(r => {
+    if (recruiter && r.recruiter_name !== recruiter) return false;
+    if (platform && r.platform !== platform) return false;
+    if (kw) {
+      const hay = [r.candidate_name, r.company_name, r.position_name, r.university, r.candidate_industry]
+        .map(v => (v || '').toLowerCase()).join(' ');
+      if (!hay.includes(kw)) return false;
+    }
+    return true;
+  });
+}
+
+// sent_at(UTC保存)をJSTの壁時計値として扱うためのヘルパー。
+// UTCのgetterで読むことで、閲覧者のブラウザのタイムゾーン設定に左右されない
+function toJST(iso) {
+  const d = new Date(iso);
+  return new Date(d.getTime() + 9 * 3600 * 1000);
+}
+function monthKey(r) {
+  if (!r.sent_at) return null;
+  const d = toJST(r.sent_at);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+function weekdayKey(r) {
+  if (!r.sent_at) return null;
+  const names = ['日', '月', '火', '水', '木', '金', '土'];
+  return names[toJST(r.sent_at).getUTCDay()];
+}
+function hourKey(r) {
+  if (!r.sent_at) return null;
+  return String(toJST(r.sent_at).getUTCHours()).padStart(2, '0') + '時';
+}
+function ageKey(r) {
+  const age = r.candidate_age;
+  if (age == null) return null;
+  if (age < 25) return '～25';
+  if (age < 30) return '25～30';
+  if (age < 35) return '30～35';
+  if (age < 40) return '35～40';
+  if (age < 45) return '40～45';
+  return '45～';
+}
+function monthlyBucketOrder(rows) {
+  return [...new Set(rows.map(monthKey).filter(Boolean))].sort();
+}
+
+// バケット×媒体の積み上げ横棒チャート（担当者別チャートと同じ見た目・仕組みを汎用化）
+function renderStackedBucketChart(containerId, legendId, bucketOrder, bucketFn, rows) {
+  const byBucket = {};
+  for (const b of bucketOrder) byBucket[b] = {};
+  for (const r of rows) {
+    const b = bucketFn(r);
+    if (b == null || !(b in byBucket)) continue;
+    const p = r.platform || '';
+    byBucket[b][p] = (byBucket[b][p] || 0) + 1;
+  }
+  if (legendId) {
+    const usedPlatforms = [...new Set(rows.map(r => r.platform).filter(Boolean))];
+    $(legendId).innerHTML = usedPlatforms.map(p => {
+      const m = platformMeta(p);
+      return `<span><span class="dot" style="background:${m.color}"></span>${escapeHtml(m.label)}</span>`;
+    }).join('');
+  }
+  const entries = bucketOrder.map(name => {
+    const counts = byBucket[name];
+    return { name, counts, total: Object.values(counts).reduce((a, c) => a + c, 0) };
+  });
+  const el = $(containerId);
+  if (entries.length === 0 || entries.every(e => e.total === 0)) {
+    el.innerHTML = '<div class="hbar-empty">データがありません</div>';
+    return;
+  }
+  const max = Math.max(1, ...entries.map(e => e.total));
+  el.innerHTML = entries.map(e => {
+    const segs = Object.entries(e.counts).sort((a, b) => b[1] - a[1]).map(([p, c]) => {
+      const m = platformMeta(p);
+      const widthPct = (c / max) * 100;
+      return `<div class="hbar-seg" data-name="${escapeHtml(e.name)}" data-platform="${escapeHtml(m.label)}" data-count="${c}" style="background:${m.color};width:${widthPct}%"></div>`;
+    }).join('');
+    return `<div class="hbar-row">
+      <div class="rlabel">${escapeHtml(e.name)}</div>
+      <div class="hbar-track">${segs}</div>
+      <div class="rtotal">${e.total}</div>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.hbar-seg').forEach(seg => {
+    seg.addEventListener('mousemove', evt => {
+      showTip(evt, `${escapeHtml(seg.dataset.name)}<br>${escapeHtml(seg.dataset.platform)}: <b>${seg.dataset.count}件</b>`);
+    });
+    seg.addEventListener('mouseleave', hideTip);
+  });
+}
+
+function renderIndustryChart(rows) {
+  const totals = {};
+  for (const r of rows) {
+    const name = r.candidate_industry || '(未設定)';
+    totals[name] = (totals[name] || 0) + 1;
+  }
+  const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  const TOP_N = 15;
+  const topNames = new Set(sorted.slice(0, TOP_N).map(([n]) => n));
+  const hasOther = sorted.length > TOP_N;
+  const order = [...topNames, ...(hasOther ? ['その他'] : [])];
+  renderStackedBucketChart('industry-chart', 'industry-chart-legend', order, r => {
+    const name = r.candidate_industry || '(未設定)';
+    return topNames.has(name) ? name : (hasOther ? 'その他' : null);
+  }, rows);
+}
+
+function renderIndustryTop20(rows) {
+  const weekCutoff = Date.now() - 7 * 86400000;
+  const recent = rows.filter(r => new Date(r.sent_at).getTime() >= weekCutoff);
+  const industryCounts = {};
+  const industryCompanies = {};
+  for (const r of recent) {
+    const ind = r.candidate_industry || '(未設定)';
+    industryCounts[ind] = (industryCounts[ind] || 0) + 1;
+    if (!industryCompanies[ind]) industryCompanies[ind] = {};
+    const comp = r.company_name || '(不明)';
+    industryCompanies[ind][comp] = (industryCompanies[ind][comp] || 0) + 1;
+  }
+  const top20 = Object.entries(industryCounts).sort((a, b) => b[1] - a[1]).slice(0, 20);
+  if (top20.length === 0) {
+    $('industry-top20').innerHTML = '<div class="hbar-empty">直近1週間のデータがありません</div>';
+    return;
+  }
+  $('industry-top20').innerHTML = top20.map(([ind, count]) => {
+    const companies = Object.entries(industryCompanies[ind]).sort((a, b) => b[1] - a[1]).slice(0, 5)
+      .map(([c, n]) => `${escapeHtml(c)}(${n})`).join('、');
+    return `<div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--gridline);">
+      <div style="display:flex;justify-content:space-between;font-size:13px;"><b>${escapeHtml(ind)}</b><span>${count}件</span></div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${companies}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderStats() {
+  const rows = statsRows();
+  renderStackedBucketChart('monthly-chart', 'monthly-chart-legend', monthlyBucketOrder(rows), monthKey, rows);
+  renderStackedBucketChart('age-chart', 'age-chart-legend', ['～25', '25～30', '30～35', '35～40', '40～45', '45～'], ageKey, rows);
+  renderStackedBucketChart('weekday-chart', 'weekday-chart-legend', ['月', '火', '水', '木', '金', '土', '日'], weekdayKey, rows);
+  renderStackedBucketChart('hour-chart', 'hour-chart-legend', Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0') + '時'), hourKey, rows);
+  renderIndustryChart(rows);
+  renderIndustryTop20(rows);
 }
 
 function renderTiles(rows) {
