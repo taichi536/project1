@@ -319,6 +319,12 @@
 </header>
 <main>
   <div id="sync-health"></div>
+  <div class="chart-panel" style="margin-bottom:16px;">
+    <h2>自動記録の健全性(直近30日・バックフィル件数)</h2>
+    <div class="sub">毎日の自動チェックで「スプレッドシートにはあるがSupabaseに無かった」ため埋め直した件数。0が続いていれば拡張機能側の自動記録は正常です</div>
+    <div class="chart-legend" id="sync-health-chart-legend"></div>
+    <div id="sync-health-chart"></div>
+  </div>
   <div class="tiles" id="tiles"></div>
   <div class="breakdown" id="breakdown"></div>
 
@@ -477,15 +483,18 @@ function fmtDate(iso) {
 }
 
 // ── 記録漏れチェック状態バナー（sync_gas_to_supabase.pyの定期実行結果を表示） ──
+let syncHealthRows = [];
 async function loadSyncHealth() {
   const el = $('sync-health');
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/sync_health?select=*&order=checked_at.desc&limit=20`,
+      `${SUPABASE_URL}/rest/v1/sync_health?select=*&order=checked_at.desc&limit=400`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
-    if (!res.ok) { el.classList.remove('show'); return; } // テーブル未作成等は静かに非表示
+    if (!res.ok) { el.classList.remove('show'); syncHealthRows = []; renderSyncHealthChart(); return; } // テーブル未作成等は静かに非表示
     const rows = await res.json();
+    syncHealthRows = rows;
+    renderSyncHealthChart();
     if (!rows.length) { el.classList.remove('show'); return; }
 
     const latestCheckedAt = rows[0].checked_at;
@@ -504,7 +513,72 @@ async function loadSyncHealth() {
     `;
   } catch (e) {
     el.classList.remove('show');
+    syncHealthRows = [];
+    renderSyncHealthChart();
   }
+}
+
+// ── 自動記録の健全性チャート（sync_healthの missing_count を日別に積み上げ表示） ──
+function renderSyncHealthChart() {
+  const legendEl = $('sync-health-chart-legend');
+  const container = $('sync-health-chart');
+  if (!container) return;
+  if (!syncHealthRows.length) {
+    container.innerHTML = '<div class="hbar-empty">データがありません（自動チェックがまだ実行されていないか、集計テーブルが未作成です）</div>';
+    if (legendEl) legendEl.innerHTML = '';
+    return;
+  }
+  // 同じ日に複数回実行されていたら、その日のうち最後の実行結果だけを使う
+  const byDayPlatform = {};
+  for (const r of syncHealthRows) {
+    const day = dayKey({ sent_at: r.checked_at });
+    if (!day) continue;
+    if (!byDayPlatform[day]) byDayPlatform[day] = {};
+    const existing = byDayPlatform[day][r.platform];
+    if (!existing || new Date(r.checked_at) > new Date(existing.checkedAt)) {
+      byDayPlatform[day][r.platform] = { missing: r.missing_count || 0, checkedAt: r.checked_at };
+    }
+  }
+  const days = Object.keys(byDayPlatform).sort().slice(-30);
+  const usedPlatforms = [...new Set(syncHealthRows.map(r => r.platform).filter(Boolean))];
+  if (legendEl) {
+    legendEl.innerHTML = usedPlatforms.map(p => {
+      const m = platformMeta(p);
+      return `<span><span class="dot" style="background:${m.color}"></span>${escapeHtml(m.label)}</span>`;
+    }).join('');
+  }
+
+  const entries = days.map(day => {
+    const platforms = byDayPlatform[day];
+    const counts = {};
+    for (const p in platforms) counts[p] = platforms[p].missing;
+    const total = Object.values(counts).reduce((a, c) => a + c, 0);
+    return { name: day, counts, total };
+  });
+
+  if (entries.every(e => e.total === 0)) {
+    container.innerHTML = '<div class="hbar-empty" style="color:#1f8a56;">直近30日、バックフィルが必要だった記録はありません（自動記録は正常です）</div>';
+    return;
+  }
+  const max = Math.max(1, ...entries.map(e => e.total));
+  container.innerHTML = entries.map(e => {
+    const segs = Object.entries(e.counts).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]).map(([p, c]) => {
+      const m = platformMeta(p);
+      const widthPct = (c / max) * 100;
+      return `<div class="hbar-seg" data-name="${escapeHtml(e.name)}" data-platform="${escapeHtml(m.label)}" data-count="${c}" style="background:${m.color};width:${widthPct}%"></div>`;
+    }).join('');
+    return `<div class="hbar-row">
+      <div class="rlabel">${escapeHtml(e.name)}</div>
+      <div class="hbar-track">${segs}</div>
+      <div class="rtotal">${e.total}</div>
+    </div>`;
+  }).join('');
+  container.querySelectorAll('.hbar-seg').forEach(seg => {
+    seg.addEventListener('mousemove', evt => {
+      showTip(evt, `${escapeHtml(seg.dataset.name)}<br>${escapeHtml(seg.dataset.platform)}: <b>${seg.dataset.count}件バックフィル</b>`);
+    });
+    seg.addEventListener('mouseleave', hideTip);
+  });
 }
 
 async function fetchAllScouts() {
