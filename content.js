@@ -1348,14 +1348,29 @@ function extractBasicInfo(cardEl) {
     // という汎用フォールバックを使っていたため、会社名ではなく「38歳」「新着」といった
     // 先頭行がそのまま会社名として記録されていた
     const isEduLine3 = l => /学歴|卒業|修了|在学|入学/.test(l);
-    const companyRe3 = /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,|ホールディングス|グループ|銀行|証券|保険/;
-    company = lines.find(l => !isEduLine3(l) && companyRe3.test(l)) || '';
+    // カード上の定型行が会社名として記録されてしまう事故が実データで複数確認された。
+    // ・「金融 / 証券」「保険 / 損害保険」等の業種表記が、下のキーワードの
+    //   「証券」「保険」に一致して会社名として採用されていた
+    // ・「29歳」のような年齢行がそのまま会社名になっていた
+    // これらは会社名ではありえないため、候補から明示的に除外する
+    const isNoiseLine3 = l =>
+      /\s[/／]\s/.test(l)              // 「業種 / 職種」形式
+      || /^\d{1,3}歳$/.test(l)
+      || /^\d+通$/.test(l)
+      || /^新着/.test(l)
+      || /^[\d,.]+\s*万円/.test(l)
+      || /^[\d,]+$/.test(l);
+    // 「證券」は旧字体表記の会社名（例:「野村證券」）で実際に使われており、
+    // 「証券」だけではキーワードに一致しなかった（実データで確認）
+    const companyRe3 = /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,|ホールディングス|グループ|銀行|証券|證券|信託|保険/;
+    company = lines.find(l => !isEduLine3(l) && !isNoiseLine3(l) && companyRe3.test(l)) || '';
     if (!company) {
       // キーワードに一致しない会社名表記（例:「JFEエンジニアリング」）の場合、
       // 「N通」行の直後の行を会社名として採用する
       const sentIdx = lines.findIndex(l => /^\d+通$/.test(l));
-      if (sentIdx >= 0 && lines[sentIdx + 1] && !isEduLine3(lines[sentIdx + 1])) {
-        company = lines[sentIdx + 1];
+      const next = sentIdx >= 0 ? lines[sentIdx + 1] : '';
+      if (next && !isEduLine3(next) && !isNoiseLine3(next)) {
+        company = next;
       }
     }
   } else {
