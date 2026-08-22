@@ -249,6 +249,12 @@
   }
   .platform-badge .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 
+  .reply-cell { cursor: pointer; white-space: nowrap; }
+  .reply-cell.reply-none { color: var(--text-muted); }
+  .reply-cell.reply-none:hover { color: var(--accent); text-decoration: underline; }
+  .reply-cell.reply-done { color: #1f8a56; }
+  .reply-cell.reply-done:hover { text-decoration: underline dotted; }
+
   #state {
     padding: 40px 0;
     text-align: center;
@@ -406,6 +412,7 @@
       <thead>
         <tr>
           <th data-key="sent_at">送信日時</th>
+          <th data-key="replied_at">返信</th>
           <th data-key="recruiter_name">担当者</th>
           <th data-key="platform">媒体</th>
           <th data-key="candidate_name">候補者名</th>
@@ -590,7 +597,7 @@ function sortRows(rows) {
   const dir = sortDir === 'asc' ? 1 : -1;
   return [...rows].sort((a, b) => {
     let av = a[sortKey], bv = b[sortKey];
-    if (sortKey === 'sent_at') { av = new Date(av || 0).getTime(); bv = new Date(bv || 0).getTime(); }
+    if (sortKey === 'sent_at' || sortKey === 'replied_at') { av = new Date(av || 0).getTime(); bv = new Date(bv || 0).getTime(); }
     if (sortKey === 'candidate_age') { av = av ?? -1; bv = bv ?? -1; }
     if (typeof av === 'string') av = av.toLowerCase();
     if (typeof bv === 'string') bv = bv.toLowerCase();
@@ -889,8 +896,12 @@ function renderTable(rows) {
   $('tbody').innerHTML = rows.map(r => {
     const m = platformMeta(r.platform);
     const msg = r.scout_message || '';
+    const replyCell = r.replied_at
+      ? `<span class="reply-cell reply-done" data-id="${r.id}">${fmtDate(r.replied_at)}</span>`
+      : `<span class="reply-cell reply-none" data-id="${r.id}">＋記録</span>`;
     return `<tr>
       <td>${fmtDate(r.sent_at)}</td>
+      <td>${replyCell}</td>
       <td>${escapeHtml(r.recruiter_name)}</td>
       <td><span class="platform-badge"><span class="dot" style="background:${m.color}"></span>${escapeHtml(m.label)}</span></td>
       <td>${escapeHtml(r.candidate_name)}</td>
@@ -931,7 +942,54 @@ document.querySelectorAll('thead th').forEach(th => {
   });
 });
 
-$('tbody').addEventListener('click', e => {
+// ── 返信の手動記録（同じ送信記録の行にreplied_atを追記） ──
+async function patchRepliedAt(id, iso) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/scouts?id=eq.${id}`, {
+    method: 'PATCH',
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify({ replied_at: iso }),
+  });
+  if (!res.ok) throw new Error(`更新に失敗しました (HTTP ${res.status})`);
+}
+
+$('tbody').addEventListener('click', async e => {
+  const replyCell = e.target.closest('.reply-cell');
+  if (replyCell) {
+    const id = replyCell.dataset.id;
+    const row = allRows.find(r => String(r.id) === String(id));
+    if (!row) return;
+    const isDone = !!row.replied_at;
+    const defaultVal = isDone
+      ? new Date(row.replied_at).toISOString().slice(0, 16).replace('T', ' ')
+      : new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const input = prompt(
+      isDone
+        ? `返信日時を変更します（クリアする場合は空にしてOK）\n形式: YYYY-MM-DD HH:MM`
+        : `${row.company_name || '(会社名不明)'} / ${row.candidate_name || '候補者'} への返信日時を入力してください\n形式: YYYY-MM-DD HH:MM`,
+      defaultVal
+    );
+    if (input === null) return; // キャンセル
+    let iso = null;
+    if (input.trim() !== '') {
+      const parsed = new Date(input.trim().replace(' ', 'T') + ':00+09:00');
+      if (isNaN(parsed)) { alert('日時の形式が正しくありません（例: 2026-08-22 14:30）'); return; }
+      iso = parsed.toISOString();
+    }
+    try {
+      await patchRepliedAt(id, iso);
+      row.replied_at = iso;
+      render();
+    } catch (err) {
+      alert('保存に失敗しました: ' + err.message);
+    }
+    return;
+  }
+
   const cell = e.target.closest('td.msg');
   if (!cell) return;
   const full = cell.dataset.full;
