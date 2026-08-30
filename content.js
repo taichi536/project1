@@ -624,7 +624,19 @@ function findCandidateCardsByPlatform() {
     }));
   }
 
-  // green・mynavi・その他：年齢を含む適度なサイズのカード
+  if (platform === 'green') {
+    // Green Compass の候補者カード。実機DOM調査で確認したセレクター。
+    // css-1gva7jy等のハッシュ付きクラス名(CSS-in-JSによる自動生成でビルドごとに
+    // 変わりうる)は使わず、MUI(Material UI)の固定コンポーネントクラス名だけを使う
+    const cards = Array.from(document.querySelectorAll('.MuiPaper-root.MuiPaper-elevation.MuiPaper-rounded')).filter(el => {
+      const text = el.innerText || '';
+      return agePattern.test(text) && text.length > 15 && text.length < 4000;
+    });
+    if (cards.length > 0) return dedup(cards);
+    return [];
+  }
+
+  // mynavi・その他：年齢を含む適度なサイズのカード
   return dedup(Array.from(document.querySelectorAll('div, li, article')).filter(el => {
     const rect = el.getBoundingClientRect();
     const text = (el.innerText || '');
@@ -1097,6 +1109,18 @@ function scoutStatus(history, candidateId) {
 const stripVolatileLines = lines => lines.filter(l => !/\d{4}[\/年]\d{1,2}[\/月]\d{1,2}/.test(l));
 
 function getCandidateId(cardEl) {
+  // Green: カード内にプロフィールへのリンク(<a href>)が無く、候補者をクリックすると
+  // 同じページ内でURLのクエリパラメータ(?user_id=1225710)だけが変わってモーダルが開く
+  // 構造(実機DOM調査で確認)。このためfindProfileUrlによるリンク探索は機能せず、
+  // 安定ID取得に失敗してハッシュフォールバックに落ちていた(カード表示内容が少し
+  // 変わるだけで別IDになり、重複記録・記録漏れの原因になる)。クリック直後は
+  // このURLが既に更新されているため、そこから直接読み取るのが最も安定する
+  if (getPlatform() === 'green') {
+    const userId = new URLSearchParams(location.search).get('user_id');
+    if (userId) return `green_${userId}`;
+    // user_idがまだ反映されていない場合のみハッシュにフォールバック
+  }
+
   // AMBI: hidden input.js_sid から候補者ID取得
   if (getPlatform() === 'ambi') {
     const sidInput = cardEl.querySelector('input.js_sid');
@@ -1233,12 +1257,13 @@ function extractBasicInfo(cardEl) {
     return candidate || '';
   };
   univ = extractUnivFromText(text);
-  // RDS/AMBIはカードに大学名が出ないため、詳細パネルからも取得を試みる
+  // RDS/AMBI/Greenはカードに大学名が出ないため、詳細パネルからも取得を試みる
   if (!univ) {
     const platform = getPlatform();
     let panel = null;
     if (platform === 'rds') panel = findRDSDetailPanel();
     else if (platform === 'dodax') panel = findDodaxDetailPanel();
+    else if (platform === 'green') panel = findGreenDetailPanel();
     else panel = findAMBIDetailPanel();
     if (panel) {
       univ = extractUnivFromText(panel.innerText || '');
@@ -1385,6 +1410,25 @@ function extractBasicInfo(cardEl) {
       const next = sentIdx >= 0 ? lines[sentIdx + 1] : '';
       if (next && !isEduLine3(next) && !isNoiseLine3(next)) {
         company = next;
+      }
+    }
+  } else if (getPlatform() === 'green') {
+    // Greenの候補者カードは年齢・年収等の要約のみで会社名を含まない(実機で確認)。
+    // 詳細モーダルの「【会社名】」ラベル行(職務要約内、現職の会社名)を最優先で使い、
+    // 無ければ「経験企業」セクションの一番上のエントリー(＝在籍期間が最も新しい
+    // 会社＝現職または直近の勤務先)を使う
+    const panel = findGreenDetailPanel();
+    const panelText = panel ? (panel.innerText || '') : text;
+    const panelLines = panelText.split('\n').map(l => l.trim()).filter(Boolean);
+
+    const labelLine = panelLines.find(l => l.includes('【会社名】'));
+    if (labelLine) {
+      company = labelLine.replace('【会社名】', '').trim();
+    }
+    if (!company) {
+      const expIdx = panelLines.findIndex(l => l === '経験企業');
+      if (expIdx >= 0 && expIdx + 1 < panelLines.length) {
+        company = panelLines[expIdx + 1];
       }
     }
   } else {
@@ -1846,6 +1890,7 @@ document.addEventListener('click', e => {
       // Bizreachもこのフォールバックの対象外だったため、開始クリックを取り逃すと
       // 記録がまるごと消えていた（実データで未登録率85%を確認）
       platform === 'bizreach' ? findBizreachDetailPanel() :
+      platform === 'green' ? findGreenDetailPanel() :
       null;
     if (detailPanel) {
       const id = getCandidateId(detailPanel);
@@ -6006,6 +6051,30 @@ function findAMBIDetailPanel() {
 }
 
 // -------------------------------------------------------
+// Green詳細モーダルを特定する（候補者クリックで開くモーダル）
+// -------------------------------------------------------
+function findGreenDetailPanel() {
+  // 実機DOM調査で確認：候補者をクリックすると.MuiModal-root.MuiDialog-rootの
+  // モーダルが開き、「職務経歴書」「■最終学歴」「経験企業」等の全文プロフィールが入る
+  const specific = document.querySelector('.MuiModal-root.MuiDialog-root');
+  if (specific && (specific.innerText || '').trim().length > 100) return specific;
+
+  // フォールバック：モーダル特有のクラス名が変わった場合向けの座標・キーワードヒューリスティック
+  const candidates = [];
+  document.querySelectorAll('div, section, article').forEach(el => {
+    const rect = el.getBoundingClientRect();
+    const t = (el.innerText || '').trim();
+    if (rect.width > 300 && rect.height > 300 && t.length > 200 && t.length < 15000) {
+      const hasKeyword = ['職務経歴', '最終学歴', '経験企業', '会社名'].some(kw => t.includes(kw));
+      if (hasKeyword) candidates.push({ el, score: t.length });
+    }
+  });
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0].el;
+}
+
+// -------------------------------------------------------
 // Bizreach詳細パネルを特定する（カードクリックで開く右パネル）
 // -------------------------------------------------------
 function findBizreachDetailPanel() {
@@ -6232,12 +6301,19 @@ function extractProfile() {
     }
 
   } else if (host.includes('green-japan')) {
+    // 詳細モーダル(.MuiModal-root.MuiDialog-root)にスコープしないと、ページ全体
+    // (候補者一覧・保存した検索条件のタグ名一覧等)から拾ってしまい無関係な
+    // テキストが混入する（実機で確認）
+    detailPanel = findGreenDetailPanel();
     text = extractByKeywords([
-      '職務経歴', '経験業種', 'スキル', '最終学歴', '語学',
-      '経験業界', '経験職種', '資格', 'スカウト希望', '希望業界',
+      '職務要約', '職務経歴', '経験業種', 'スキル', '最終学歴', '語学',
+      '経験企業', '経験業界', '経験職種', '資格', 'スカウト希望', '希望業界',
       '希望職種', '希望勤務地', '転職先に求める', '自己PR'
-    ]);
+    ], detailPanel);
     if (text) text = removeNonProfileSections(text);
+    if (!text || text.length < 100) {
+      text = detailPanel ? removeNonProfileSections(extractMainText(detailPanel, 3000)) : '';
+    }
 
   } else if (host.includes('ambi') || host.includes('en-ambi')) {
     detailPanel = findAMBIDetailPanel();
