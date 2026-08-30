@@ -1413,22 +1413,42 @@ function extractBasicInfo(cardEl) {
       }
     }
   } else if (getPlatform() === 'green') {
-    // Greenの候補者カードは年齢・年収等の要約のみで会社名を含まない(実機で確認)。
-    // 詳細モーダルの「【会社名】」ラベル行(職務要約内、現職の会社名)を最優先で使い、
-    // 無ければ「経験企業」セクションの一番上のエントリー(＝在籍期間が最も新しい
-    // 会社＝現職または直近の勤務先)を使う
-    const panel = findGreenDetailPanel();
-    const panelText = panel ? (panel.innerText || '') : text;
-    const panelLines = panelText.split('\n').map(l => l.trim()).filter(Boolean);
+    // Greenの一覧カードには「現（前）勤務先」ラベルがあり、その次の行が
+    // 「DockYard正社員2022年09月〜2026年05月」のように
+    // 会社名＋雇用形態＋在籍期間が区切り無しで連結されている(実機で確認)。
+    // モーダルを開いていなくても取れるため、これを最優先で使う
+    const employmentType = /(正社員|契約社員|派遣社員|業務委託|アルバイト|パート|インターン|嘱託|役員)/;
+    const cleanGreenCompany = (s) => {
+      if (!s) return '';
+      let v = s.trim();
+      const m = v.match(employmentType);
+      if (m && m.index > 0) v = v.slice(0, m.index);
+      // 雇用形態が無い表記のために、末尾の在籍期間(2023年01月〜…)も落とす
+      v = v.replace(/\d{4}年\d{1,2}月.*$/, '');
+      return v.trim();
+    };
 
-    const labelLine = panelLines.find(l => l.includes('【会社名】'));
-    if (labelLine) {
-      company = labelLine.replace('【会社名】', '').trim();
+    const workIdx = lines.findIndex(l => l.includes('現（前）勤務先') || l.includes('現(前)勤務先'));
+    if (workIdx >= 0 && workIdx + 1 < lines.length) {
+      company = cleanGreenCompany(lines[workIdx + 1]);
     }
+
+    // 送信時フォールバック等でモーダルが渡された場合は、そちらのラベルから拾う。
+    // 「【会社名】」は職務要約の自由記述内にあるため候補者によっては存在せず、
+    // その場合は「経験企業」セクションの一番上(＝在籍期間が最も新しい勤務先)を使う
     if (!company) {
-      const expIdx = panelLines.findIndex(l => l === '経験企業');
-      if (expIdx >= 0 && expIdx + 1 < panelLines.length) {
-        company = panelLines[expIdx + 1];
+      const panel = findGreenDetailPanel();
+      const panelLines = (panel ? (panel.innerText || '') : text)
+        .split('\n').map(l => l.trim()).filter(Boolean);
+
+      const labelLine = panelLines.find(l => l.includes('【会社名】'));
+      if (labelLine) company = labelLine.replace('【会社名】', '').trim();
+
+      if (!company) {
+        const expIdx = panelLines.findIndex(l => l === '経験企業');
+        if (expIdx >= 0 && expIdx + 1 < panelLines.length) {
+          company = cleanGreenCompany(panelLines[expIdx + 1]);
+        }
       }
     }
   } else {
@@ -5969,7 +5989,11 @@ function cleanUnivName(raw) {
   // [\S]*(?:大学院|大学|高専|専門学校) をグリーディに使うと
   // "早稲田大学法学部" → "早稲田大学"、"東京大学大学院工学系研究科" → "東京大学大学院" になる
   const m = s.match(/[\S]*(?:大学院|大学|高専|専門学校)/);
-  return m ? m[0] : s;
+  s = m ? m[0] : s;
+  // Greenは学校名の末尾に学校種別を連結して表示するため「シンガポール国立大学大学」の
+  // ように「大学」が重複することがある(実機で確認)。「大阪大学大学院」のような正当な
+  // 表記を壊さないよう、末尾が「大学大学」で終わる場合だけを対象にする
+  return s.replace(/大学大学$/, '大学');
 }
 
 // -------------------------------------------------------
