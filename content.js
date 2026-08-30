@@ -25,6 +25,15 @@ chrome.storage.local.get(['gasSettings', 'recruiterName']).then(r => {
   _cachedRecruiterName = (r.gasSettings && r.gasSettings.recruiter) || r.recruiterName || '';
 }).catch(() => {});
 
+// Greenのテンプレート選択を追跡するためのキャッシュ。Greenは候補者ごとの「スカウト」
+// 開始ボタンが無く送信時にしかpendingScoutを作れないため、AMBI/RDS等のように
+// pendingScout経由でテンプレート名を記録できない。かつテンプレート選択後もチップの
+// 表示は「テンプレート」のまま変わらず、送信時にDOMを読むだけでは選択内容が分からない
+// （実機で確認）。このため「テンプレート」チップのクリックを起点に、直後に選ばれる
+// メニュー項目のテキストをここに保持しておき、送信時のpendingScout復元時に使う
+let _cachedGreenTemplate = '';
+let _greenTemplatePickerOpenTs = 0;
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && (changes.gasSettings || changes.recruiterName)) {
     const next = (changes.gasSettings && changes.gasSettings.newValue && changes.gasSettings.newValue.recruiter)
@@ -1493,6 +1502,27 @@ document.addEventListener('click', e => {
   // 最新インスタンスのみ処理（古いVMインスタンスはスキップ）
   if (document.documentElement.getAttribute('data-snow-we-id') !== _INSTANCE_ID) return;
 
+  // Greenのテンプレート選択を追跡する。チップ自体は<div role="button">でボタン/リンク
+  // ではないため、下のbtn判定（button/aのみ対象）より前で拾う必要がある。
+  // チップの表示は選択後も「テンプレート」のまま変わらないため、送信時にDOMを読むだけ
+  // では選択済みテンプレートが分からない（実機で確認）。「テンプレート」チップを押した
+  // 直後（8秒以内）に選ばれたメニュー項目を、選択されたテンプレート名として記憶する
+  if (getPlatform() === 'green') {
+    const chip = e.target.closest('[role="button"], .MuiChip-root');
+    if (chip && (chip.innerText || '').trim() === 'テンプレート' && chip.closest('.MuiModal-root, .MuiDialog-root')) {
+      _greenTemplatePickerOpenTs = Date.now();
+    }
+    const menuItem = e.target.closest('li[role="menuitem"]');
+    if (menuItem && _greenTemplatePickerOpenTs && Date.now() - _greenTemplatePickerOpenTs < 8000) {
+      const name = (menuItem.innerText || '').trim();
+      if (name && name !== '＋テンプレートを作成') {
+        _cachedGreenTemplate = name;
+        console.log('[Snow-we] green: テンプレート選択を検知:', name);
+      }
+      _greenTemplatePickerOpenTs = 0;
+    }
+  }
+
   const btn = e.target.closest('button, a');
   if (!btn) return;
   // Greenの送信ボタンはアイコン（紙飛行機）のみで表示テキストを一切持たず、
@@ -1928,8 +1958,20 @@ document.addEventListener('click', e => {
     if (detailPanel) {
       const id = getCandidateId(detailPanel);
       if (id) {
-        raw = JSON.stringify({ id, info: extractBasicInfo(detailPanel), ts: Date.now(), fallbackPosition: _cachedCurrentPosition });
-        console.log(`[Snow-we] ${platform}: pendingScoutが無かったため送信時点の詳細パネルから復元:`, id);
+        // Greenは「テンプレート」チップのクリック追跡で拾ったテンプレート名(_cachedGreenTemplate)を
+        // ポジション名として使う。チップの表示は選択後も変わらないため、送信直前のDOM読み取り
+        // だけでは選択済みテンプレートが分からない（実機で確認）。
+        // 本文(scout_message)もこの時点でtextareaから直接読み取っておく
+        const templateName = platform === 'green' ? _cachedGreenTemplate : '';
+        const bodyText = platform === 'green'
+          ? (document.querySelector('.MuiModal-root textarea, .MuiDialog-root textarea')?.value || '')
+          : '';
+        raw = JSON.stringify({
+          id, info: extractBasicInfo(detailPanel), ts: Date.now(),
+          fallbackPosition: _cachedCurrentPosition, templateName, bodyText,
+        });
+        console.log(`[Snow-we] ${platform}: pendingScoutが無かったため送信時点の詳細パネルから復元:`, id,
+          templateName ? `/ template: ${templateName}` : '');
       }
     }
   }
