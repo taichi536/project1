@@ -1495,7 +1495,14 @@ document.addEventListener('click', e => {
 
   const btn = e.target.closest('button, a');
   if (!btn) return;
-  const text = (btn.innerText || '').trim();
+  // Greenの送信ボタンはアイコン（紙飛行機）のみで表示テキストを一切持たず、
+  // aria-label="送信" だけが手掛かりになる（実機で確認）。このため従来の
+  // innerTextベースの判定では記録処理が一度も発火していなかった。
+  // 表示テキストが空のときに限りaria-label/titleで補う（他媒体の判定は変えない）
+  let text = (btn.innerText || '').trim();
+  if (!text) {
+    text = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '').trim();
+  }
   // AMBIの送信ボタンは実際のDOMが「送 信」のように文字間にスペースを挟んで表示される
   // （字間デザイン）ため、素の完全一致だとずっと素通りしていた。空白（半角・全角）を
   // 除去した文字列で判定することで、こうした字間デザインの差異を吸収する
@@ -1533,7 +1540,13 @@ document.addEventListener('click', e => {
   // AMBIは既にスカウト済みの候補者だとボタン表示が「スカウト」ではなく「再スカウト」に
   // 変わる(実機で確認)。以前はこの文言が一切マッチせず、再スカウト操作は検知そのものが
   // 起きていなかった(pendingScoutが作られないため、送信しても記録処理に進めなかった)
-  const isScoutBtn           = textCore === 'スカウト' || textCore === '再スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする') || text.includes('スカウトを作成');
+  // Greenには候補者ごとの「スカウト」開始ボタンが存在せず、画面上部ナビの
+  // 「スカウト」タブがこの判定に誤ってヒットしていた（実機のログで確認）。
+  // 無関係な候補者でpendingScoutが作られる原因になるため対象外にする。
+  // Greenは候補者をクリックするとモーダルが開き、その中の送信アイコンで完結するので、
+  // 送信時のフォールバック（詳細モーダルから候補者情報を復元する処理）で記録できる
+  const isGreen = getPlatform() === 'green';
+  const isScoutBtn           = !isGreen && (textCore === 'スカウト' || textCore === '再スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする') || text.includes('スカウトを作成'));
   const isConfirmBtn         = textCore === '確認';
   // Bizreach: モーダル内の最終送信ボタンは「スカウトを送信」という文言で、
   // 単独の「送信」「送信する」とは一致しない（実機で確認）。このボタンは
