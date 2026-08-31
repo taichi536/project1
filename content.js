@@ -1167,9 +1167,6 @@ function getCandidateId(cardEl) {
       }
     }
     if (buMatch) return `bizreach_resume-${buMatch[1]}`;
-    // 会員番号が見つからない場合のフォールバックとしてURLを使う
-    const urlMatch = location.pathname.match(/\/list\/(\d+)(?:[/?#]|$)/);
-    if (urlMatch) return `bizreach_resume-${urlMatch[1]}`;
     // 直接 id を持つ場合
     if (cardEl.id && cardEl.id.startsWith('resume-')) return `bizreach_${cardEl.id}`;
     // 子要素の bui-drawer-trigger に id がある（実際のBizreach構造）
@@ -1182,10 +1179,19 @@ function getCandidateId(cardEl) {
       if (el.id?.startsWith('resume-')) return `bizreach_${el.id}`;
       el = el.parentElement;
     }
-    // フォールバック：カードテキストのフィンガープリント
+    // フォールバック：カードテキストのフィンガープリント。URLフォールバックより先に試す
+    // （下記の理由により、URLは「今このカードの」候補者IDとして信頼できないため）
     const fpLines = stripVolatileLines((cardEl.innerText || '').split('\n').map(l => l.trim()).filter(l => l.length > 3));
     const fp = fpLines.slice(0, 8).join('|');
     if (fp.length > 20) return `bizreach_fp_${simpleHash(fp)}`;
+    // 最終手段としてのみURLを使う。location.pathnameはページ全体で共有される値であり、
+    // 一括判定ループが会員番号の見つからない複数の候補者カードを順に処理する間、
+    // 直前に開いた別候補者の詳細パネルのURLが残ったままになることがある。この状態で
+    // 未処理の候補者にまでURL由来のIDを割り当てると、全員が同じIDになって「処理済み」
+    // と誤認され、判定されずにまとめてスキップされる事故が実機で確認された
+    // （フィンガープリントで個別に識別できる場合はここに到達しない）
+    const urlMatch = location.pathname.match(/\/list\/(\d+)(?:[/?#]|$)/);
+    if (urlMatch) return `bizreach_resume-${urlMatch[1]}`;
     return null;
   }
 
