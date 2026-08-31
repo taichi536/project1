@@ -2900,17 +2900,23 @@ async function triggerAutoAdd() {
           addedCount++;
           if (candidateId) {
             scoutHistory[`listed_${candidateId}`] = { date: Date.now(), platform: getPlatform() };
-            const starredInfo = extractBasicInfo(el);
-            recordScoutQueueEntry({
-              candidateId,
-              platform: getPlatform(),
-              position: _batchPosition,
-              info: starredInfo,
-              reason: judgeReason,
-              verdict: overall,
-              fullProfile: profileText,
-            }).catch(() => {});
-            _starredThisPage.push({ candidateId, el, position: _batchPosition, info: starredInfo, reason: judgeReason });
+            // Bizreachは検討中リストへの追加(clickAddButton)だけ行い、承認待ちキューには
+            // 入れない。判定でOKになった候補者だけを追加する運用のため、人によるレビュー
+            // (承認/却下)を挟む他媒体の運用とは異なる。承認待ちに入れると、作業中の画面に
+            // 割り込む形でレビューパネルが表示されてしまうため対象外にする
+            if (getPlatform() !== 'bizreach') {
+              const starredInfo = extractBasicInfo(el);
+              recordScoutQueueEntry({
+                candidateId,
+                platform: getPlatform(),
+                position: _batchPosition,
+                info: starredInfo,
+                reason: judgeReason,
+                verdict: overall,
+                fullProfile: profileText,
+              }).catch(() => {});
+              _starredThisPage.push({ candidateId, el, position: _batchPosition, info: starredInfo, reason: judgeReason });
+            }
           }
         }
       } catch (err) {
