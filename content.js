@@ -2662,7 +2662,7 @@ async function triggerAutoAdd() {
   if (!_batchApiKey) {
     let stored;
     try {
-      stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria', 'currentPosition']);
+      stored = await chrome.storage.local.get(['apiKey', 'screeningCriteria', 'currentPosition', 'gasSettings', 'recruiterName']);
     } catch (e) {
       console.warn('[Snow-we] triggerAutoAdd: ストレージ読み込みエラー', e.message);
       showAutoStatus('⚠️ 拡張機能が再起動されました。ページをリロードして再度ボタンを押してください。', 10000);
@@ -2673,6 +2673,17 @@ async function triggerAutoAdd() {
     if (!key || key.length < 20) {
       showAutoStatus('⚙️設定タブでAPIキーを保存してください', 4000);
       await saveAutoAddProgress({ running: false });
+      return;
+    }
+    // 担当者名が未設定のまま一括判定を走らせると、その回の記録が全件「担当者不明」に
+    // なってしまう（拡張機能の再インストール・設定リセット直後に発生していたのを実データで確認）。
+    // GAS側は担当者名が空だと書き込み自体をスキップするため症状が出ないが、Supabase側は
+    // 無条件に記録するため、その回だけ丸ごと集計から漏れる。開始前に止めて設定を促す
+    const recruiterCheck = (stored.gasSettings && stored.gasSettings.recruiter) || stored.recruiterName || _cachedRecruiterName || '';
+    if (!recruiterCheck) {
+      showAutoStatus('⚙️設定タブで担当者名を保存してください（未設定のまま実行すると記録が担当者不明になります）', 6000);
+      await saveAutoAddProgress({ running: false });
+      _triggerAutoAddLock = false;
       return;
     }
     _batchApiKey = key;
