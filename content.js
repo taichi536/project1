@@ -6527,6 +6527,20 @@ function extractProfile() {
     text = extractMainText(null, 2500);
   }
 
+  // dodaXの候補者検索結果ページには、絞り込みフィルター欄の見出しに「学歴」「経験業種」
+  // 「年収」等、実際のプロフィールとまったく同じ語が使われている。詳細パネルの検出に
+  // 失敗しdocument全体を対象にフォールバックした場合、このフィルター欄がプロフィールと
+  // 誤認識され、無関係な文面でパーソナライズ文が生成される事故が実機で確認された
+  // （生成文の冒頭が毎回「候補者検索結果／一括スカウト送信は、最大500件まで送信できます」
+  // という同一の定型文になっていた）。既知の非プロフィール定型文が含まれる場合は、
+  // このまま返さず空にして、呼び出し元の「プロフィールを取得できませんでした」という
+  // 明確なエラー表示に倒す
+  const PAGE_CHROME_MARKERS = ['候補者検索結果', '一括スカウト送信は、最大', 'ポジティブアクション等法令上の例外事由'];
+  if (PAGE_CHROME_MARKERS.some(m => text.includes(m))) {
+    console.warn('[Snow-we] extractProfile: ページの検索結果/フィルター欄を誤検出したため破棄します');
+    text = '';
+  }
+
   return text
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
@@ -6647,9 +6661,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           await scrollRightPanelToBottom();
         }
         const profileText = extractProfile();
-        // デバッグ表示用のパネル取得もプラットフォームに合わせる（以前は常にRDS用の
-        // 関数を呼んでいたため、AMBI等では中身があっても常に「なし」と誤表示していた）
-        const panel = isRDS ? findRDSDetailPanel() : (getPlatform() === 'ambi' ? findAMBIDetailPanel() : findRDSDetailPanel());
+        // デバッグ表示用のパネル取得もプラットフォームに合わせる（以前はAMBI以外だと
+        // 常にRDS用の関数にフォールバックしていたため、dodaX等の調査時にログの
+        // 「detailPanel」欄が実際には無関係なRDS向け検出結果を指しており、
+        // 誤った手がかりで原因調査が混乱する事故があった）
+        const _platformForDebugPanel = getPlatform();
+        const panel = isRDS ? findRDSDetailPanel()
+          : _platformForDebugPanel === 'ambi' ? findAMBIDetailPanel()
+          : _platformForDebugPanel === 'dodax' ? findDodaxDetailPanel()
+          : _platformForDebugPanel === 'bizreach' ? findBizreachDetailPanel()
+          : _platformForDebugPanel === 'green' ? findGreenDetailPanel()
+          : _platformForDebugPanel === 'mynavi' ? findMynaviDetailPanel()
+          : findRDSDetailPanel();
         console.log('[Snow-we] extractProfile 結果:', profileText.length, '文字');
         console.log('[Snow-we] detailPanel:', panel ? `あり (${(panel.innerText||'').trim().length}文字)` : 'なし');
         console.log('[Snow-we] プロフィール先頭100文字:', profileText.substring(0, 100));
