@@ -282,7 +282,6 @@ async function loadSettings() {
   if (gas.dbUrl) $('gas-db-url').value = gas.dbUrl;
   if (gas.secret) $('gas-secret').value = gas.secret;
   if (gas.positionUrl) $('position-gas-url').value = gas.positionUrl;
-  $('toggle-scout-record').checked = gas.scoutRecordEnabled !== false;
   $('toggle-feedback').checked = gas.feedbackEnabled !== false;
 
   const arc = r.autoRunConfig || {};
@@ -337,7 +336,6 @@ $('settings-save-btn').addEventListener('click', async () => {
     dbUrl: $('gas-db-url').value.trim(),
     secret: $('gas-secret').value.trim(),
     positionUrl: $('position-gas-url').value.trim(),
-    scoutRecordEnabled: $('toggle-scout-record').checked,
     feedbackEnabled: $('toggle-feedback').checked,
   };
   // recruiterNameを単独でも保存（content scriptからの読み込みを安定化）

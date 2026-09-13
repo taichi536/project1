@@ -967,10 +967,27 @@ async function patchScoutHistory(candidateId, patch) {
   }
 }
 
+// 直近に記録した候補者IDと時刻。同一候補者が短時間に何度も記録されるのを防ぐ
+const _recentlyRecorded = new Map();
+const RECORD_DEDUPE_MS = 5 * 60 * 1000;
+
 async function recordScoutSent(candidateId, info, templateName, templateRaw = '', fallbackPosition = '') {
   if (!candidateId) return;
   const now = Date.now();
   const platform = getPlatform();
+
+  // 同一候補者の多重記録を防ぐ。実データで同じ候補者が数分以内に3〜4回記録されている
+  // ケースが確認されており、経路が複数ある：
+  // ・「確認」ボタンと「送信」ボタンの両方がこの関数に到達する（2回目はpendingScoutが
+  //   消費済みのため、送信時フォールバックで候補者情報を組み直して再度記録してしまう）
+  // ・送信がバリデーション等で失敗し、ユーザーがもう一度送信ボタンを押した場合
+  // ・background.js側のタイムアウト再送（サーバは書き込み済みだがabortで失敗扱いになる）
+  const lastRecordedAt = _recentlyRecorded.get(candidateId);
+  if (lastRecordedAt && now - lastRecordedAt < RECORD_DEDUPE_MS) {
+    console.log(`[Snow-we] 直近${Math.round((now - lastRecordedAt) / 1000)}秒前に記録済みのためスキップ:`, candidateId);
+    return;
+  }
+  _recentlyRecorded.set(candidateId, now);
   const positionName = templateName || fallbackPosition || '';
   const industry = gicsAutoClassify(info.company || '');
 
@@ -1028,44 +1045,27 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     console.log('[Snow-we] 担当者名を再読み込みでも取得できなかったためキャッシュ値で補完:', sharedRecruiter);
   }
 
-  // ② GASへの記録はバックグラウンドのバッチキューに積むだけ（サブ・失敗してもローカル記録には影響しない）。
-  // 以前はここで即座にPOSTしていたが、RDSの一括送信等で候補者が短時間に連続処理されると
-  // GAS側・拡張機能側の両方で書き込みが競合しやすかったため、background.js側で
-  // 数秒〜1分おきにまとめて1回のリクエストで送るバッチ方式に変更した
-  ;(async () => {
-    if ((!sharedGas.url && !sharedGas.dbUrl) || !sharedRecruiter || sharedGas.scoutRecordEnabled === false) return;
-    const ageNum = (info.age || '').replace(/[歳才]/, '');
-    const payload = {
-      secret: sharedGas.secret || 'snowwe2024',
-      recruiter: sharedRecruiter,
-      company: info.company || '',
-      age: ageNum,
-      univ: info.univ || '',
-      media: platform,
-      position: positionName || sharedCurrentPosition || '',
-      industry,
-      ts: now,
-      candidateId, // 記録が空欄になった場合にGAS側から自動修復するための紐付けキー
-    };
-    console.log('[Snow-we] GAS記録キューに追加:', JSON.stringify({ recruiter: payload.recruiter, position: payload.position, industry: payload.industry, media: payload.media, ts: payload.ts, age: payload.age, company: payload.company, univ: payload.univ }));
-    try {
-      await chrome.runtime.sendMessage({ type: 'queueGasScout', payload });
-    } catch (e) {
-      if (!e.message?.includes('Extension context invalidated'))
-        console.warn('[Snow-we] GAS記録キューへの追加失敗:', e.message);
-    }
-  })();
+  // ② スカウト実績のスプレッドシート(GAS)への記録は廃止した。
+  // 以前はGASとSupabaseの両方に書いていたが、書き込み条件が両者で異なっていたため
+  // （GASは担当者名が空・GAS URL未設定・自動記録OFFのいずれかでスキップ、Supabaseは
+  // 無条件に記録）、片方にしか存在しない記録が常時発生し、どちらが正しいのかを
+  // 照合するだけで多大な手間がかかっていた。記録先をSupabaseの一本に統一する。
+  // なお、ポジション一覧の取得やフィードバック送信など、スカウト実績以外のGAS連携は
+  // 引き続き使用する。
 
   // ③ Supabaseへの保存は背景のバッチキューに積むだけ（サブ・失敗してもローカル記録には影響しない）。
-  // GASと同じ「1件ずつ独立して送信・失敗時は自動リトライ・サーキットブレーカー」の
-  // 仕組みをbackground.js側で流用している（詳細はbackground.jsのコメント参照）
+  // 1件ずつ独立して送信・失敗時は自動リトライ・サーキットブレーカーの仕組みを
+  // background.js側に持たせている（詳細はbackground.jsのコメント参照）
   ;(async () => {
     const ageNum = parseInt((info.age || '').replace(/[歳才]/g, '')) || null;
-    // ここまでの復元(再読み込み・キャッシュ)を全てすり抜けて空だった場合は、記録自体は
-    // 残す（消えるより良い）が、後から原因を追えるよう必ずログに残す。担当者名が空だと
-    // 「担当者×日」の集計・GASとの照合から漏れ、実在するのに未登録として扱われる
+    // 担当者名が空のまま記録されると「担当者×日」の集計から漏れる。記録自体は必ず残すが
+    // （消えるより良い）、実データではこの状態で一括数十件が記録された事故が複数回
+    // 起きているため、画面上にも警告を出して即座に気づけるようにする
     if (!sharedRecruiter) {
-      console.warn('[Snow-we] 担当者名を特定できないままSupabaseに記録します（要確認）:', candidateId, info.company || '');
+      console.warn('[Snow-we] 担当者名を特定できないまま記録します（要確認）:', candidateId, info.company || '');
+      try {
+        showAutoStatus('⚠️ 担当者名が未設定です。設定タブで担当者名を保存してください（このままだと担当者不明で記録されます）', 8000);
+      } catch (_) {}
     }
     try {
       await chrome.runtime.sendMessage({
@@ -1195,10 +1195,36 @@ function getCandidateId(cardEl) {
     return null;
   }
 
-  const url = findProfileUrl(cardEl);
-  if (url) return url.replace(/[?#].*$/, ''); // クエリ・ハッシュを除去
-
   const text = (cardEl.innerText || '');
+
+  // doda X: 同一人物なのに取得経路によって3種類のIDになり、重複記録の原因になっていた。
+  //   ・URL経由（React fiberから組み立て）: .../member_search/detail/705981 → 先頭ゼロなし
+  //   ・カードテキスト経由: dodax_00890205 → 先頭ゼロあり
+  //   ・ハッシュ: dodax_h...
+  // 候補者番号（8桁）を単独行として取得し、URL由来の番号もゼロ埋めして同じ形に揃える。
+  if (getPlatform() === 'dodax') {
+    // 誤って絞り込みフィルター欄等を渡された場合に、候補者ごとに変わらない文字列から
+    // IDを作ってしまうと、全候補者が同一IDに潰れる（実機ログで確認）。IDを作らない
+    if (DODAX_PAGE_CHROME_MARKERS.some(mk => text.includes(mk))) {
+      console.warn('[Snow-we] getCandidateId(dodax): 候補者カードではない要素のためIDを返しません');
+      return null;
+    }
+    const lineNum = text.match(/(?:^|\n)\s*(\d{8})\s*(?=\n|$)/);
+    if (lineNum) return `dodax_${lineNum[1]}`;
+    const dodaxUrl = findProfileUrl(cardEl);
+    const urlNum = dodaxUrl && dodaxUrl.match(/\/member_search\/detail\/(\d+)/);
+    if (urlNum) return `dodax_${urlNum[1].padStart(8, '0')}`;
+  }
+
+  // RDSは候補者ごとの固定URLを持たないため、URLをIDに使うと事故る。実データでは
+  // 「https://ats.hrtech.rikunabi.com/client/setting/chatTemplate」（チャットテンプレートの
+  // 設定ページ）が候補者IDとして21件記録され、別人の候補者が全員この1つのIDに
+  // 潰れていた。RDSはカード上の会員ID・候補者番号の方が確実なので、URLより先に試す
+  const isRds = getPlatform() === 'rds';
+  if (!isRds) {
+    const url = findProfileUrl(cardEl);
+    if (url) return url.replace(/[?#].*$/, ''); // クエリ・ハッシュを除去
+  }
 
   // RDS等：「会員ID：」ラベルの直後にある値は候補者ごとに固有かつ不変のIDのため、
   // ハッシュフィンガープリント（タグ・コメント追加等でカード表示テキストが変わると
@@ -1216,6 +1242,12 @@ function getCandidateId(cardEl) {
   // 会社名・大学名が出てくる前の先頭5行だけだと同じ属性の別候補者が同一ハッシュに衝突し、
   // 一方が「処理済み」として無言でスキップされる（バッジが一切つかない）原因になっていた。
   // 会社名等の識別性の高い情報を含むよう先頭10行まで広げて衝突を減らす。
+  // RDSはここまでで会員ID・候補者番号が取れなかった場合に限り、最後の手段としてURLを試す
+  if (isRds) {
+    const rdsUrl = findProfileUrl(cardEl);
+    if (rdsUrl) return rdsUrl.replace(/[?#].*$/, '');
+  }
+
   const lines = stripVolatileLines(text.split('\n').map(l => l.trim()).filter(Boolean));
   const fingerprint = lines.slice(0, 10).join('|');
   if (fingerprint.length > 10) {
@@ -1226,6 +1258,22 @@ function getCandidateId(cardEl) {
   }
 
   return null;
+}
+
+// 会社名の候補として採用してはいけない行を判定する。
+// 送信フォーム側のテキストを拾ってしまうと自社の署名文（「株式会社Snow-we.Inc代表の
+// 桝井と申します。」等）が、候補者カードの定型行を拾うと「男性」「転職回数：転職経験なし」
+// 等が、それぞれ会社名として記録される事故が実データで多数確認されたため、
+// 媒体ごとの抽出ロジックとは別に共通の除外条件として持つ
+function isMessageLine(line) {
+  const l = (line || '').trim();
+  if (!l) return true;
+  // スカウトメール本文・挨拶文（自社の署名がこの経路で混入する）
+  if (/と申します|拝見し|ご経歴|ご連絡|お世話になり|よろしくお願い|いたします|ください|ませんか/.test(l)) return true;
+  // 候補者カードの定型行（会社名ではありえない）
+  if (/^(男性|女性|非公開|現職|前職)$/.test(l)) return true;
+  if (/^転職回数|^最終ログイン|^職務経歴書|以内のスカウト|^スカウト送信済/.test(l)) return true;
+  return false;
 }
 
 // カードから基本情報を抽出（履歴保存用）
@@ -1293,16 +1341,22 @@ function extractBasicInfo(cardEl) {
     // パネルから候補者情報を復元するフォールバック経由だとリストカードではなく
     // こちらの構造で渡ってくるため、性別や職歴等の無関係な行を会社名として誤って
     // 拾ってしまっていた（実データで確認）。このラベルがあれば最優先で使う
-    const companyLabelIdx = lines.findIndex(l => l === '在籍企業');
-    if (companyLabelIdx >= 0 && companyLabelIdx + 1 < lines.length) {
-      company = lines[companyLabelIdx + 1];
+    // ラベルと値が同一行に出る場合（「在籍企業：株式会社X」等）があり、完全一致だと
+    // 必ず取りこぼして下のフォールバックに落ちるため、前方一致で判定して同一行の値も拾う
+    const companyLabelIdx = lines.findIndex(l => l.startsWith('在籍企業'));
+    if (companyLabelIdx >= 0) {
+      const sameLineValue = lines[companyLabelIdx].replace(/^在籍企業[^\S\n]*[：:]?[^\S\n]*/, '').trim();
+      if (sameLineValue) company = sameLineValue;
+      else if (companyLabelIdx + 1 < lines.length) company = lines[companyLabelIdx + 1];
     }
     // AMBIカード: 「業界 / 部署」行の直前が会社名
     if (!company) {
       const industryIdx = lines.slice().reverse().findIndex(l => l.includes(' / '));
       if (industryIdx >= 0) {
         const realIdx = lines.length - 1 - industryIdx;
-        if (realIdx > 0) company = lines[realIdx - 1];
+        // 直前の行を無条件に採用していたため、そこが性別欄や転職回数欄だと
+        // 「男性」「転職回数：転職経験なし」がそのまま会社名になっていた（実データで確認）
+        if (realIdx > 0 && !isMessageLine(lines[realIdx - 1])) company = lines[realIdx - 1];
       }
     }
     // 「バックエンドエンジニア / 4年以上」「一般事務・営業事務 / 3年以上」のように
@@ -1339,7 +1393,7 @@ function extractBasicInfo(cardEl) {
         if (i === idx) continue;
         const line = lines[i];
         if (!line || line.length < 2) continue;
-        if (isEduLine(line)) continue;
+        if (isEduLine(line) || isMessageLine(line)) continue;
         const dist = Math.abs(i - idx);
         if (line.includes('／') && line.length > 4) {
           if (dist < bestSlashDist) { bestSlashDist = dist; bestSlashLine = line; }
@@ -1351,8 +1405,10 @@ function extractBasicInfo(cardEl) {
       if (bestLine) company = bestLine.split(/[／/]/)[0].trim();
     }
     if (!company) {
-      // フォールバック：ページ全体で会社名キーワードを含む行
-      company = lines.find(l => !isEduLine(l) && companyRe.test(l))?.split(/[／/]/)[0].trim() || '';
+      // フォールバック：ページ全体で会社名キーワードを含む行。
+      // このフォールバックは検索範囲がパネル全体に及ぶため、送信フォーム側のスカウト
+      // 本文（自社の署名文）が最初にヒットしてしまう事故が実データで多数確認された
+      company = lines.find(l => !isEduLine(l) && !isMessageLine(l) && companyRe.test(l))?.split(/[／/]/)[0].trim() || '';
     }
   } else if (getPlatform() === 'dodax') {
     // doda-X: 「現職」「在籍」の近くか、会社名キーワードを含む行を優先
@@ -1417,7 +1473,20 @@ function extractBasicInfo(cardEl) {
     // 「證券」は旧字体表記の会社名（例:「野村證券」）で実際に使われており、
     // 「証券」だけではキーワードに一致しなかった（実データで確認）
     const companyRe3 = /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,|ホールディングス|グループ|銀行|証券|證券|信託|保険/;
-    company = lines.find(l => !isEduLine3(l) && !isNoiseLine3(l) && companyRe3.test(l)) || '';
+    // 実際にextractBasicInfoへ渡されるのは一覧カードではなく詳細パネルであることが
+    // ほとんどで、詳細パネルには「在籍企業名」ラベルがある。キーワード一致に頼ると
+    // 「JFEエンジニアリング」「ソニー」のように株式会社等を含まない社名が必ず空欄に
+    // なり、かつ職務経歴中の過去在籍企業を現職として拾う危険もあるため、ラベルを最優先する
+    const bizLabelIdx = lines.findIndex(l => l.startsWith('在籍企業名'));
+    if (bizLabelIdx >= 0) {
+      const sameLine = lines[bizLabelIdx].replace(/^在籍企業名[^\S\n]*[：:]?[^\S\n]*/, '').trim();
+      const nextLine = lines[bizLabelIdx + 1] || '';
+      const candidate = sameLine || nextLine;
+      if (candidate && !isEduLine3(candidate) && !isNoiseLine3(candidate) && !isMessageLine(candidate)) {
+        company = candidate;
+      }
+    }
+    if (!company) company = lines.find(l => !isEduLine3(l) && !isNoiseLine3(l) && !isMessageLine(l) && companyRe3.test(l)) || '';
     if (!company) {
       // キーワードに一致しない会社名表記（例:「JFEエンジニアリング」）の場合、
       // 「N通」行の直後の行を会社名として採用する
@@ -1486,7 +1555,12 @@ function extractBasicInfo(cardEl) {
   // 「株式会社」を含むため会社名キーワードの判定を通ってしまう）。実在の会社名が
   // この長さになることはまずないため、文章の場合は先頭の会社名部分だけを取り出す。
   // 取り出せない場合は空欄にする（誤った長文を残すより安全）
-  if (company.length > 40) {
+  // 媒体ごとの抽出をすり抜けたスカウト本文・定型行を最後に落とす。実データでは
+  // 「ハイクラス転職エージェント、株式会社Snow-we.Inc代表の桝井と申します。」が
+  // ちょうど40文字で下の長文ガード(>40)を通過し、会社名として記録され続けていた
+  if (company && isMessageLine(company)) company = '';
+
+  if (company.length > 30) {
     const head = company.match(/^[^\s　。、]{2,40}?(?:株式会社|合同会社|有限会社|ホールディングス)/)
       || company.match(/^(?:株式会社|合同会社|有限会社)[^\s　。、]{1,20}/);
     company = head ? head[0] : '';
@@ -3554,7 +3628,14 @@ function findProfileUrl(cardEl) {
   // （RDSの hrtech/rikunabi/recruitdirect パターンはドメイン名だけで緩くマッチするため、
   //  同じ求人に紐づく複数候補者が同一の求人広告URLを候補者IDとして誤取得し、
   //  重複記録や別候補者の混同を引き起こしていた）
-  const excludePatterns = [/jobAdvertisement/i, /joboffer/i, /job_offer/i, /\/requisition\//i];
+  // 設定・テンプレート・管理画面等へのリンクも候補者を識別しない。実データで
+  // 「/client/setting/chatTemplate」が候補者IDとして採用され、複数の別人が同一IDに
+  // 潰れていたため、候補者ページではありえないパスを明示的に除外する
+  const excludePatterns = [
+    /jobAdvertisement/i, /joboffer/i, /job_offer/i, /\/requisition\//i,
+    /\/setting(s)?(\/|$)/i, /template/i, /\/admin(\/|$)/i, /\/mypage(\/|$)/i,
+    /\/help(\/|$)/i, /\/logout/i, /\/notification/i,
+  ];
 
   const matchesPattern = (href) => {
     if (!href || href === '#' || href.startsWith('javascript')) return false;
