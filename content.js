@@ -4657,6 +4657,11 @@ const SCOUT_BOILERPLATE_MARKERS = [
   'スカウト送信', '候補者様',
 ];
 
+// dodaXの候補者検索結果ページ・絞り込みフィルター欄（「学歴」「資格」等、実際の
+// プロフィールと同じ語を見出しに使うため誤検出しやすい）を検出するための定型文。
+// findDodaxDetailPanelの候補除外と、extractProfileの最終安全策の両方で使う
+const DODAX_PAGE_CHROME_MARKERS = ['候補者検索結果', '一括スカウト送信は、最大', 'ポジティブアクション等法令上の例外事由'];
+
 // フィードバックのprofileSummaryがスカウトメール文面等の汚染データでないかを判定
 function isContaminatedFeedback(f) {
   const summary = f?.profileSummary || '';
@@ -6535,8 +6540,7 @@ function extractProfile() {
   // という同一の定型文になっていた）。既知の非プロフィール定型文が含まれる場合は、
   // このまま返さず空にして、呼び出し元の「プロフィールを取得できませんでした」という
   // 明確なエラー表示に倒す
-  const PAGE_CHROME_MARKERS = ['候補者検索結果', '一括スカウト送信は、最大', 'ポジティブアクション等法令上の例外事由'];
-  if (PAGE_CHROME_MARKERS.some(m => text.includes(m))) {
+  if (DODAX_PAGE_CHROME_MARKERS.some(m => text.includes(m))) {
     console.warn('[Snow-we] extractProfile: ページの検索結果/フィルター欄を誤検出したため破棄します');
     text = '';
   }
@@ -6655,6 +6659,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           for (let i = 0; i < 10; i++) {
             const p = findAMBIDetailPanel();
             if (p && (p.innerText || '').trim().length > 200) break;
+            await sleep(300);
+          }
+        } else if (getPlatform() === 'dodax') {
+          // dodaXは候補者を連続してクリックした際、詳細パネルの表示切り替えが
+          // 完了する前に抽出が走ると、直前の状態（絞り込みフィルター欄等、
+          // 実プロフィールと同じ語を見出しに使う非プロフィール要素）を誤って
+          // 拾ってしまう事故が実機ログで確認された。有効なプロフィールらしい
+          // 内容になるまで最大3秒ほど待ってから抽出する（AMBIと同じ対策）
+          for (let i = 0; i < 10; i++) {
+            const p = findDodaxDetailPanel();
+            const pt = p ? (p.innerText || '').trim() : '';
+            const looksValid = pt.length > 200 && !DODAX_PAGE_CHROME_MARKERS.some(m => pt.includes(m));
+            if (looksValid) break;
             await sleep(300);
           }
         } else {
