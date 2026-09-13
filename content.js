@@ -6324,7 +6324,18 @@ function extractProfile() {
     }
 
   } else if (host.includes('doda-x') || host.includes('dodax') || host.includes('x.doda')) {
-    detailPanel = findDodaxDetailPanel();
+    // findDodaxDetailPanelはページ全体を対象にした座標+キーワードヒューリスティックのため、
+    // 「スカウトを作成」クリック後の画面状態では、絞り込みフィルター欄など無関係な要素を
+    // 安定して選び続けてしまう事故が実機で確認された（3秒待つリトライを入れても、その間
+    // ずっと同じ誤ったパネルを返し続けるため改善しなかった）。dodaXは候補者一覧の
+    // カード自体に職務経歴等の全文が展開表示される作りのため、直前にクリックして
+    // 選択済みのカード(_selectedCard、getCandidateId等でも使っている同じ要素)を
+    // 優先的に使う方が、無関係な要素を拾わず確実に候補者本人のデータだけを取得できる
+    const selectedCardText = _selectedCard ? (_selectedCard.innerText || '').trim() : '';
+    const selectedCardLooksValid = selectedCardText.length > 200
+      && !DODAX_PAGE_CHROME_MARKERS.some(m => selectedCardText.includes(m))
+      && ['職務経歴', '在籍企業', '学歴'].some(kw => selectedCardText.includes(kw));
+    detailPanel = selectedCardLooksValid ? _selectedCard : findDodaxDetailPanel();
     const ddRoot = detailPanel || null;
 
     const byKeyword = extractByKeywords([
