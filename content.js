@@ -6661,23 +6661,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (p && (p.innerText || '').trim().length > 200) break;
             await sleep(300);
           }
-        } else if (getPlatform() === 'dodax') {
-          // dodaXは候補者を連続してクリックした際、詳細パネルの表示切り替えが
-          // 完了する前に抽出が走ると、直前の状態（絞り込みフィルター欄等、
-          // 実プロフィールと同じ語を見出しに使う非プロフィール要素）を誤って
-          // 拾ってしまう事故が実機ログで確認された。有効なプロフィールらしい
-          // 内容になるまで最大3秒ほど待ってから抽出する（AMBIと同じ対策）
-          for (let i = 0; i < 10; i++) {
-            const p = findDodaxDetailPanel();
-            const pt = p ? (p.innerText || '').trim() : '';
-            const looksValid = pt.length > 200 && !DODAX_PAGE_CHROME_MARKERS.some(m => pt.includes(m));
-            if (looksValid) break;
-            await sleep(300);
-          }
         } else {
           await scrollRightPanelToBottom();
         }
-        const profileText = extractProfile();
+        // dodaXは候補者を連続してクリックした際、詳細パネルの表示切り替えが
+        // 完了する前に抽出が走ると、直前の状態（絞り込みフィルター欄等、実
+        // プロフィールと同じ語を見出しに使う非プロフィール要素）を誤って拾って
+        // しまう事故が実機ログで確認された。findDodaxDetailPanel単体の事前
+        // チェックだけでは、その直後にextractProfile内部で改めて呼び出す
+        // findDodaxDetailPanelが別のタイミングの状態を拾ってしまい効果が
+        // なかった（実機で再現）ため、extractProfile自体を結果が安定するまで
+        // リトライする（AMBIの.leftCell待機と同じ考え方）
+        let profileText;
+        if (getPlatform() === 'dodax') {
+          profileText = '';
+          for (let i = 0; i < 10; i++) {
+            profileText = extractProfile();
+            if (profileText.trim().length > 200) break;
+            await sleep(300);
+          }
+        } else {
+          profileText = extractProfile();
+        }
         // デバッグ表示用のパネル取得もプラットフォームに合わせる（以前はAMBI以外だと
         // 常にRDS用の関数にフォールバックしていたため、dodaX等の調査時にログの
         // 「detailPanel」欄が実際には無関係なRDS向け検出結果を指しており、
