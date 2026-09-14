@@ -2029,7 +2029,7 @@ document.addEventListener('click', e => {
     const detailPanel =
       platform === 'ambi' ? findAMBIDetailPanel() :
       platform === 'rds' ? findRDSDetailPanel() :
-      platform === 'dodax' ? findDodaxDetailPanel() :
+      platform === 'dodax' ? (findDodaxProfilePane() || findDodaxDetailPanel()) :
       // Bizreachもこのフォールバックの対象外だったため、開始クリックを取り逃すと
       // 記録がまるごと消えていた（実データで未登録率85%を確認）
       platform === 'bizreach' ? findBizreachDetailPanel() :
@@ -5893,7 +5893,7 @@ function initDetailPanelObserver() {
     clearTimeout(_detailJudgeTimer);
     _detailJudgeTimer = setTimeout(async () => {
       const p = platform === 'rds' ? findRDSDetailPanel()
-              : platform === 'dodax' ? findDodaxDetailPanel()
+              : platform === 'dodax' ? (findDodaxProfilePane() || findDodaxDetailPanel())
               : findAMBIDetailPanel();
       await showScoutedNoticeInPanel(p);
       // 詳細パネル自動AI判定は無効化済み（誤判定の温床だったため）。
@@ -6161,6 +6161,31 @@ function cleanUnivName(raw) {
 }
 
 // -------------------------------------------------------
+// doda X「スカウト送信」画面の、左側にある候補者プロフィール欄を特定する
+// -------------------------------------------------------
+// 座標ベースの推測(findDodaxDetailPanel)は、一覧ページのDOMが背後に残っている状態だと
+// 絞り込みフィルター欄など無関係な要素を安定して選んでしまうため、ここでは内容で特定する。
+// 候補者プロフィール欄は必ず「基本情報」と「在籍企業」の両方を含み、右側の送信フォーム
+// （差出人・宛先・件名・本文）は含まない。条件を満たす要素のうち最も内側（最小）のものが、
+// 余計な周辺要素を含まない目的の欄になる
+function findDodaxProfilePane() {
+  const formMarkers = ['差出人', '宛先', '件名', '本文', '注目した'];
+  let best = null;
+  let bestLen = Infinity;
+  document.querySelectorAll('div, section, article, main').forEach(el => {
+    const t = (el.innerText || '').trim();
+    if (t.length < 100 || t.length > 20000) return;
+    if (!t.includes('基本情報') || !t.includes('在籍企業')) return;
+    if (DODAX_PAGE_CHROME_MARKERS.some(m => t.includes(m))) return;
+    // 送信フォーム側まで含んでしまっている広い要素は、スカウト本文が混入するため除外する
+    if (formMarkers.filter(m => t.includes(m)).length >= 3) return;
+    if (t.length < bestLen) { bestLen = t.length; best = el; }
+  });
+  if (best) console.log('[Snow-we] findDodaxProfilePane: プロフィール欄を特定 len=' + bestLen);
+  return best;
+}
+
+// -------------------------------------------------------
 // doda X 詳細パネルを特定する（カードクリックで開く右パネル）
 // -------------------------------------------------------
 function findDodaxDetailPanel() {
@@ -6412,11 +6437,18 @@ function extractProfile() {
     // カード自体に職務経歴等の全文が展開表示される作りのため、直前にクリックして
     // 選択済みのカード(_selectedCard、getCandidateId等でも使っている同じ要素)を
     // 優先的に使う方が、無関係な要素を拾わず確実に候補者本人のデータだけを取得できる
-    const selectedCardText = _selectedCard ? (_selectedCard.innerText || '').trim() : '';
+    // ただし「スカウト送信」画面に遷移すると一覧のカードがDOMから外れることがあり、
+    // 切り離された古い要素が_selectedCardに残ると、前の候補者の内容でそのまま生成して
+    // しまう（実機で、画面上の候補者とはまったく別人の経歴で生成される事象を確認）。
+    // document.containsで、今も画面に存在する要素かどうかを必ず確認する。
+    // またスカウト送信画面では左側のプロフィール欄が最も確実な情報源のため、そちらを優先する
+    const profilePane = findDodaxProfilePane();
+    const selectedCardText = (_selectedCard && document.contains(_selectedCard))
+      ? (_selectedCard.innerText || '').trim() : '';
     const selectedCardLooksValid = selectedCardText.length > 200
       && !DODAX_PAGE_CHROME_MARKERS.some(m => selectedCardText.includes(m))
       && ['職務経歴', '在籍企業', '学歴'].some(kw => selectedCardText.includes(kw));
-    detailPanel = selectedCardLooksValid ? _selectedCard : findDodaxDetailPanel();
+    detailPanel = profilePane || (selectedCardLooksValid ? _selectedCard : findDodaxDetailPanel());
     const ddRoot = detailPanel || null;
 
     const byKeyword = extractByKeywords([
