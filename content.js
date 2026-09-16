@@ -765,6 +765,10 @@ function showBadge(cls, text, tooltip = '', profileSummary = '', aiVerdict = '')
 // クリックトラッキング開始
 setupClickTracking();
 
+// 前回、拡張機能との接続が切れていて送信できなかった記録があれば送り直す。
+// ページを読み込み直した時点では接続が回復しているため、ここで回収できる
+setTimeout(() => { resendUnsentRecords().catch(() => {}); }, 3000);
+
 // -------------------------------------------------------
 // スカウト送信履歴の管理
 // -------------------------------------------------------
@@ -1072,40 +1076,41 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
         showAutoStatus('⚠️ 担当者名が未設定です。設定タブで担当者名を保存してください（このままだと担当者不明で記録されます）', 8000);
       } catch (_) {}
     }
+    const supabasePayload = {
+      candidateId,
+      data: {
+        platform,
+        platform_candidate_id: candidateId,
+        candidate_name: info.name || '',
+        candidate_age: ageNum,
+        candidate_industry: industry,
+        company_name: info.company || '',
+        university: info.univ || '',
+        position_name: positionName || sharedCurrentPosition,
+        recruiter_name: sharedRecruiter,
+        sent_at: new Date(now).toISOString(),
+        scout_message: templateRaw || '',
+        // どのバージョンの拡張機能が記録したかを残す。メンバーごとに更新の
+        // タイミングが揃わず、記録漏れの原因が「古いバージョンのままだから」
+        // なのか「まだ直っていないバグがあるから」なのか切り分けられない、
+        // という問題が実際に起きたため（8/16〜8/22の大量欠落の調査で判明）
+        ext_version: (() => {
+          try { return chrome.runtime.getManifest().version; } catch (_) { return ''; }
+        })(),
+      },
+    };
     try {
-      await chrome.runtime.sendMessage({
-        type: 'queueSupabaseScout',
-        payload: {
-          candidateId,
-          data: {
-            platform,
-            platform_candidate_id: candidateId,
-            candidate_name: info.name || '',
-            candidate_age: ageNum,
-            candidate_industry: industry,
-            company_name: info.company || '',
-            university: info.univ || '',
-            position_name: positionName || sharedCurrentPosition,
-            recruiter_name: sharedRecruiter,
-            sent_at: new Date(now).toISOString(),
-            scout_message: templateRaw || '',
-            // どのバージョンの拡張機能が記録したかを残す。メンバーごとに更新の
-            // タイミングが揃わず、記録漏れの原因が「古いバージョンのままだから」
-            // なのか「まだ直っていないバグがあるから」なのか切り分けられない、
-            // という問題が実際に起きたため（8/16〜8/22の大量欠落の調査で判明）
-            ext_version: (() => {
-              try { return chrome.runtime.getManifest().version; } catch (_) { return ''; }
-            })(),
-          },
-        },
-      });
+      await chrome.runtime.sendMessage({ type: 'queueSupabaseScout', payload: supabasePayload });
     } catch (e) {
       // 拡張機能を更新・再読み込みすると、開いたままのタブの内容は拡張機能から
       // 切り離され、ここが必ず失敗する。従来はこのエラーだけ警告も出さずに
       // 握り潰していたため、ユーザーは気づかないまま送り続け、その間の記録が
-      // すべて失われていた（実データで、30分間に送った22件のうち17件が
-      // 記録されず、ページ再読み込み後の時間帯は漏れゼロという形で確認）。
-      // 画面上に「再読み込みが必要」と明示して、気づけるようにする
+      // すべて失われていた（実データで、ある担当者の1週間分176件が失われていた）。
+      // 画面に警告を出すだけでは「再読み込みを忘れない」という人の注意に頼ることに
+      // なるため、ページ側の保存領域に退避して次回読み込み時に自動送信する。
+      // 拡張機能から切り離されてもページ自身のlocalStorageは使えるため、ここに
+      // 置いておけば記録は失われない
+      stashUnsentRecord(supabasePayload);
       if (e.message?.includes('Extension context invalidated')) {
         showExtensionInvalidatedBanner();
       } else {
@@ -1113,6 +1118,56 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
       }
     }
   })();
+}
+
+// ── 送信できなかった記録の退避と再送 ──────────────────────────
+// 拡張機能との接続が切れている間の記録を、ページ側のlocalStorageに貯めておき、
+// ページを読み込み直したときにまとめて送り直す
+const UNSENT_KEY = 'snowwe_unsent_scouts';
+
+function stashUnsentRecord(payload) {
+  try {
+    const list = JSON.parse(localStorage.getItem(UNSENT_KEY) || '[]');
+    // 同じ候補者が既に退避済みなら重ねない
+    if (list.some(p => p?.candidateId === payload.candidateId)) return;
+    list.push(payload);
+    // 際限なく貯まらないよう上限を設ける（古いものから捨てる）
+    while (list.length > 500) list.shift();
+    localStorage.setItem(UNSENT_KEY, JSON.stringify(list));
+    console.warn('[Snow-we] 記録を送信できなかったため一時保存しました。ページ再読み込み時に再送します:', payload.candidateId);
+  } catch (e) {
+    console.warn('[Snow-we] 一時保存に失敗:', e.message);
+  }
+}
+
+async function resendUnsentRecords() {
+  let list;
+  try {
+    list = JSON.parse(localStorage.getItem(UNSENT_KEY) || '[]');
+  } catch (_) {
+    return;
+  }
+  if (!Array.isArray(list) || list.length === 0) return;
+  if (!isExtensionAlive()) return;
+
+  console.log(`[Snow-we] 未送信の記録が${list.length}件あります。再送します`);
+  const remaining = [];
+  for (const payload of list) {
+    try {
+      await chrome.runtime.sendMessage({ type: 'queueSupabaseScout', payload });
+    } catch (_) {
+      remaining.push(payload); // まだ送れない場合は次回に持ち越す
+    }
+  }
+  try {
+    if (remaining.length === 0) localStorage.removeItem(UNSENT_KEY);
+    else localStorage.setItem(UNSENT_KEY, JSON.stringify(remaining));
+  } catch (_) {}
+  const sent = list.length - remaining.length;
+  if (sent > 0) {
+    console.log(`[Snow-we] 未送信だった記録 ${sent}件を再送しました`);
+    try { showAutoStatus(`✅ 記録できていなかった${sent}件を送信しました`, 6000); } catch (_) {}
+  }
 }
 
 // 拡張機能との接続が生きているか（切れていると記録が一切保存されない）
