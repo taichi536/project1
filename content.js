@@ -114,7 +114,12 @@ function showExtensionInvalidatedBanner() {
       background:transparent;border:none;color:#78350f;font-size:18px;
       font-weight:700;cursor:pointer;line-height:1;
     `;
-    closeBtn.addEventListener('click', () => banner.remove());
+    // 閉じたら再表示できるようにする。この状態のまま操作を続けると記録が
+    // 失われ続けるため、次にスカウト操作をした時点でもう一度警告する必要がある
+    closeBtn.addEventListener('click', () => {
+      banner.remove();
+      _extensionInvalidatedBannerShown = false;
+    });
     banner.appendChild(closeBtn);
 
     document.documentElement.appendChild(banner);
@@ -1095,10 +1100,28 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
         },
       });
     } catch (e) {
-      if (!e.message?.includes('Extension context invalidated'))
+      // 拡張機能を更新・再読み込みすると、開いたままのタブの内容は拡張機能から
+      // 切り離され、ここが必ず失敗する。従来はこのエラーだけ警告も出さずに
+      // 握り潰していたため、ユーザーは気づかないまま送り続け、その間の記録が
+      // すべて失われていた（実データで、30分間に送った22件のうち17件が
+      // 記録されず、ページ再読み込み後の時間帯は漏れゼロという形で確認）。
+      // 画面上に「再読み込みが必要」と明示して、気づけるようにする
+      if (e.message?.includes('Extension context invalidated')) {
+        showExtensionInvalidatedBanner();
+      } else {
         console.warn('[Snow-we] Supabase記録キューへの追加失敗:', e.message);
+      }
     }
   })();
+}
+
+// 拡張機能との接続が生きているか（切れていると記録が一切保存されない）
+function isExtensionAlive() {
+  try {
+    return !!(chrome.runtime && chrome.runtime.id);
+  } catch (_) {
+    return false;
+  }
 }
 
 // 直近90日以内にスカウト済みかを返す
@@ -1674,6 +1697,13 @@ document.addEventListener('click', e => {
   }
 
   console.log('[Snow-we] スカウト系ボタン検知:', JSON.stringify(text));
+
+  // 拡張機能との接続が切れていると、この先の記録処理は必ず失敗する。
+  // 送信してから失敗に気づいても手遅れ（記録は復元できない）なので、
+  // スカウト操作を始めた時点で警告を出す
+  if (!isExtensionAlive()) {
+    showExtensionInvalidatedBanner();
+  }
 
   // ── スカウトボタン：候補者カードを特定して保存 ──
   if (isScoutBtn) {
