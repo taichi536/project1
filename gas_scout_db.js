@@ -281,6 +281,14 @@ function doPost(e) {
     if (data.action === 'getAllDailySheetHistory') {
       const datePattern = /^\s*(\d{4})年(\d{1,2})月(\d{1,2})日\s*[（(][日月火水木金土][）)]\s*$/;
       const records = [];
+      // 期間の指定（'YYYY-MM-DD'）。全日付シートを毎回読むと、シートが数か月分
+      // 溜まった時点でApps Scriptの6分の実行時間上限に掛かり、応答が返らなくなる
+      // （実際に、7か月分・150枚超になった時点で404やHTMLのエラーページが返る状態に
+      // なった）。範囲外のシートは getValues を一切呼ばずに読み飛ばすことで、
+      // 必要な期間だけを短時間で返せるようにする。未指定なら従来どおり全期間を返す
+      const sinceDate = (data.since || '').trim();
+      const untilDate = (data.until || '').trim();
+      let scannedSheets = 0;
       // シート1枚につきメンバー数分(4回)読み込んでいると、シート数が多いと
       // Apps Script側の実行時間を圧迫して6分のタイムアウトに掛かりかねないため、
       // シート1枚につき全メンバー分の列を1回のgetValuesでまとめて読む
@@ -288,8 +296,13 @@ function doPost(e) {
       ss.getSheets().forEach(sheet => {
         const m = sheet.getName().match(datePattern);
         if (!m) return;
+        const workDate = `${m[1]}-${('0' + m[2]).slice(-2)}-${('0' + m[3]).slice(-2)}`;
+        // 範囲外のシートはここで打ち切る（重いgetValuesに入る前に判定する）
+        if (sinceDate && workDate < sinceDate) return;
+        if (untilDate && workDate > untilDate) return;
         const lastRow = sheet.getLastRow();
         if (lastRow < 3) return;
+        scannedSheets++;
         const numRows = lastRow - 2;
         const allValues = sheet.getRange(3, 1, numRows, maxCol).getValues();
 
@@ -298,7 +311,6 @@ function doPost(e) {
         // (JSTは+9時間のため日本時間0時=UTC前日15時)、正午を使ってズレないようにする
         const sheetFallbackDateMs =
           new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0).getTime();
-        const workDate = `${m[1]}-${('0' + m[2]).slice(-2)}-${('0' + m[3]).slice(-2)}`;
 
         Object.entries(MEMBER_MAP).forEach(([recruiter, startCol]) => {
           const off = startCol - 1; // 0-indexed
@@ -353,7 +365,9 @@ function doPost(e) {
           });
         });
       });
-      return json({ ok: true, records });
+      Logger.log('[Snow-we] getAllDailySheetHistory: since=' + (sinceDate || '(全期間)') +
+        ' until=' + (untilDate || '(制限なし)') + ' 読んだシート数=' + scannedSheets + ' 件数=' + records.length);
+      return json({ ok: true, records, scannedSheets });
     }
 
     // ── 記録不備一覧取得（拡張機能のpopupがバッジ表示のために定期取得） ──
