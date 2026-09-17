@@ -544,7 +544,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // 見られる人は誰でもポジション一覧を読める。APIが返すのは求人情報だけで候補者等の
 // 個人情報は含まないため許容している。差し替えるときはサーバーの.envとここの両方を
 // 更新して、拡張機能を配り直す必要がある。
-const DEFAULT_POSITIONS_API_TOKEN = '';
+const DEFAULT_POSITIONS_API_TOKEN = '354baf5b88f9a4d43111b4ec475ad4fd6b47dacd87f5ea9a63e6deabccc9fcf5';
 
 async function getPositionsApiToken() {
   const { positionsApiToken } = await chrome.storage.local.get(['positionsApiToken']);
