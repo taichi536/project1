@@ -468,7 +468,7 @@ const SUPABASE_KEY = 'sb_publishable_tEQ4TOve0uCydsGiEm1cDA_D1LQ49wN';
 // GASの「ポジション」シートではなくSupabaseの positions テーブルを正として参照する。
 // nameForFilter を渡すとその名称と完全一致する1件だけを取得する。
 async function fetchSupabasePositions(nameForFilter) {
-  const cols = 'name,business_overview,required_skills,preferred_skills,desired_profile';
+  const cols = 'name,source,business_overview,required_skills,preferred_skills,desired_profile';
   const filter = nameForFilter ? `&name=eq.${encodeURIComponent(nameForFilter)}` : '&order=name.asc';
   const res = await fetch(`${SUPABASE_URL}/rest/v1/positions?select=${cols}${filter}`, {
     headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
@@ -977,7 +977,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .then(rows => {
         if (rows.length > 0) {
           console.log('[Snow-we] getPositionList: Supabaseから取得成功', rows.length, '件');
-          sendResponse({ positions: rows.map(r => r.name) });
+          // 募集元ファームの判別に使うため、ポジション名→source の対応も返す。
+          // マスタのポジション名には「AC）」のような接頭辞が付いていないものが
+          // 大半で、名前だけではどのファームの求人か判別できないため
+          const sources = {};
+          rows.forEach(r => { if (r.name) sources[r.name] = r.source || ''; });
+          sendResponse({ positions: rows.map(r => r.name), sources });
         } else {
           console.warn('[Snow-we] getPositionList: Supabase応答が空。ハードコード一覧にフォールバック');
           sendResponse({ positions: POSITION_LIST });
@@ -995,7 +1000,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     fetchSupabasePositions()
       .then(rows => {
         sendResponse({
-          positions: rows.map(r => ({ name: r.name, description: buildPositionRequirementsText(r).substring(0, 1500) })),
+          positions: rows.map(r => ({ name: r.name, source: r.source || '', description: buildPositionRequirementsText(r).substring(0, 1500) })),
         });
       })
       .catch(() => sendResponse({ positions: [] }));
