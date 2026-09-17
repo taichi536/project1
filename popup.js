@@ -462,13 +462,34 @@ $('copy-template-btn').addEventListener('click', () => {
   });
 });
 
+// ポジション名の接頭辞から、募集元のファーム名を判別する。
+// 従来はテンプレート・生成プロンプトの両方で「アクセンチュア」が固定文字列に
+// なっていたため、EY・PwC・KPMG・デロイトの案件でも候補者に「アクセンチュアの
+// 〇〇のポジション」という文面が送られてしまっていた。
+// 判別できない場合は空文字を返し、ファーム名に触れない書き方にする
+// （誤った社名を書くくらいなら、書かない方が安全なため）
+function detectClientCompany(positionName) {
+  const p = (positionName || '').trim();
+  if (/^AC\s*[）)]/.test(p)) return 'アクセンチュア';
+  if (/^BC\s*[（()）]/.test(p)) return 'ベイカレント';
+  if (/^DTC\s*[（()）]/.test(p)) return 'デロイト トーマツ コンサルティング';
+  if (/^EY\s*[（()）]/i.test(p)) return 'EY';
+  if (/^PwC/i.test(p)) return 'PwC';
+  if (/^KPMG/i.test(p)) return 'KPMG';
+  return '';
+}
+
 function buildTemplate(personalizedLine, positionName) {
   const pos = positionName || '営業戦略コンサルタント';
+  const company = detectClientCompany(positionName);
+  const intro = company
+    ? `この度、貴方様のご経歴を拝見し、${company}の「${pos}」のポジションに高い親和性を感じ、ご連絡いたしました。`
+    : `この度、貴方様のご経歴を拝見し、「${pos}」のポジションに高い親和性を感じ、ご連絡いたしました。`;
   return `候補者様
 
 初めまして。ハイクラス転職エージェント、株式会社Snow-we.Inc代表の桝井と申します。
 
-この度、貴方様のご経歴を拝見し、アクセンチュアの「${pos}」のポジションに高い親和性を感じ、ご連絡いたしました。
+${intro}
 
 ${personalizedLine}
 
@@ -618,7 +639,7 @@ ${positionDescription ? `募集要件:\n${positionDescription.substring(0, 800)}
 以下の候補者プロフィールを読んで、スカウトメールに挿入するパーソナライズ文を1文で作成してください。
 
 【挿入位置】
-直前：「この度、貴方様のご経歴を拝見し、アクセンチュアの「${positionName || '〇〇'}」のポジションに高い親和性を感じ、ご連絡いたしました。」
+直前：「この度、貴方様のご経歴を拝見し、${detectClientCompany(positionName) ? detectClientCompany(positionName) + 'の' : ''}「${positionName || '〇〇'}」のポジションに高い親和性を感じ、ご連絡いたしました。」
 直後：「当方の経験上、面接次第ではありますが、かなり高い確度で本ポジションにてオファーが出ると感じます。」
 
 【最優先】プロフィールに数値で語れる実績（売上・予算達成率・前年比・受賞歴・マネジメント人数・取扱件数・登壇実績等）が書かれている場合は、必ずそれを具体的に盛り込むこと。抽象的な形容（「豊富な経験」「幅広く活躍」等）だけで済ませず、数字や固有の実績を優先する。数値の記載が無い場合のみ、職種・役割の具体性で補う。
@@ -740,7 +761,7 @@ async function extractCandidateAttributes(apiKey, profileText) {
 ${profileText}
 
 JSON形式のみで出力（コードブロック不要）:
-{"current_role":"現在の役職","current_industry":"現職業界（例:SIer・コンサル・メーカー等）","company_size":"企業規模（大手・中堅・ベンチャー等）","experience_years":経験年数の整数,"key_skills":["スキル1","スキル2"],"estimated_grade":"推定グレード（例:Manager相当・Consultant相当）","transfer_axis":"転職軸（記載があれば。なければ職歴から推測）","strengths":"アクセンチュアで活かせる最大の強み1文"}`;
+{"current_role":"現在の役職","current_industry":"現職業界（例:SIer・コンサル・メーカー等）","company_size":"企業規模（大手・中堅・ベンチャー等）","experience_years":経験年数の整数,"key_skills":["スキル1","スキル2"],"estimated_grade":"推定グレード（例:Manager相当・Consultant相当）","transfer_axis":"転職軸（記載があれば。なければ職歴から推測）","strengths":"コンサルファームで活かせる最大の強み1文"}`;
 
   const data = await claudeFetch(apiKey, {
     model: 'claude-haiku-4-5-20251001',
@@ -804,7 +825,7 @@ async function suggestPosition(apiKey, profileText) {
   const nameWithSnippetList = positions.map(p =>
     p.description ? `${p.name}（${p.description.substring(0, 120)}）` : p.name
   ).join('\n');
-  const step1Prompt = `あなたはアクセンチュア転職支援の専門エージェントです。
+  const step1Prompt = `あなたはハイクラスコンサル転職支援の専門エージェントです。募集ポジションはアクセンチュア・ベイカレント・BIG4（デロイト・PwC・EY・KPMG）等、複数のファームのものが混在しています。
 以下の候補者プロフィールと募集ポジション一覧を照合し、最も合致しそうなポジション名を上位15件選んでください。
 ポジション名の後の括弧内は募集要件の冒頭です。候補者の職歴・スキルと照合して判断してください。
 
@@ -859,7 +880,7 @@ async function suggestPositionSingleStep(apiKey, profileText, positionListText, 
 - 強み: ${candidateAttrs.strengths || '不明'}
 ` : '';
 
-  const prompt = `あなたはアクセンチュア日本法人への転職支援を専門とするハイクラス転職エージェントです。
+  const prompt = `あなたはコンサルファームへの転職支援を専門とするハイクラス転職エージェントです。募集ポジションはアクセンチュア・ベイカレント・BIG4（デロイト・PwC・EY・KPMG）等、複数のファームのものが混在しています。
 候補者にスカウトを送る際、どのポジションで打てば「刺さるか」を判断してください。
 ${attrSection}
 【判断の視点】
