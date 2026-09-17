@@ -254,7 +254,8 @@ $('save-btn').addEventListener('click', () => {
 // 設定の保存・読み込み
 // ============================================================
 async function loadSettings() {
-  const r = await chrome.storage.local.get(['screeningCriteria', 'gasSettings', 'autoRunConfig']);
+  const r = await chrome.storage.local.get(['screeningCriteria', 'gasSettings', 'autoRunConfig', 'positionsApiToken']);
+  if (r.positionsApiToken) $('positions-api-token').value = r.positionsApiToken;
   const c = r.screeningCriteria || {};
   const gas = r.gasSettings || {};
 
@@ -350,7 +351,10 @@ $('settings-save-btn').addEventListener('click', async () => {
     urls: $('auto-run-urls').value.split('\n').map(u => u.trim()).filter(Boolean),
   };
 
-  await chrome.storage.local.set({ screeningCriteria: criteria, gasSettings, autoRunConfig });
+  const positionsApiToken = $('positions-api-token').value.trim();
+  await chrome.storage.local.set({ screeningCriteria: criteria, gasSettings, autoRunConfig, positionsApiToken });
+  // トークンを差し替えたらキャッシュは無効。次回取得で取り直させる
+  await chrome.storage.local.remove(['positionsCache']);
   chrome.runtime.sendMessage({ type: 'setAutoRunAlarm', autoRunConfig }).catch(() => {});
 
   const saved = $('settings-saved');
@@ -468,8 +472,23 @@ $('copy-template-btn').addEventListener('click', () => {
 // 〇〇のポジション」という文面が送られてしまっていた。
 // 判別できない場合は空文字を返し、ファーム名に触れない書き方にする
 // （誤った社名を書くくらいなら、書かない方が安全なため）
+// ポジション名を「クライアント企業名」と「ポジション名」に分ける。
+// 現行の表示名は「ファーム名｜ポジション名」（候補者管理システムのfirm列を
+// 日本語化したもの）。過去に保存されたcurrentPositionには「AC）」のような
+// 接頭辞形式やファーム名なしのものも残っているため、そちらも解釈する
+function splitPositionLabel(positionName) {
+  const p = (positionName || '').trim();
+  const sep = p.indexOf('｜');
+  if (sep > 0) {
+    return { company: p.slice(0, sep).trim(), position: p.slice(sep + 1).trim() };
+  }
+  return { company: detectClientCompany(p), position: p };
+}
+
 function detectClientCompany(positionName) {
   const p = (positionName || '').trim();
+  const sep = p.indexOf('｜');
+  if (sep > 0) return p.slice(0, sep).trim();
   if (/^AC\s*[）)]/.test(p)) return 'アクセンチュア';
   if (/^BC\s*[（()）]/.test(p)) return 'ベイカレント';
   if (/^DTC\s*[（()）]/.test(p)) return 'デロイト トーマツ コンサルティング';
@@ -480,8 +499,9 @@ function detectClientCompany(positionName) {
 }
 
 function buildTemplate(personalizedLine, positionName) {
-  const pos = positionName || '営業戦略コンサルタント';
-  const company = detectClientCompany(positionName);
+  const split = splitPositionLabel(positionName);
+  const pos = split.position || '営業戦略コンサルタント';
+  const company = split.company;
   const intro = company
     ? `この度、貴方様のご経歴を拝見し、${company}の「${pos}」のポジションに高い親和性を感じ、ご連絡いたしました。`
     : `この度、貴方様のご経歴を拝見し、「${pos}」のポジションに高い親和性を感じ、ご連絡いたしました。`;
@@ -639,7 +659,7 @@ ${positionDescription ? `募集要件:\n${positionDescription.substring(0, 800)}
 以下の候補者プロフィールを読んで、スカウトメールに挿入するパーソナライズ文を1文で作成してください。
 
 【挿入位置】
-直前：「この度、貴方様のご経歴を拝見し、${detectClientCompany(positionName) ? detectClientCompany(positionName) + 'の' : ''}「${positionName || '〇〇'}」のポジションに高い親和性を感じ、ご連絡いたしました。」
+直前：「この度、貴方様のご経歴を拝見し、${splitPositionLabel(positionName).company ? splitPositionLabel(positionName).company + 'の' : ''}「${splitPositionLabel(positionName).position || '〇〇'}」のポジションに高い親和性を感じ、ご連絡いたしました。」
 直後：「当方の経験上、面接次第ではありますが、かなり高い確度で本ポジションにてオファーが出ると感じます。」
 
 【最優先】プロフィールに数値で語れる実績（売上・予算達成率・前年比・受賞歴・マネジメント人数・取扱件数・登壇実績等）が書かれている場合は、必ずそれを具体的に盛り込むこと。抽象的な形容（「豊富な経験」「幅広く活躍」等）だけで済ませず、数字や固有の実績を優先する。数値の記載が無い場合のみ、職種・役割の具体性で補う。
@@ -743,17 +763,6 @@ async function runSuggestPosition() {
   $('suggest-btn').disabled = false;
 }
 
-async function fetchPositionsFromGas(positionUrl, secret) {
-  const res = await fetch(positionUrl, {
-    method: 'POST',
-    body: JSON.stringify({ secret, action: 'getPositions' }),
-  });
-  if (!res.ok) throw new Error(`GAS接続エラー (${res.status})`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'ポジション取得失敗');
-  return data.positions || [];
-}
-
 async function extractCandidateAttributes(apiKey, profileText) {
   const prompt = `以下の候補者プロフィールから転職提案に必要な属性を抽出してください。
 
@@ -778,112 +787,104 @@ JSON形式のみで出力（コードブロック不要）:
 async function suggestPosition(apiKey, profileText) {
   apiKey = sanitizeApiKey(apiKey);
 
-  const r = await chrome.storage.local.get(['gasSettings']);
-  const gas = r.gasSettings || {};
-  let positions = [];
-  let usingGas = false; // 旧経路(GAS)から取得したかどうか。ログ判別用
-
-  // ポジションマスタはSupabaseのpositionsテーブルが正（業務概要・必須スキル・
-  // 歓迎スキル・求める人物像まで揃っている）。ポジション選択のドロップダウンは
-  // 既にそちらを見ているのに、この提案機能だけGAS経由のまま取り残されており、
-  // 名称と短い説明しか得られないうえ、GASが応答しないときは無言でハードコードの
-  // デフォルト一覧に落ちて提案していた
+  // ポジションマスタの正は候補者管理システムのAPI。全ファーム・全件にURLと
+  // 職務内容・応募要件が揃っている。ただし要件込みの全件は約4MBあってAIに
+  // 渡しきれないため、まず軽量版（名称・ファーム・カテゴリ・勤務地のみ）で
+  // 絞り込み、絞り込んだ分だけ要件付きで取り直す
+  let all = [];
   try {
     setStatus('suggest', 'loading', 'ポジション情報を取得中...');
-    const res = await chrome.runtime.sendMessage({ type: 'getPositionListWithDesc' });
-    if (res?.positions?.length > 0) {
-      positions = res.positions;
-      console.log('[Snow-we] ポジション提案: Supabaseから', positions.length, '件取得');
+    const res = await chrome.runtime.sendMessage({ type: 'getPositionsCompact' });
+    all = res?.positions || [];
+    if (all.length === 0 && res?.error) {
+      console.warn('[Snow-we] ポジション提案: API取得失敗', res.error);
+    } else {
+      console.log('[Snow-we] ポジション提案: APIから', all.length, '件取得');
     }
   } catch (_) {}
-
-  // Supabaseから取れなかった場合のみ、旧経路のGASを試す
-  const gasUrl = gas.positionUrl || gas.url || gas.dbUrl;
-  if (positions.length === 0 && gasUrl) {
-    try {
-      setStatus('suggest', 'loading', 'GASからポジション情報を取得中...');
-      const fetched = await fetchPositionsFromGas(gasUrl, gas.secret || 'snowwe2024');
-      if (fetched.length > 0) {
-        positions = fetched;
-        usingGas = true;
-      }
-    } catch (e) {
-      // GAS取得失敗時はデフォルト一覧にフォールバック
-    }
-  }
 
   // Step 0: 候補者プロフィールを構造化抽出
   setStatus('suggest', 'loading', '候補者プロフィールを分析中...');
   const candidateAttrs = await extractCandidateAttributes(apiKey, profileText);
 
-  // 募集要件付きのポジション一覧が1件も取れなかった場合だけ、画面のドロップダウンに
-  // 並んでいる名称だけで判断する簡易経路に落ちる。以前はこの判定がGAS取得の成否
-  // (usingGas)になっていたため、Supabaseから取得できていてもこちらに落ちてしまい、
-  // せっかくの募集要件を使わずに提案していた
-  if (positions.length === 0) {
+  // 一覧が1件も取れなかった場合だけ、画面のドロップダウンに並んでいる名称だけで
+  // 判断する簡易経路に落ちる（募集要件を使えないので精度は落ちる）
+  if (all.length === 0) {
     const positionListText = Array.from(document.querySelectorAll('#position-select option'))
       .map(o => o.value).filter(Boolean).join('\n');
     setStatus('suggest', 'loading', 'ポジションを分析中...');
     return await suggestPositionSingleStep(apiKey, profileText, positionListText, candidateAttrs);
   }
 
-  // ポジション数が30件以下なら全件をSonnetへ直接渡す
-  if (positions.length <= 30) {
-    setStatus('suggest', 'loading', `${positions.length}件のポジションを分析中...`);
-    const detailList = positions
-      .map(p => p.description ? `${p.name}: ${p.description}` : p.name)
-      .join('\n');
-    return await suggestPositionSingleStep(apiKey, profileText, detailList, candidateAttrs);
-  }
-
-  // 31件以上の場合：2ステップ処理
-  // ── Step 1: Haikuで全ポジションから上位15件に絞り込み ──
-  setStatus('suggest', 'loading', `Step1: ${positions.length}件から候補を絞り込み中...`);
-  const nameWithSnippetList = positions.map(p =>
-    p.description ? `${p.name}（${p.description.substring(0, 120)}）` : p.name
+  // ── Step 1: Haikuで全件から上位15件に絞り込み ──
+  // ポジション名を書き写させると表記ゆれで照合できないため、行番号で返させる
+  setStatus('suggest', 'loading', `Step1: ${all.length}件から候補を絞り込み中...`);
+  const indexedList = all.map((p, i) =>
+    `${i}\t${p.firmJa}\t${p.title}${p.categoryLabel ? ` / ${p.categoryLabel}` : ''}${p.location ? ` / ${p.location}` : ''}`
   ).join('\n');
-  const step1Prompt = `あなたはハイクラスコンサル転職支援の専門エージェントです。募集ポジションはアクセンチュア・ベイカレント・BIG4（デロイト・PwC・EY・KPMG）等、複数のファームのものが混在しています。
-以下の候補者プロフィールと募集ポジション一覧を照合し、最も合致しそうなポジション名を上位15件選んでください。
-ポジション名の後の括弧内は募集要件の冒頭です。候補者の職歴・スキルと照合して判断してください。
 
-【募集ポジション一覧（名前＋要件概要）】
-${nameWithSnippetList}
+  const step1Prompt = `あなたはハイクラスコンサル転職支援の専門エージェントです。募集ポジションはアクセンチュア・BIG4（デロイト・PwC・EY・KPMG）・ベイカレント等、複数のファームのものが混在しています。
+以下の候補者プロフィールと募集ポジション一覧を照合し、最も合致しそうなポジションを上位15件選んでください。
+一覧は「番号<TAB>ファーム名<TAB>ポジション名 / カテゴリ / 勤務地」の形式です。
+
+【募集ポジション一覧】
+${indexedList}
 
 【候補者プロフィール】
 ${profileText}
 
-【重要】出力はJSON配列のみ。ポジション名は一覧に記載された文字列を一字一句そのままコピーすること:
-["ポジション名1","ポジション名2",...]`;
+【重要】出力は番号のJSON配列のみ。説明・コードブロックは不要:
+[12,45,301,...]`;
 
   const step1Data = await claudeFetch(apiKey, {
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 500,
+    max_tokens: 300,
     messages: [{ role: 'user', content: step1Prompt }]
   });
   const step1Text = (step1Data.content?.[0]?.text || '').trim();
-  const arrMatch = step1Text.match(/\[[\s\S]*\]/);
-  let top15Names = [];
+  const arrMatch = step1Text.match(/\[[\s\S]*?\]/);
+  let shortlist = [];
   if (arrMatch) {
-    try { top15Names = JSON.parse(arrMatch[0]); } catch (_) {}
+    try {
+      shortlist = JSON.parse(arrMatch[0]).map(n => all[Number(n)]).filter(Boolean).slice(0, 15);
+    } catch (_) {}
+  }
+  // 絞り込みに失敗した場合は、要件なしのまま全件の名称で判断する
+  if (shortlist.length === 0) {
+    setStatus('suggest', 'loading', 'ポジションを分析中...');
+    return await suggestPositionSingleStep(apiKey, profileText, all.map(p => p.label).join('\n'), candidateAttrs);
   }
 
-  // 完全一致→部分一致の順でポジションを照合
-  const matched = top15Names.map(name => {
-    const exact = positions.find(p => p.name === name);
-    if (exact) return exact;
-    const partial = positions.find(p => p.name.includes(name) || name.includes(p.name));
-    return partial || null;
-  }).filter(Boolean);
+  // ── Step 2: 絞り込んだ分だけ要件付きで取り直し、詳細ランキング ──
+  setStatus('suggest', 'loading', `Step2: ${shortlist.length}件を詳細分析中...`);
+  let detailed = shortlist;
+  try {
+    const detailRes = await chrome.runtime.sendMessage({
+      type: 'getPositionDetails',
+      ids: shortlist.map(p => p.id),
+    });
+    if (detailRes?.positions?.length) detailed = detailRes.positions;
+  } catch (_) {}
 
-  // マッチできなかった場合はStep1をスキップして全件渡す
-  const top15 = matched.length >= 3 ? matched : positions;
-
-  // ── Step 2: Haikuで詳細ランキング ──
-  setStatus('suggest', 'loading', `Step2: ${top15.length}件を詳細分析中...`);
-  const detailList = top15
-    .map(p => p.description ? `${p.name}: ${p.description}` : p.name)
+  const detailList = detailed
+    .map(p => p.description ? `${p.label}: ${p.description}` : p.label)
     .join('\n');
-  return await suggestPositionSingleStep(apiKey, profileText, detailList, candidateAttrs);
+  const result = await suggestPositionSingleStep(apiKey, profileText, detailList, candidateAttrs);
+
+  // 提案結果に求人URLとファーム名を紐づける。AIが返すのは表示名だけなので、
+  // ここで元のポジションに突き合わせる
+  const byLabel = new Map(detailed.map(p => [p.label, p]));
+  (result.suggestions || []).forEach(s => {
+    const p = byLabel.get(s.position)
+      || detailed.find(d => d.title === s.position)
+      || detailed.find(d => s.position && (d.label.includes(s.position) || s.position.includes(d.label)));
+    if (p) {
+      s.position = p.label;
+      s.url = p.url || '';
+      s.firmJa = p.firmJa || '';
+    }
+  });
+  return result;
 }
 
 async function suggestPositionSingleStep(apiKey, profileText, positionListText, candidateAttrs = null) {
@@ -959,12 +960,13 @@ function renderSuggestion(result) {
       </div>
       <div class="suggest-position">${escapeHtml(s.position || '')}</div>
       <div class="suggest-reason">${escapeHtml(s.reason || '')}</div>
+      ${s.url ? `<a class="suggest-url" href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">求人ページを開く ↗</a>` : ''}
       <button class="use-position-btn" data-position="${escapeHtml(s.position || '')}">このポジションで生成</button>
     `;
     container.appendChild(card);
 
     card.querySelector('.use-position-btn').addEventListener('click', () => {
-      $('position-select').value = s.position;
+      applySelectedPosition(s.position);
       document.querySelectorAll('.tab-btn')[0].click();
       const existing = $('result-text').textContent.trim();
       if (!existing) runGenerate();
@@ -972,8 +974,23 @@ function renderSuggestion(result) {
   });
 
   if (result.suggestions?.[0]) {
-    $('position-select').value = result.suggestions[0].position;
+    applySelectedPosition(result.suggestions[0].position);
   }
+}
+
+// 提案されたポジションを選択状態にする。
+// selectへの代入ではchangeイベントが発火しないため、ドロップダウン用に登録した
+// 保存処理が走らず、currentPosition（ページ側のインジケーターや記録が見ている値）
+// が更新されないままになっていた。一覧に無いポジション名を代入すると選択が
+// 空になってしまう点もここで吸収する
+function applySelectedPosition(name) {
+  if (!name) return;
+  const sel = $('position-select');
+  if (!Array.from(sel.options).some(o => o.value === name)) {
+    sel.appendChild(new Option(name, name));
+  }
+  sel.value = name;
+  chrome.storage.local.set({ currentPosition: name });
 }
 
 // ============================================================
@@ -1474,6 +1491,45 @@ function renderScreeningResult(result) {
 // ============================================================
 // APIキー接続テスト
 // ============================================================
+// ポジションAPIの接続テスト。入力中のトークンをその場で保存してから叩くので、
+// 「設定を保存」を押し忘れたまま失敗する、という分かりにくい状態にならない
+$('positions-api-test-btn').addEventListener('click', async () => {
+  const resultEl = $('positions-api-test-result');
+  resultEl.style.display = 'block';
+  resultEl.style.color = '#2c2c2a';
+  resultEl.textContent = '⏳ 接続中...';
+
+  const token = $('positions-api-token').value.trim();
+  if (!token) {
+    resultEl.style.color = '#b91c1c';
+    resultEl.textContent = '❌ トークンが入力されていません';
+    return;
+  }
+
+  try {
+    await chrome.storage.local.set({ positionsApiToken: token });
+    await chrome.storage.local.remove(['positionsCache']);
+    const res = await chrome.runtime.sendMessage({ type: 'getPositionsCompact', forceRefresh: true });
+    const positions = res?.positions || [];
+    if (positions.length === 0) {
+      resultEl.style.color = '#b91c1c';
+      resultEl.textContent = `❌ 取得できませんでした: ${res?.error || '応答が0件'}`;
+      return;
+    }
+    const byFirm = {};
+    positions.forEach(p => { byFirm[p.firmJa || '不明'] = (byFirm[p.firmJa || '不明'] || 0) + 1; });
+    const breakdown = Object.entries(byFirm)
+      .sort((a, b) => b[1] - a[1])
+      .map(([f, n]) => `${f} ${n}`)
+      .join(' / ');
+    resultEl.style.color = '#085041';
+    resultEl.textContent = `✅ ${positions.length}件 取得（${breakdown}）`;
+  } catch (e) {
+    resultEl.style.color = '#b91c1c';
+    resultEl.textContent = `❌ エラー: ${e.message}`;
+  }
+});
+
 $('api-test-btn').addEventListener('click', async () => {
   const apiKey = sanitizeApiKey($('api-key').value);
   const resultEl = $('api-test-result');

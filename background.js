@@ -486,6 +486,141 @@ function buildPositionRequirementsText(row) {
   return parts.join(' / ').substring(0, 2000);
 }
 
+// ── 候補者管理システムのポジションAPI ──────────────────────────────────
+// ポジションマスタの正は候補者管理システム側に移した。Supabaseのpositionsは
+// アクセンチュア偏重(175/250)でURLを持たず、歓迎スキル・求める人物像は全件空
+// だったのに対し、こちらは全ファーム・全件にURLと職務内容・応募要件が揃っている。
+// Supabase経路はAPIに到達できないときのフォールバックとして残す。
+const POSITIONS_API_URL = 'https://143-198-195-132.nip.io/api/positions';
+const POSITIONS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+// firm列は英語表記で入っているため、スカウト文面にそのまま差し込めない
+const FIRM_JA = {
+  'Accenture': 'アクセンチュア',
+  'Deloitte': 'デロイト トーマツ コンサルティング',
+  'EY': 'EYストラテジー・アンド・コンサルティング',
+  'PwC': 'PwCコンサルティング',
+  'KPMG': 'KPMGコンサルティング',
+  'future': 'フューチャー',
+  'Dirbato': 'Dirbato',
+  'アビーム': 'アビームコンサルティング',
+  'ベイカレント': 'ベイカレント・コンサルティング',
+  'カタリス': 'カタリス',
+  '日立コンサルティング': '日立コンサルティング',
+};
+function firmToJa(firm) {
+  return FIRM_JA[firm] || firm || '';
+}
+
+// ポジションの表示名。同じ職種名が複数ファームに存在するため、ファーム名を
+// 含めないと選択・記録した求人がどのファームのものか判別できなくなる。
+// この文字列がそのまま currentPosition として保存され、Supabaseのscouts.position
+// にも記録される
+const POSITION_LABEL_SEPARATOR = '｜';
+function positionLabel(p) {
+  const firm = firmToJa(p.firm);
+  return firm ? `${firm}${POSITION_LABEL_SEPARATOR}${p.title}` : (p.title || '');
+}
+
+function buildApiPositionRequirementsText(p) {
+  const parts = [];
+  if (p.categoryLabel)  parts.push('【カテゴリ】' + p.categoryLabel);
+  if (p.location)       parts.push('【勤務地】' + p.location);
+  if (p.jobContent)     parts.push('【職務内容】' + p.jobContent);
+  if (p.qualification)  parts.push('【応募要件】' + p.qualification);
+  return parts.join(' / ').substring(0, 2500);
+}
+
+// トークンを差し替えたら、サービスワーカー内のメモリキャッシュも捨てる。
+// storage側のキャッシュだけ消しても、こちらが生きていると古い一覧を返し続ける
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.positionsApiToken) _positionsMemCache = null;
+});
+
+async function getPositionsApiToken() {
+  const { positionsApiToken } = await chrome.storage.local.get(['positionsApiToken']);
+  return (positionsApiToken || '').trim();
+}
+
+async function fetchPositionsApi(query) {
+  const token = await getPositionsApiToken();
+  if (!token) throw new Error('ポジションAPIのアクセストークンが未設定です（設定タブで入力してください）');
+  const res = await fetch(`${POSITIONS_API_URL}?${query}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw new Error(res.status === 401
+      ? 'ポジションAPIの認証に失敗しました（トークンを確認してください）'
+      : `ポジションAPI取得失敗: ${res.status}`);
+  }
+  const data = await res.json();
+  return data.positions || [];
+}
+
+// 軽量版の一覧。職務内容・応募要件を含む全件は約4MBあり、chrome.storageの
+// 容量を圧迫するうえAIにも渡しきれないため、一覧はこちらだけをキャッシュし、
+// 詳細は必要になった数件だけ fetchPositionDetails で取りに行く
+let _positionsMemCache = null;
+async function fetchPositionsCompact(forceRefresh) {
+  const now = Date.now();
+  if (!forceRefresh && _positionsMemCache && now - _positionsMemCache.fetchedAt < POSITIONS_CACHE_TTL_MS) {
+    return _positionsMemCache.positions;
+  }
+
+  const { positionsCache } = await chrome.storage.local.get(['positionsCache']);
+  const cached = positionsCache;
+  if (!forceRefresh && cached?.positions?.length && now - (cached.fetchedAt || 0) < POSITIONS_CACHE_TTL_MS) {
+    _positionsMemCache = cached;
+    return cached.positions;
+  }
+
+  try {
+    const positions = await fetchPositionsApi('compact=1');
+    if (positions.length > 0) {
+      const entry = { fetchedAt: now, positions };
+      _positionsMemCache = entry;
+      await chrome.storage.local.set({ positionsCache: entry });
+      console.log('[Snow-we] ポジションAPI: 一覧を更新', positions.length, '件');
+      return positions;
+    }
+    console.warn('[Snow-we] ポジションAPI: 応答が0件');
+  } catch (e) {
+    console.warn('[Snow-we] ポジションAPI取得失敗:', e.message);
+  }
+
+  // 取得できなかったときは期限切れのキャッシュでも使う。一覧が空になると
+  // ポジション選択そのものができなくなり、生成も記録も止まってしまうため
+  if (cached?.positions?.length) {
+    console.warn('[Snow-we] ポジションAPI: 期限切れキャッシュで代用', cached.positions.length, '件');
+    return cached.positions;
+  }
+  return [];
+}
+
+async function fetchPositionDetails(ids) {
+  const unique = [...new Set((ids || []).filter(Boolean))];
+  if (unique.length === 0) return [];
+  const out = [];
+  // APIは1リクエスト200件までなので分割して取得する
+  for (let i = 0; i < unique.length; i += 100) {
+    const chunk = unique.slice(i, i + 100);
+    out.push(...await fetchPositionsApi(`ids=${encodeURIComponent(chunk.join(','))}`));
+  }
+  return out;
+}
+
+// 表示名からポジションを引く。ファーム名付きの新形式だけでなく、旧形式
+// （Supabaseのポジション名そのまま）で保存された currentPosition からも
+// 引けるように、職種名だけの一致も見る
+async function findPositionByLabel(label) {
+  const target = (label || '').trim();
+  if (!target) return null;
+  const positions = await fetchPositionsCompact();
+  const exact = positions.find(p => positionLabel(p) === target);
+  if (exact) return exact;
+  return positions.find(p => (p.title || '').trim() === target) || null;
+}
+
 let _supabaseQueueChain = Promise.resolve();
 function withSupabaseQueueLock(fn) {
   const result = _supabaseQueueChain.then(fn, fn);
@@ -940,11 +1075,23 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     const { position } = msg;
     (async () => {
       let requirements = '';
+      // 候補者管理システムのAPIを正とし、取れなかったときだけSupabaseを見る
       try {
-        const rows = await fetchSupabasePositions(position);
-        if (rows[0]) requirements = buildPositionRequirementsText(rows[0]);
+        const hit = await findPositionByLabel(position);
+        if (hit) {
+          const [detail] = await fetchPositionDetails([hit.id]);
+          if (detail) requirements = buildApiPositionRequirementsText(detail);
+        }
       } catch (e) {
-        console.warn('[Snow-we] getPositionRequirements: Supabase取得失敗', e.message);
+        console.warn('[Snow-we] getPositionRequirements: ポジションAPI取得失敗', e.message);
+      }
+      if (!requirements) {
+        try {
+          const rows = await fetchSupabasePositions(position);
+          if (rows[0]) requirements = buildPositionRequirementsText(rows[0]);
+        } catch (e) {
+          console.warn('[Snow-we] getPositionRequirements: Supabase取得失敗', e.message);
+        }
       }
 
       const { gasSettings } = await chrome.storage.local.get(['gasSettings']);
@@ -971,39 +1118,58 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  // ポジション一覧を返す（Supabaseの positions テーブルから取得、失敗時はハードコードで代替）
+  // ポジション一覧（表示名の配列）を返す。
+  // 候補者管理システムのAPI → Supabase → ハードコード の順にフォールバックする
   if (msg.type === 'getPositionList') {
-    fetchSupabasePositions()
-      .then(rows => {
+    (async () => {
+      try {
+        const rows = await fetchPositionsCompact(msg.forceRefresh === true);
         if (rows.length > 0) {
-          console.log('[Snow-we] getPositionList: Supabaseから取得成功', rows.length, '件');
-          // 募集元ファームの判別に使うため、ポジション名→source の対応も返す。
-          // マスタのポジション名には「AC）」のような接頭辞が付いていないものが
-          // 大半で、名前だけではどのファームの求人か判別できないため
-          const sources = {};
-          rows.forEach(r => { if (r.name) sources[r.name] = r.source || ''; });
-          sendResponse({ positions: rows.map(r => r.name), sources });
-        } else {
-          console.warn('[Snow-we] getPositionList: Supabase応答が空。ハードコード一覧にフォールバック');
-          sendResponse({ positions: POSITION_LIST });
+          sendResponse({ positions: rows.map(positionLabel), source: 'api' });
+          return;
         }
-      })
-      .catch(e => {
-        console.warn('[Snow-we] getPositionList: Supabase取得失敗。ハードコード一覧にフォールバック', e.message);
-        sendResponse({ positions: POSITION_LIST });
-      });
+      } catch (e) {
+        console.warn('[Snow-we] getPositionList: ポジションAPI失敗', e.message);
+      }
+      try {
+        const rows = await fetchSupabasePositions();
+        if (rows.length > 0) {
+          console.warn('[Snow-we] getPositionList: ポジションAPIが使えずSupabaseにフォールバック');
+          sendResponse({ positions: rows.map(r => r.name), source: 'supabase' });
+          return;
+        }
+      } catch (e) {
+        console.warn('[Snow-we] getPositionList: Supabaseも失敗', e.message);
+      }
+      console.warn('[Snow-we] getPositionList: ハードコード一覧にフォールバック');
+      sendResponse({ positions: POSITION_LIST, source: 'hardcoded' });
+    })();
     return true;
   }
 
-  // ポジション一覧（説明付き）を返す — AI提案機能用
-  if (msg.type === 'getPositionListWithDesc') {
-    fetchSupabasePositions()
-      .then(rows => {
-        sendResponse({
-          positions: rows.map(r => ({ name: r.name, source: r.source || '', description: buildPositionRequirementsText(r).substring(0, 1500) })),
-        });
-      })
-      .catch(() => sendResponse({ positions: [] }));
+  // ポジション一覧（軽量版の生データ）を返す — AI提案のStep1用。
+  // 職務内容・応募要件は含まないので、絞り込み後に getPositionDetails で取得する
+  if (msg.type === 'getPositionsCompact') {
+    fetchPositionsCompact(msg.forceRefresh === true)
+      .then(rows => sendResponse({
+        positions: rows.map(p => ({ ...p, label: positionLabel(p), firmJa: firmToJa(p.firm) })),
+      }))
+      .catch(e => sendResponse({ positions: [], error: e.message }));
+    return true;
+  }
+
+  // 指定IDのポジション詳細（職務内容・応募要件つき）を返す — AI提案のStep2用
+  if (msg.type === 'getPositionDetails') {
+    fetchPositionDetails(msg.ids)
+      .then(rows => sendResponse({
+        positions: rows.map(p => ({
+          ...p,
+          label: positionLabel(p),
+          firmJa: firmToJa(p.firm),
+          description: buildApiPositionRequirementsText(p),
+        })),
+      }))
+      .catch(e => sendResponse({ positions: [], error: e.message }));
     return true;
   }
 });

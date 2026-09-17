@@ -1343,6 +1343,13 @@ function getCandidateId(cardEl) {
 // 桝井と申します。」等）が、候補者カードの定型行を拾うと「男性」「転職回数：転職経験なし」
 // 等が、それぞれ会社名として記録される事故が実データで多数確認されたため、
 // 媒体ごとの抽出ロジックとは別に共通の除外条件として持つ
+// ポジションの表示名は「ファーム名｜ポジション名」形式。テンプレート名や
+// スカウトメール本文に現れるのはポジション名だけなので、照合するときは
+// ファーム名の部分を落として比べる（記録するのは元の表示名のまま）
+function stripFirmPrefix(s) {
+  return (s || '').replace(/^[^｜]{1,30}｜/, '').trim();
+}
+
 function isMessageLine(line) {
   const l = (line || '').trim();
   if (!l) return true;
@@ -1909,7 +1916,7 @@ document.addEventListener('click', e => {
 
         const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
         const positionList = res?.positions || [];
-        const normT = s => s
+        const normT = s => stripFirmPrefix(s)
           .replace(/^[A-Za-z]+[）)]\s*/u, '')
           .replace(/[（]/g, '(').replace(/[）]/g, ')')
           .replace(/　/g, ' ').replace(/\s*[-－–—]\s*/g, '-')
@@ -2015,7 +2022,7 @@ document.addEventListener('click', e => {
           const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
           const positionList = res?.positions || [];
           const sorted = [...positionList].sort((a, b) => b.length - a.length);
-          const normStr = s => s
+          const normStr = s => stripFirmPrefix(s)
             .replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')')
             .replace(/　/g, ' ').trim();
           const stripSuffix2 = p => p
@@ -2168,7 +2175,7 @@ document.addEventListener('click', e => {
                 const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
                 const positionList = res?.positions || [];
                 const sorted = [...positionList].sort((a, b) => b.length - a.length);
-                const normStr = s => s.replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim();
+                const normStr = s => stripFirmPrefix(s).replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim();
                 const stripSuffix3 = p => p.replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '').replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '').trim();
                 const exactHits = sorted.filter(p => p && normStr(tmplVal) === normStr(p));
                 const stripHits = exactHits.length === 0
@@ -2213,7 +2220,7 @@ document.addEventListener('click', e => {
               const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
               const positionList = res?.positions || [];
               const sorted = [...positionList].sort((a, b) => b.length - a.length);
-              const normStr = s => s.replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim();
+              const normStr = s => stripFirmPrefix(s).replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim();
               const stripSuffix4 = p => p.replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '').replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '').trim();
               const nTmpl = normStr(tmplVal);
               const exactHits = sorted.filter(p => p && nTmpl === normStr(p));
@@ -2251,7 +2258,7 @@ document.addEventListener('click', e => {
               const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
               const positionList = res?.positions || [];
               const sorted = [...positionList].sort((a, b) => b.length - a.length);
-              const normStr = s => s.replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim();
+              const normStr = s => stripFirmPrefix(s).replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim();
               const stripSuffix5 = p => p.replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '').replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '').trim();
               const nTmpl = normStr(tmplVal);
               const exactHits = sorted.filter(p => p && nTmpl === normStr(p));
@@ -5511,7 +5518,7 @@ function buildCriteriaText(criteria, platform) {
 // -------------------------------------------------------
 const _aiSuggestCache = new Map(); // profileKey → suggestions
 
-async function suggestPositionWithAI(candidateProfile, positionsWithDesc) {
+async function suggestPositionWithAI(candidateProfile) {
   const stored = await chrome.storage.local.get(['apiKey']).catch(() => ({}));
   const apiKey = (stored.apiKey || '').replace(/[^\x21-\x7E]/g, '').trim();
   if (!apiKey || apiKey.length < 20) throw new Error('APIキー未設定');
@@ -5521,11 +5528,68 @@ async function suggestPositionWithAI(candidateProfile, positionsWithDesc) {
   if (_aiSuggestCache.has(cacheKey)) return _aiSuggestCache.get(cacheKey);
 
   const profile = candidateProfile.slice(0, 3000);
-  const posList = positionsWithDesc.slice(0, 60).map((p, i) =>
-    `${i + 1}. 【${p.name}】${p.description ? p.description.slice(0, 400) : ''}`
+
+  // 一覧は軽量版（職務内容・応募要件を含まない）を使う。全件に要件を付けると
+  // 約4MBになりAIに渡しきれないため、まず全件から番号で絞り込み、
+  // 絞り込んだ分だけ要件付きで取り直す2段階にする。
+  // 以前はここで positionsWithDesc.slice(0, 60) としており、一覧の先頭60件
+  // （名前順の頭から60件）しか候補に入っていなかった
+  const compactRes = await chrome.runtime.sendMessage({ type: 'getPositionsCompact' });
+  const all = compactRes?.positions || [];
+  if (all.length === 0) throw new Error(compactRes?.error || 'ポジション一覧を取得できませんでした');
+
+  // ── Step1: 全件から20件に絞り込む ──
+  // ポジション名を書き写させると表記ゆれで照合できないため、行番号で返させる
+  const indexedList = all.map((p, i) =>
+    `${i}\t${p.firmJa}\t${p.title}${p.categoryLabel ? ` / ${p.categoryLabel}` : ''}${p.location ? ` / ${p.location}` : ''}`
   ).join('\n');
 
-  const prompt = `あなたは日本の転職エージェントのアシスタントです。
+  const step1Data = await claudeFetch(apiKey, {
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 300,
+    messages: [{ role: 'user', content: `あなたは日本の転職エージェントのアシスタントです。
+候補者のプロフィールを読み、以下の募集ポジション一覧から、経験・スキルが活かせそうなものを20件選んでください。
+一覧は「番号<TAB>ファーム名<TAB>ポジション名 / カテゴリ / 勤務地」の形式です。
+
+【候補者プロフィール】
+${profile}
+
+【募集ポジション一覧】
+${indexedList}
+
+必ず番号のJSON配列のみで回答してください。説明・コードブロックは不要:
+[12,45,301,...]` }]
+  });
+
+  const step1Text = (step1Data.content?.[0]?.text || '').trim();
+  const arrMatch = step1Text.match(/\[[\s\S]*?\]/);
+  let shortlist = [];
+  if (arrMatch) {
+    try {
+      shortlist = JSON.parse(arrMatch[0])
+        .map(n => all[Number(n)])
+        .filter(Boolean)
+        .slice(0, 20);
+    } catch (_) {}
+  }
+  if (shortlist.length === 0) throw new Error('ポジションの絞り込みに失敗しました');
+
+  // ── Step2: 絞り込んだ分だけ要件付きで取り直し、トップ3を選ぶ ──
+  const detailRes = await chrome.runtime.sendMessage({
+    type: 'getPositionDetails',
+    ids: shortlist.map(p => p.id),
+  });
+  // 詳細が取れなかった場合は、要件なしのまま絞り込み結果で判断する
+  const detailed = (detailRes?.positions?.length ? detailRes.positions : shortlist);
+
+  const posList = detailed.map((p, i) =>
+    `${i}. 【${p.firmJa || ''}｜${p.title}】${p.description ? p.description.slice(0, 700) : ''}`
+  ).join('\n');
+
+  const data = await claudeFetch(apiKey, {
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 400,
+    messages: [{ role: 'user', content: `あなたは日本の転職エージェントのアシスタントです。
 候補者のプロフィールを分析し、以下のポジション一覧の中からこの候補者の経験・スキルに最もマッチするポジションをトップ3選んでください。
 
 選定ポイント：
@@ -5539,24 +5603,31 @@ ${profile}
 【ポジション一覧】
 ${posList}
 
-必ず以下のJSON形式のみで回答してください。コードブロック・前置き・説明文は不要。nameは一覧の【】内と完全一致させること。
+必ず以下のJSON形式のみで回答してください。コードブロック・前置き・説明文は不要。indexは一覧の先頭の番号。
 {"suggestions":[
-  {"rank":1,"name":"ポジション名","reason":"マッチ理由を25文字以内で"},
-  {"rank":2,"name":"ポジション名","reason":"マッチ理由を25文字以内で"},
-  {"rank":3,"name":"ポジション名","reason":"マッチ理由を25文字以内で"}
-]}`;
-
-  const data = await claudeFetch(apiKey, {
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 400,
-    messages: [{ role: 'user', content: prompt }]
+  {"rank":1,"index":0,"reason":"マッチ理由を25文字以内で"},
+  {"rank":2,"index":0,"reason":"マッチ理由を25文字以内で"},
+  {"rank":3,"index":0,"reason":"マッチ理由を25文字以内で"}
+]}` }]
   });
 
   const text = (data.content?.[0]?.text || '').trim();
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('AI応答のJSON解析失敗: ' + text.slice(0, 80));
   const parsed = JSON.parse(jsonMatch[0]);
-  const suggestions = parsed.suggestions || [];
+  const suggestions = (parsed.suggestions || [])
+    .map(s => {
+      const p = detailed[Number(s.index)];
+      if (!p) return null;
+      return {
+        rank: s.rank,
+        name: p.label || `${p.firmJa || ''}｜${p.title}`,
+        firmJa: p.firmJa || '',
+        url: p.url || '',
+        reason: s.reason || '',
+      };
+    })
+    .filter(Boolean);
   if (suggestions.length > 0) _aiSuggestCache.set(cacheKey, suggestions);
   return suggestions;
 }
@@ -5717,11 +5788,7 @@ async function initPositionIndicator() {
 
         aiResults.innerHTML = `<div style="padding:8px 14px;font-size:11px;color:#6b7280;font-family:sans-serif;background:#f8fafc;border-bottom:1px solid #e2e8f0;">📄 プロフィール取得済み（${profile.length}文字）— ポジションを分析中...</div>`;
 
-        const posRes = await chrome.runtime.sendMessage({ type: 'getPositionListWithDesc' });
-        const posWithDesc = posRes?.positions || [];
-        if (posWithDesc.length === 0) throw new Error('ポジション情報を取得できませんでした（ポップアップ設定でGAS URLを確認してください）');
-
-        const suggestions = await suggestPositionWithAI(profile, posWithDesc);
+        const suggestions = await suggestPositionWithAI(profile);
         if (!suggestions || suggestions.length === 0) throw new Error('提案結果が空でした');
 
         aiResults.innerHTML = '';
@@ -5739,11 +5806,15 @@ async function initPositionIndicator() {
           sItem.innerHTML = `
             <div style="font-weight:600;color:#4f46e5;">${s.rank}位 ${escapeHtml(s.name || '')}</div>
             <div style="font-size:11px;color:#6b7280;margin-top:2px;">${escapeHtml(s.reason || '')}</div>
+            ${s.url ? `<a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer"
+              style="display:inline-block;margin-top:4px;font-size:10px;color:#4f46e5;text-decoration:underline;">求人ページを開く ↗</a>` : ''}
           `;
           sItem.addEventListener('mouseenter', () => { sItem.style.background = '#ede9fe'; });
           sItem.addEventListener('mouseleave', () => { sItem.style.background = '#faf5ff'; });
           sItem.addEventListener('click', async (e) => {
             e.stopPropagation();
+            // 求人ページのリンクを押したときは、ポジションを選択したことにしない
+            if (e.target.closest('a')) return;
             currentPos = s.name;
             await chrome.storage.local.set({ currentPosition: s.name }).catch(() => {});
             console.log('[Snow-we] AIポジション選択:', s.name);

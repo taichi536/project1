@@ -361,6 +361,7 @@
     }
     .suggest-position { font-size: 13px; font-weight: 600; color: #2c2c2a; margin-bottom: 5px; }
     .suggest-reason { font-size: 11px; color: #5F5E5A; line-height: 1.6; margin-bottom: 7px; }
+    .suggest-url { display: inline-block; font-size: 11px; color: #4B42A3; text-decoration: underline; margin-bottom: 7px; word-break: break-all; }
     .use-position-btn {
       width: 100%; padding: 6px;
       background: #EEEDFE; color: #3C3489;
@@ -815,6 +816,18 @@
         </div>
       </div>
     </details>
+  </div>
+
+  <!-- 候補者管理システム（ポジションマスタ）のアクセストークン -->
+  <div style="margin-top:14px; padding-top:12px; border-top:0.5px solid #e0ddd6;">
+    <div class="label">📋 ポジションAPI アクセストークン</div>
+    <div style="font-size:10px; color:#888; margin:3px 0 4px;">
+      候補者管理システムからポジション一覧（求人URL・職務内容・応募要件）を取得するために使います。<br>
+      管理者から共有された値を貼り付けてください。
+    </div>
+    <input type="password" id="positions-api-token" placeholder="（管理者から共有されたトークン）" style="width:100%;">
+    <button class="settings-save-btn" id="positions-api-test-btn" style="width:100%; margin-top:6px;">🔌 ポジション取得テスト</button>
+    <div id="positions-api-test-result" style="font-size:11px; margin-top:6px; padding:8px; background:#f5f4f0; border-radius:6px; display:none; word-break:break-all;"></div>
   </div>
 
   <!-- チーム設定コード -->
