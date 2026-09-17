@@ -823,9 +823,9 @@
     <div class="label">📋 ポジションAPI アクセストークン</div>
     <div style="font-size:10px; color:#888; margin:3px 0 4px;">
       候補者管理システムからポジション一覧（求人URL・職務内容・応募要件）を取得するために使います。<br>
-      管理者から共有された値を貼り付けてください。
+      通常は空欄のままでOK（拡張機能に既定のトークンが入っています）。別のトークンを使う場合のみ入力してください。
     </div>
-    <input type="password" id="positions-api-token" placeholder="（管理者から共有されたトークン）" style="width:100%;">
+    <input type="password" id="positions-api-token" placeholder="（空欄 = 既定のトークンを使う）" style="width:100%;">
     <button class="settings-save-btn" id="positions-api-test-btn" style="width:100%; margin-top:6px;">🔌 ポジション取得テスト</button>
     <div id="positions-api-test-result" style="font-size:11px; margin-top:6px; padding:8px; background:#f5f4f0; border-radius:6px; display:none; word-break:break-all;"></div>
   </div>

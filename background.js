@@ -537,14 +537,23 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.positionsApiToken) _positionsMemCache = null;
 });
 
+// チーム全員で共有する既定のアクセストークン。メンバーが各自で設定しなくても
+// 使えるようにするためのもので、設定タブで個別に入力した値があればそちらを優先する。
+//
+// 注意: この値はリポジトリにも配布した拡張機能にも残るため、拡張機能のフォルダを
+// 見られる人は誰でもポジション一覧を読める。APIが返すのは求人情報だけで候補者等の
+// 個人情報は含まないため許容している。差し替えるときはサーバーの.envとここの両方を
+// 更新して、拡張機能を配り直す必要がある。
+const DEFAULT_POSITIONS_API_TOKEN = '';
+
 async function getPositionsApiToken() {
   const { positionsApiToken } = await chrome.storage.local.get(['positionsApiToken']);
-  return (positionsApiToken || '').trim();
+  return (positionsApiToken || DEFAULT_POSITIONS_API_TOKEN || '').trim();
 }
 
 async function fetchPositionsApi(query) {
   const token = await getPositionsApiToken();
-  if (!token) throw new Error('ポジションAPIのアクセストークンが未設定です（設定タブで入力してください）');
+  if (!token) throw new Error('ポジションAPIのアクセストークンが未設定です（設定タブで入力するか、配布版の既定トークンを確認してください）');
   const res = await fetch(`${POSITIONS_API_URL}?${query}`, {
     headers: { Authorization: `Bearer ${token}` },
   });

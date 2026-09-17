@@ -1499,12 +1499,8 @@ $('positions-api-test-btn').addEventListener('click', async () => {
   resultEl.style.color = '#2c2c2a';
   resultEl.textContent = '⏳ 接続中...';
 
+  // 空欄のままでも、拡張機能に埋め込まれた既定トークンで試せるようにする
   const token = $('positions-api-token').value.trim();
-  if (!token) {
-    resultEl.style.color = '#b91c1c';
-    resultEl.textContent = '❌ トークンが入力されていません';
-    return;
-  }
 
   try {
     await chrome.storage.local.set({ positionsApiToken: token });
