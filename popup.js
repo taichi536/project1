@@ -778,14 +778,28 @@ JSON形式のみで出力（コードブロック不要）:
 async function suggestPosition(apiKey, profileText) {
   apiKey = sanitizeApiKey(apiKey);
 
-  // GASからポジション取得を試みる
   const r = await chrome.storage.local.get(['gasSettings']);
   const gas = r.gasSettings || {};
   let positions = [];
-  let usingGas = false;
+  let usingGas = false; // 旧経路(GAS)から取得したかどうか。ログ判別用
 
+  // ポジションマスタはSupabaseのpositionsテーブルが正（業務概要・必須スキル・
+  // 歓迎スキル・求める人物像まで揃っている）。ポジション選択のドロップダウンは
+  // 既にそちらを見ているのに、この提案機能だけGAS経由のまま取り残されており、
+  // 名称と短い説明しか得られないうえ、GASが応答しないときは無言でハードコードの
+  // デフォルト一覧に落ちて提案していた
+  try {
+    setStatus('suggest', 'loading', 'ポジション情報を取得中...');
+    const res = await chrome.runtime.sendMessage({ type: 'getPositionListWithDesc' });
+    if (res?.positions?.length > 0) {
+      positions = res.positions;
+      console.log('[Snow-we] ポジション提案: Supabaseから', positions.length, '件取得');
+    }
+  } catch (_) {}
+
+  // Supabaseから取れなかった場合のみ、旧経路のGASを試す
   const gasUrl = gas.positionUrl || gas.url || gas.dbUrl;
-  if (gasUrl) {
+  if (positions.length === 0 && gasUrl) {
     try {
       setStatus('suggest', 'loading', 'GASからポジション情報を取得中...');
       const fetched = await fetchPositionsFromGas(gasUrl, gas.secret || 'snowwe2024');
@@ -802,15 +816,18 @@ async function suggestPosition(apiKey, profileText) {
   setStatus('suggest', 'loading', '候補者プロフィールを分析中...');
   const candidateAttrs = await extractCandidateAttributes(apiKey, profileText);
 
-  if (!usingGas) {
-    // GAS未設定：従来通り1回のSonnet呼び出し（ポジション名のみ）
+  // 募集要件付きのポジション一覧が1件も取れなかった場合だけ、画面のドロップダウンに
+  // 並んでいる名称だけで判断する簡易経路に落ちる。以前はこの判定がGAS取得の成否
+  // (usingGas)になっていたため、Supabaseから取得できていてもこちらに落ちてしまい、
+  // せっかくの募集要件を使わずに提案していた
+  if (positions.length === 0) {
     const positionListText = Array.from(document.querySelectorAll('#position-select option'))
       .map(o => o.value).filter(Boolean).join('\n');
     setStatus('suggest', 'loading', 'ポジションを分析中...');
     return await suggestPositionSingleStep(apiKey, profileText, positionListText, candidateAttrs);
   }
 
-  // GAS設定済み：ポジション数が30件以下なら全件をSonnetへ直接渡す
+  // ポジション数が30件以下なら全件をSonnetへ直接渡す
   if (positions.length <= 30) {
     setStatus('suggest', 'loading', `${positions.length}件のポジションを分析中...`);
     const detailList = positions
