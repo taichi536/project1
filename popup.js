@@ -452,19 +452,60 @@ $('copy-btn').addEventListener('click', () => {
   });
 });
 
-$('copy-template-btn').addEventListener('click', () => {
+$('copy-template-btn').addEventListener('click', async () => {
+  const btn = $('copy-template-btn');
   const personalized = $('result-text').textContent.trim();
   const positionName = $('position-select').value;
-  const template = buildTemplate(personalized, positionName);
-  navigator.clipboard.writeText(template).then(() => {
-    $('copy-template-btn').textContent = 'コピーしました!';
-    $('copy-template-btn').classList.add('copied');
-    setTimeout(() => {
-      $('copy-template-btn').textContent = 'テンプレ全文をコピー';
-      $('copy-template-btn').classList.remove('copied');
-    }, 2000);
-  });
+
+  btn.disabled = true;
+  btn.textContent = '文面を作成中...';
+
+  let template;
+  let usedFull = true;
+  try {
+    template = await buildFullTemplate(personalized, positionName);
+  } catch (e) {
+    // ポジションマスタに無い・APIに届かない場合は、拡張機能内蔵の簡易テンプレートで出す。
+    // 文面が短くなるだけで、コピーできない状態にはしない
+    console.warn('[Snow-we] 完成版テンプレートを取得できませんでした:', e.message);
+    template = buildTemplate(personalized, positionName);
+    usedFull = false;
+  }
+
+  try {
+    await navigator.clipboard.writeText(template);
+    btn.textContent = usedFull ? 'コピーしました!' : 'コピーしました（簡易版）';
+    btn.classList.add('copied');
+  } catch (e) {
+    btn.textContent = 'コピーに失敗しました';
+  }
+  setTimeout(() => {
+    btn.textContent = 'テンプレ全文をコピー';
+    btn.classList.remove('copied');
+    btn.disabled = false;
+  }, 2000);
 });
+
+// 候補者管理システム側の完成版スカウト文面を取得し、生成したパーソナライズ文を差し込む。
+// ファームごとの年収レンジ・強み・残業訴求の出し分けはサーバー側のテンプレートが持って
+// いるので、拡張機能では組み立てず取得するだけにする
+async function buildFullTemplate(personalizedLine, positionName) {
+  const res = await chrome.runtime.sendMessage({ type: 'getScoutTemplate', label: positionName });
+  if (!res?.ok || !res.body) throw new Error(res?.error || 'テンプレートを取得できませんでした');
+  return insertPersonalizedLine(res.body, personalizedLine);
+}
+
+// パーソナライズ文は「当方の経験上、面接次第では〜」の直前に入れる。
+// 拡張機能内蔵テンプレートと同じ位置で、導入のすぐ後に候補者ごとの内容が来る。
+// 差し込み位置が見つからない場合は、末尾に付けて分かりにくくなるより、
+// 呼び出し元で内蔵テンプレートに切り替えさせる
+function insertPersonalizedLine(body, line) {
+  const text = (line || '').trim();
+  if (!text) return body;
+  const idx = body.indexOf('当方の経験上、');
+  if (idx === -1) throw new Error('パーソナライズ文の差し込み位置が見つかりませんでした');
+  return `${body.slice(0, idx)}${text}\n\n${body.slice(idx)}`;
+}
 
 // ポジション名の接頭辞から、募集元のファーム名を判別する。
 // 従来はテンプレート・生成プロンプトの両方で「アクセンチュア」が固定文字列に
@@ -962,8 +1003,37 @@ function renderSuggestion(result) {
       <div class="suggest-reason">${escapeHtml(s.reason || '')}</div>
       ${s.url ? `<a class="suggest-url" href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">求人ページを開く ↗</a>` : ''}
       <button class="use-position-btn" data-position="${escapeHtml(s.position || '')}">このポジションで生成</button>
+      <button class="scout-template-btn" data-position="${escapeHtml(s.position || '')}">📄 スカウト文面（全文）をコピー</button>
     `;
     container.appendChild(card);
+
+    // 提案されたポジションのスカウト文面を、その場で作ってコピーする。
+    // パーソナライズ文は毎回生成し直す（生成プロンプトにポジション名が入るため、
+    // 別のポジションで作った文をそのまま使い回すと噛み合わないことがある）
+    const tmplBtn = card.querySelector('.scout-template-btn');
+    tmplBtn.addEventListener('click', async () => {
+      applySelectedPosition(s.position);
+      tmplBtn.disabled = true;
+      tmplBtn.textContent = 'パーソナライズ文を生成中...';
+      try {
+        // 生成に失敗したとき、前の候補者・前のポジションで作った文が残っていると
+        // それをそのままコピーしてしまうため、先に消してから生成する
+        $('result-text').textContent = '';
+        await runGenerate();
+        const personalized = $('result-text').textContent.trim();
+        if (!personalized) throw new Error('パーソナライズ文を生成できませんでした');
+        tmplBtn.textContent = '文面を作成中...';
+        const template = await buildFullTemplate(personalized, s.position);
+        await navigator.clipboard.writeText(template);
+        tmplBtn.textContent = '✅ コピーしました';
+      } catch (e) {
+        tmplBtn.textContent = `❌ ${e.message}`;
+      }
+      setTimeout(() => {
+        tmplBtn.textContent = '📄 スカウト文面（全文）をコピー';
+        tmplBtn.disabled = false;
+      }, 3000);
+    });
 
     card.querySelector('.use-position-btn').addEventListener('click', () => {
       applySelectedPosition(s.position);

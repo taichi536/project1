@@ -603,6 +603,19 @@ async function fetchPositionsCompact(forceRefresh) {
   return [];
 }
 
+// ポジションごとのスカウト文面。候補者管理システムの画面にある「スカウト文を作成」と
+// 同じテンプレートを使う（ファームごとの年収レンジ・強み・残業訴求の出し分けを含む）。
+// 拡張機能側で作り直すと二重管理になり、テンプレートを直したときに片方だけ古いまま
+// 残ってしまうため、文面の組み立てはサーバーに任せる
+async function fetchScoutTemplate(id) {
+  const token = await getPositionsApiToken();
+  const res = await fetch(`${POSITIONS_API_URL}/scout-template?id=${encodeURIComponent(id)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`スカウト文面の取得に失敗しました (${res.status})`);
+  return res.json();
+}
+
 async function fetchPositionDetails(ids) {
   const unique = [...new Set((ids || []).filter(Boolean))];
   if (unique.length === 0) return [];
@@ -1161,6 +1174,26 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         positions: rows.map(p => ({ ...p, label: positionLabel(p), firmJa: firmToJa(p.firm) })),
       }))
       .catch(e => sendResponse({ positions: [], error: e.message }));
+    return true;
+  }
+
+  // ポジションのスカウト文面を返す。ポジションはid、または表示名（ファーム名｜ポジション名）で指定する
+  if (msg.type === 'getScoutTemplate') {
+    (async () => {
+      try {
+        let id = msg.positionId || '';
+        if (!id && msg.label) {
+          const hit = await findPositionByLabel(msg.label);
+          if (!hit) throw new Error('ポジションマスタに該当する求人が見つかりませんでした');
+          id = hit.id;
+        }
+        if (!id) throw new Error('ポジションが指定されていません');
+        const data = await fetchScoutTemplate(id);
+        sendResponse({ ok: true, ...data });
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
+    })();
     return true;
   }
 
