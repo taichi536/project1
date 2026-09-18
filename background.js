@@ -522,6 +522,21 @@ function positionLabel(p) {
   return firm ? `${firm}${POSITION_LABEL_SEPARATOR}${p.title}` : (p.title || '');
 }
 
+// ポジション提案のStep1（全件からの絞り込み）でAIに見せる1行。職務内容を読む前の
+// 段階なので、ここに何を入れるかで絞り込みの精度がそのまま決まる。
+//
+// ・勤務地は住所が丸ごと入っている求人がある（「本社：東京都千代田区大手町1-9-7 /
+//   大手町フィナンシャルシティ / …（変更の範囲）…」）。一覧全体では数万字に達する
+//   一方、適性の判断には寄与しないため、先頭の1区切りだけに切り詰める。
+// ・categoryLabelはファームによって英語（アクセンチュア: Consulting,
+//   Software Engineering）と日本語（EY: 戦略コンサルティング）が混在している。
+//   日本語の候補者プロフィールと突き合わせる以上、英語のファームが不利になるため、
+//   日本語で統一されている industry を使う。
+function buildPositionMatchText(p) {
+  const loc = (p.location || '').split('/')[0].trim().substring(0, 20);
+  return [p.title, p.industry, loc].filter(Boolean).join(' / ');
+}
+
 function buildApiPositionRequirementsText(p) {
   const parts = [];
   if (p.categoryLabel)  parts.push('【カテゴリ】' + p.categoryLabel);
@@ -1171,7 +1186,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'getPositionsCompact') {
     fetchPositionsCompact(msg.forceRefresh === true)
       .then(rows => sendResponse({
-        positions: rows.map(p => ({ ...p, label: positionLabel(p), firmJa: firmToJa(p.firm) })),
+        positions: rows.map(p => ({
+          ...p,
+          label: positionLabel(p),
+          firmJa: firmToJa(p.firm),
+          matchText: buildPositionMatchText(p),
+        })),
       }))
       .catch(e => sendResponse({ positions: [], error: e.message }));
     return true;

@@ -5540,16 +5540,15 @@ async function suggestPositionWithAI(candidateProfile) {
 
   // ── Step1: 全件から20件に絞り込む ──
   // ポジション名を書き写させると表記ゆれで照合できないため、行番号で返させる
-  const indexedList = all.map((p, i) =>
-    `${i}\t${p.firmJa}\t${p.title}${p.categoryLabel ? ` / ${p.categoryLabel}` : ''}${p.location ? ` / ${p.location}` : ''}`
-  ).join('\n');
+  const indexedList = all.map((p, i) => `${i}\t${p.firmJa}\t${p.matchText || p.title}`).join('\n');
 
   const step1Data = await claudeFetch(apiKey, {
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 300,
     messages: [{ role: 'user', content: `あなたは日本の転職エージェントのアシスタントです。
 候補者のプロフィールを読み、以下の募集ポジション一覧から、経験・スキルが活かせそうなものを20件選んでください。
-一覧は「番号<TAB>ファーム名<TAB>ポジション名 / カテゴリ / 勤務地」の形式です。
+一覧は「番号<TAB>ファーム名<TAB>ポジション名 / 領域 / 勤務地」の形式です。
+ポジション名の長さや詳しさはファームごとの記載ルールの違いによるもので、求人の良し悪しとは関係ありません。名前が短いポジションを不利に扱わないでください。
 
 【候補者プロフィール】
 ${profile}

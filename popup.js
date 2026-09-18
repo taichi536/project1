@@ -870,13 +870,12 @@ async function suggestPosition(apiKey, profileText) {
   // ── Step 1: Haikuで全件から上位15件に絞り込み ──
   // ポジション名を書き写させると表記ゆれで照合できないため、行番号で返させる
   setStatus('suggest', 'loading', `Step1: ${all.length}件から候補を絞り込み中...`);
-  const indexedList = all.map((p, i) =>
-    `${i}\t${p.firmJa}\t${p.title}${p.categoryLabel ? ` / ${p.categoryLabel}` : ''}${p.location ? ` / ${p.location}` : ''}`
-  ).join('\n');
+  const indexedList = all.map((p, i) => `${i}\t${p.firmJa}\t${p.matchText || p.title}`).join('\n');
 
   const step1Prompt = `あなたはハイクラスコンサル転職支援の専門エージェントです。募集ポジションはアクセンチュア・BIG4（デロイト・PwC・EY・KPMG）・ベイカレント等、複数のファームのものが混在しています。
 以下の候補者プロフィールと募集ポジション一覧を照合し、最も合致しそうなポジションを上位15件選んでください。
-一覧は「番号<TAB>ファーム名<TAB>ポジション名 / カテゴリ / 勤務地」の形式です。
+一覧は「番号<TAB>ファーム名<TAB>ポジション名 / 領域 / 勤務地」の形式です。
+ポジション名の長さや詳しさはファームごとの記載ルールの違いによるもので、求人の良し悪しとは関係ありません。名前が短いポジションを不利に扱わないでください。
 
 【募集ポジション一覧】
 ${indexedList}
