@@ -2721,6 +2721,16 @@ async function claudeFetch(apiKey, body, maxRetries = 4) {
       throw new Error(err.error?.message || `APIエラー (${response.status})`);
     }
     const data = await response.json();
+    // 呼び出しごとの内訳をコンソールに出す。合計額（API利用額の表示）だけでは
+    // どの処理が費用の大半を占めているのか分からず、削る場所を推測で決めることに
+    // なるため。単価はHaiku 4.5が入力$1/出力$5、Sonnet 4.6が入力$3/出力$15（100万トークンあたり）
+    if (data.usage) {
+      const price = body.model?.includes('sonnet') ? { i: 3, o: 15 } : { i: 1, o: 5 };
+      const cost = (data.usage.input_tokens || 0) / 1e6 * price.i
+                 + (data.usage.output_tokens || 0) / 1e6 * price.o;
+      console.log(`[Snow-we] API呼び出し: 入力${data.usage.input_tokens}トークン / `
+        + `出力${data.usage.output_tokens}トークン / $${cost.toFixed(4)} (${body.model})`);
+    }
     await recordApiCost(body.model, data.usage);
     return data;
   }
