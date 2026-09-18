@@ -900,6 +900,21 @@ ${profileText}
       shortlist = JSON.parse(arrMatch[0]).map(n => all[Number(n)]).filter(Boolean).slice(0, 15);
     } catch (_) {}
   }
+  // Step1でどのファームが残ったかを出す。Step1が見ているのはポジション名・カテゴリ・
+  // 勤務地だけなので、求人名の書き方がファームごとに違うと、職務内容を読む前の段階で
+  // 特定のファームが落ちている可能性がある。母数と見比べれば偏りが分かる
+  if (shortlist.length > 0) {
+    const shortCount = {};
+    shortlist.forEach(p => { shortCount[p.firmJa] = (shortCount[p.firmJa] || 0) + 1; });
+    const allCount = {};
+    all.forEach(p => { allCount[p.firmJa] = (allCount[p.firmJa] || 0) + 1; });
+    console.log('[Snow-we] Step1 絞り込み結果（ファーム別）:',
+      Object.entries(shortCount)
+        .sort((a, b) => b[1] - a[1])
+        .map(([f, n]) => `${f} ${n}件（母数${allCount[f] || 0}件）`)
+        .join(' / '));
+  }
+
   // 絞り込みに失敗した場合は、要件なしのまま全件の名称で判断する
   if (shortlist.length === 0) {
     setStatus('suggest', 'loading', 'ポジションを分析中...');
