@@ -12,6 +12,11 @@ const _ANTHROPIC_HEADERS = {
   'anthropic-dangerous-direct-browser-access': 'true'
 };
 
+// ポジション提案1回分のトークン数と金額を集計する。合計額の表示だけでは
+// どの処理が費用の大半を占めているのか分からず、削る場所を推測で決めることに
+// なるため。コンソールを開かなくても分かるよう、結果カードの下に出す
+let _usageTally = null;
+
 async function claudeFetch(apiKey, body, maxRetries = 4) {
   let delay = 3000;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -40,6 +45,14 @@ async function claudeFetch(apiKey, body, maxRetries = 4) {
                  + (data.usage.output_tokens || 0) / 1e6 * price.o;
       console.log(`[Snow-we] API呼び出し: 入力${data.usage.input_tokens}トークン / `
         + `出力${data.usage.output_tokens}トークン / $${cost.toFixed(4)} (${body.model})`);
+      if (_usageTally) {
+        _usageTally.calls.push({
+          input: data.usage.input_tokens || 0,
+          output: data.usage.output_tokens || 0,
+          cost,
+        });
+        _usageTally.cost += cost;
+      }
     }
     await recordApiCost(body.model, data.usage);
     return data;
@@ -771,6 +784,7 @@ async function runSuggestPosition() {
   setStatus('suggest', 'loading', 'プロフィールを取得中...');
   $('suggest-btn').disabled = true;
   $('suggest-result').style.display = 'none';
+  _usageTally = { calls: [], cost: 0, firmBreakdown: '' };
 
   let profileData;
   try {
@@ -907,11 +921,12 @@ ${profileText}
     shortlist.forEach(p => { shortCount[p.firmJa] = (shortCount[p.firmJa] || 0) + 1; });
     const allCount = {};
     all.forEach(p => { allCount[p.firmJa] = (allCount[p.firmJa] || 0) + 1; });
-    console.log('[Snow-we] Step1 絞り込み結果（ファーム別）:',
-      Object.entries(shortCount)
-        .sort((a, b) => b[1] - a[1])
-        .map(([f, n]) => `${f} ${n}件（母数${allCount[f] || 0}件）`)
-        .join(' / '));
+    const breakdown = Object.entries(shortCount)
+      .sort((a, b) => b[1] - a[1])
+      .map(([f, n]) => `${f} ${n}件（母数${allCount[f] || 0}件）`)
+      .join(' / ');
+    console.log('[Snow-we] Step1 絞り込み結果（ファーム別）:', breakdown);
+    if (_usageTally) _usageTally.firmBreakdown = breakdown;
   }
 
   // 絞り込みに失敗した場合は、要件なしのまま全件の名称で判断する
@@ -1070,6 +1085,32 @@ function renderSuggestion(result) {
   if (result.suggestions?.[0]) {
     applySelectedPosition(result.suggestions[0].position);
   }
+
+  renderSuggestDiagnostics(container);
+}
+
+// 今回の分析にかかった費用と、絞り込みでどのファームが残ったかを結果の下に出す。
+// コンソールを開かなくても、料金と偏りをその場で確認できるようにするため
+function renderSuggestDiagnostics(container) {
+  if (!_usageTally || _usageTally.calls.length === 0) return;
+  const t = _usageTally;
+  const totalIn = t.calls.reduce((s, c) => s + c.input, 0);
+  const totalOut = t.calls.reduce((s, c) => s + c.output, 0);
+  const perCall = t.calls
+    .map((c, i) => `${i + 1}回目 入力${c.input.toLocaleString()} / 出力${c.output.toLocaleString()} / $${c.cost.toFixed(4)}`)
+    .join('<br>');
+
+  const el = document.createElement('div');
+  el.style.cssText = 'margin-top:10px;padding:8px 10px;background:#f5f4f0;border-radius:6px;'
+    + 'font-size:10px;color:#5F5E5A;line-height:1.7;';
+  el.innerHTML = `
+    <div style="font-weight:600;color:#2c2c2a;margin-bottom:3px;">
+      今回の分析: $${t.cost.toFixed(4)}（入力${totalIn.toLocaleString()} / 出力${totalOut.toLocaleString()}トークン）
+    </div>
+    <div>${perCall}</div>
+    ${t.firmBreakdown ? `<div style="margin-top:4px;">絞り込み: ${escapeHtml(t.firmBreakdown)}</div>` : ''}
+  `;
+  container.appendChild(el);
 }
 
 // 提案されたポジションを選択状態にする。
