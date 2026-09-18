@@ -537,29 +537,26 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.positionsApiToken) _positionsMemCache = null;
 });
 
-// チーム全員で共有する既定のアクセストークン。メンバーが各自で設定しなくても
-// 使えるようにするためのもので、設定タブで個別に入力した値があればそちらを優先する。
+// ポジションAPIは認証なしで読める。返すのは各ファームの採用ページに元から公開
+// されている求人情報だけで、秘密にする必要のあるものが無いため。
+// 認証を付けると共有トークンをここに埋め込むことになるが、この拡張機能の
+// リポジトリは公開されているのでトークンも公開されてしまい、秘密として機能しない。
 //
-// 注意: この値はリポジトリにも配布した拡張機能にも残るため、拡張機能のフォルダを
-// 見られる人は誰でもポジション一覧を読める。APIが返すのは求人情報だけで候補者等の
-// 個人情報は含まないため許容している。差し替えるときはサーバーの.envとここの両方を
-// 更新して、拡張機能を配り直す必要がある。
-const DEFAULT_POSITIONS_API_TOKEN = '354baf5b88f9a4d43111b4ec475ad4fd6b47dacd87f5ea9a63e6deabccc9fcf5';
-
+// サーバー側で認証を有効にした場合に備えて、設定タブで入力されたトークンがあれば
+// 送る余地だけは残してある（通常は未設定で運用する）
 async function getPositionsApiToken() {
   const { positionsApiToken } = await chrome.storage.local.get(['positionsApiToken']);
-  return (positionsApiToken || DEFAULT_POSITIONS_API_TOKEN || '').trim();
+  return (positionsApiToken || '').trim();
 }
 
 async function fetchPositionsApi(query) {
   const token = await getPositionsApiToken();
-  if (!token) throw new Error('ポジションAPIのアクセストークンが未設定です（設定タブで入力するか、配布版の既定トークンを確認してください）');
   const res = await fetch(`${POSITIONS_API_URL}?${query}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!res.ok) {
     throw new Error(res.status === 401
-      ? 'ポジションAPIの認証に失敗しました（トークンを確認してください）'
+      ? 'ポジションAPIの認証に失敗しました（設定タブのトークンを空欄にしてお試しください）'
       : `ポジションAPI取得失敗: ${res.status}`);
   }
   const data = await res.json();
