@@ -525,16 +525,17 @@ function positionLabel(p) {
 // ポジション提案のStep1（全件からの絞り込み）でAIに見せる1行。職務内容を読む前の
 // 段階なので、ここに何を入れるかで絞り込みの精度がそのまま決まる。
 //
-// ・勤務地は住所が丸ごと入っている求人がある（「本社：東京都千代田区大手町1-9-7 /
-//   大手町フィナンシャルシティ / …（変更の範囲）…」）。一覧全体では数万字に達する
-//   一方、適性の判断には寄与しないため、先頭の1区切りだけに切り詰める。
+// ・勤務地は入れない。住所が丸ごと入っている求人があり（「本社：東京都千代田区
+//   大手町1-9-7 / 大手町フィナンシャルシティ / …（変更の範囲）…」）、850件分では
+//   万単位の文字数になる。先頭だけに切り詰めても「本社：東京都千代田区大手」の
+//   ような断片にしかならず判断材料にならない。勤務地はStep2（絞り込んだ十数件の
+//   詳細）に含まれており、そちらで考慮されるので、ここで持つ必要がない。
 // ・categoryLabelはファームによって英語（アクセンチュア: Consulting,
 //   Software Engineering）と日本語（EY: 戦略コンサルティング）が混在している。
 //   日本語の候補者プロフィールと突き合わせる以上、英語のファームが不利になるため、
 //   日本語で統一されている industry を使う。
 function buildPositionMatchText(p) {
-  const loc = (p.location || '').split('/')[0].trim().substring(0, 20);
-  return [p.title, p.industry, loc].filter(Boolean).join(' / ');
+  return [p.title, p.industry].filter(Boolean).join(' / ');
 }
 
 function buildApiPositionRequirementsText(p) {
