@@ -6324,21 +6324,45 @@ function cleanUnivName(raw) {
 // 候補者プロフィール欄は必ず「基本情報」と「在籍企業」の両方を含み、右側の送信フォーム
 // （差出人・宛先・件名・本文）は含まない。条件を満たす要素のうち最も内側（最小）のものが、
 // 余計な周辺要素を含まない目的の欄になる
+// プロフィール欄に含まれる見出し。「基本情報」と「在籍企業」だけを条件に最小の要素を
+// 選ぶと、基本情報のテーブルだけを囲む小さな要素（希望条件・経験業種・マネジメント経験を
+// 含まない）が選ばれてしまい、取得できるプロフィールが100文字程度になる事故が起きた。
+// 含んでいる見出しの種類が多いものを優先し、同点のときだけ最も内側（最小）を選ぶ
+const DODAX_PROFILE_SECTION_MARKERS = ['希望条件', '経験職種', '経験業種', '学歴', 'マネジメント'];
+const DODAX_PROFILE_MIN_LEN = 300;
+
 function findDodaxProfilePane() {
   const formMarkers = ['差出人', '宛先', '件名', '本文', '注目した'];
-  let best = null;
-  let bestLen = Infinity;
-  document.querySelectorAll('div, section, article, main').forEach(el => {
-    const t = (el.innerText || '').trim();
-    if (t.length < 100 || t.length > 20000) return;
-    if (!t.includes('基本情報') || !t.includes('在籍企業')) return;
-    if (DODAX_PAGE_CHROME_MARKERS.some(m => t.includes(m))) return;
-    // 送信フォーム側まで含んでしまっている広い要素は、スカウト本文が混入するため除外する
-    if (formMarkers.filter(m => t.includes(m)).length >= 3) return;
-    if (t.length < bestLen) { bestLen = t.length; best = el; }
-  });
-  if (best) console.log('[Snow-we] findDodaxProfilePane: プロフィール欄を特定 len=' + bestLen);
-  return best;
+
+  const pick = (minLen) => {
+    let best = null;
+    let bestLen = Infinity;
+    let bestSections = -1;
+    document.querySelectorAll('div, section, article, main').forEach(el => {
+      const t = (el.innerText || '').trim();
+      if (t.length < minLen || t.length > 20000) return;
+      if (!t.includes('基本情報') || !t.includes('在籍企業')) return;
+      if (DODAX_PAGE_CHROME_MARKERS.some(m => t.includes(m))) return;
+      // 送信フォーム側まで含んでしまっている広い要素は、スカウト本文が混入するため除外する
+      if (formMarkers.filter(m => t.includes(m)).length >= 3) return;
+      const sections = DODAX_PROFILE_SECTION_MARKERS.filter(m => t.includes(m)).length;
+      if (sections > bestSections || (sections === bestSections && t.length < bestLen)) {
+        bestSections = sections;
+        bestLen = t.length;
+        best = el;
+      }
+    });
+    return best ? { el: best, len: bestLen, sections: bestSections } : null;
+  };
+
+  // まず十分な分量のある欄を探し、見つからない場合だけ従来どおり小さい要素も許容する
+  // （項目が少ない候補者でプロフィール欄を丸ごと見失うより、狭くても取れた方がよい）
+  const hit = pick(DODAX_PROFILE_MIN_LEN) || pick(100);
+  if (hit) {
+    console.log('[Snow-we] findDodaxProfilePane: プロフィール欄を特定 len=' + hit.len + ' 見出し数=' + hit.sections);
+    return hit.el;
+  }
+  return null;
 }
 
 // -------------------------------------------------------
@@ -6627,8 +6651,12 @@ function extractProfile() {
     text = byKeyword.length >= bySelector.length ? byKeyword : bySelector;
     if (text) text = removeNonProfileSections(text);
 
-    if (!text || text.trim().length < 100) {
-      text = detailPanel ? removeNonProfileSections(extractMainText(detailPanel, 5000)) : '';
+    // 閾値が100文字だったため、経験職種の行だけを拾った104文字が「取得成功」と判定され、
+    // パネル全文を取り直す処理が動かないことがあった。プロフィールとして使える分量には
+    // 届いていないので基準を上げ、さらに取り直した方が長ければそちらを採用する
+    if (!text || text.trim().length < DODAX_PROFILE_MIN_LEN) {
+      const whole = detailPanel ? removeNonProfileSections(extractMainText(detailPanel, 5000)) : '';
+      if (whole.trim().length > (text || '').trim().length) text = whole;
     }
 
   } else if (host.includes('rikunabi') || host.includes('hrtech')) {
