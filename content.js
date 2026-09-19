@@ -1386,6 +1386,37 @@ function stripFirmPrefix(s) {
   return (s || '').replace(/^[^｜]{1,30}｜/, '').trim();
 }
 
+// 候補者の情報を、詳細パネルの再描画が落ち着いてから読み取る。
+// 同じ内容が2回続けて読めた時点でその値を採用する。読み取るたびに内容が変わる
+// 間は再描画の途中なので、確定するまで待つ（最大で約1秒）。
+// 読み取り対象の要素はReactに差し替えられることがあるため、切り離されていたら
+// 媒体ごとの詳細パネルを取り直す
+async function readCandidateWhenStable(card) {
+  const platform = getPlatform();
+  const refind = () => {
+    if (platform === 'rds') return findRDSDetailPanel();
+    if (platform === 'dodax') return findDodaxProfilePane() || findDodaxDetailPanel();
+    if (platform === 'bizreach') return findBizreachDetailPanel();
+    if (platform === 'ambi') return findAMBIDetailPanel();
+    return null;
+  };
+  const started = Date.now();
+  let prevKey = null;
+  let last = { id: '', info: {} };
+  for (let i = 0; i < 8; i++) {
+    const el = (card && document.contains(card)) ? card : (refind() || card);
+    if (!el) break;
+    const id = getCandidateId(el);
+    const info = extractBasicInfo(el);
+    const key = `${id}|${info.company || ''}|${info.univ || ''}|${info.age || ''}`;
+    last = { id, info };
+    if (key === prevKey) break;   // 2回続けて同じ内容 → 再描画は終わっている
+    prevKey = key;
+    await sleep(120);
+  }
+  return { ...last, waitedMs: Date.now() - started };
+}
+
 // 会社名の欄に入ってはいけない値かどうか。学歴・部署役職・画面のラベルを弾く。
 // 法人格（株式会社・大学法人等）が付いている場合は、学校法人や「〇〇大学」を名乗る
 // 企業もあるため弾かない
@@ -1907,22 +1938,30 @@ document.addEventListener('click', e => {
     console.log('[Snow-we] カード検出:', card ? 'あり' : 'なし', '/ _selectedCard:', _selectedCard ? 'あり' : 'なし', '/ カード総数:', cards.length);
 
     if (card) {
-      const id = getCandidateId(card);
-      console.log('[Snow-we] 1回目クリック candidateId:', id);
-      console.log('[Snow-we] カードテキスト行:', (card.innerText || '').split('\n').map(l=>l.trim()).filter(Boolean).slice(0,40));
-      if (id) {
-        // フォールバック用ポジションは、以前は非同期でchrome.storageから読み込んでから
-        // 追記していたが、RDSの一括送信等で候補者が高速に連続処理されると、次の候補者の
-        // 処理が始まってから追記が完了して間に合わない（別候補者に書き込まれる／記録され
-        // ない）ことがあったため、同期的に読めるキャッシュ値を使い、pendingScout保存と
-        // 同時に確定させる
-        sessionStorage.setItem('pendingScout', JSON.stringify({
-          id, info: extractBasicInfo(card), ts: Date.now(), fallbackPosition: _cachedCurrentPosition
-        }));
-        console.log('[Snow-we] pendingScout を sessionStorage に保存しました (fallbackPosition:', _cachedCurrentPosition || 'なし', ')');
-      } else {
-        console.log('[Snow-we] candidateId が取得できなかったため保存スキップ');
-      }
+      // 詳細パネルの再描画が間に合っていないまま読み取ると、前の候補者の会社名・大学・
+      // 年齢をそのまま記録してしまう。シートの手入力と突き合わせたところ、RDSで約15%・
+      // doda-Xで約15%の記録が「1つ前の候補者の会社名」になっていた（候補者IDはURLから
+      // 取れるため新しい候補者のものになり、プロフィールだけが古いという混ざった記録に
+      // なる。Greenは0件、Bizreachは3件で、再描画の遅い媒体に集中している）。
+      // 同じ内容が2回続けて読めるまで待ってから確定させる
+      // fallbackPositionは、候補者が高速に連続処理されても取り違えないよう、
+      // 同期的に読めるキャッシュ値をこの時点で確定させる
+      const fallbackPosition = _cachedCurrentPosition;
+      (async () => {
+        const stable = await readCandidateWhenStable(card);
+        const id = stable.id;
+        console.log('[Snow-we] 1回目クリック candidateId:', id,
+          stable.waitedMs ? `/ パネル確定まで${stable.waitedMs}ms待機` : '');
+        console.log('[Snow-we] カードテキスト行:', (card.innerText || '').split('\n').map(l => l.trim()).filter(Boolean).slice(0, 40));
+        if (id) {
+          sessionStorage.setItem('pendingScout', JSON.stringify({
+            id, info: stable.info, ts: Date.now(), fallbackPosition
+          }));
+          console.log('[Snow-we] pendingScout を sessionStorage に保存しました (fallbackPosition:', fallbackPosition || 'なし', ')');
+        } else {
+          console.log('[Snow-we] candidateId が取得できなかったため保存スキップ');
+        }
+      })();
     }
     return;
   }
