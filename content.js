@@ -766,8 +766,17 @@ function showBadge(cls, text, tooltip = '', profileSummary = '', aiVerdict = '')
 setupClickTracking();
 
 // 前回、拡張機能との接続が切れていて送信できなかった記録があれば送り直す。
-// ページを読み込み直した時点では接続が回復しているため、ここで回収できる
-setTimeout(() => { resendUnsentRecords().catch(() => {}); }, 3000);
+// ページを読み込み直した時点では接続が回復しているため、ここで回収できる。
+//
+// 1回だけだと、その瞬間にサービスワーカーが起動中だった場合に再送が空振りし、
+// 次にこのページを開き直すまで記録が滞留する。間隔を空けて複数回試し、
+// タブを再び表示したときにも試す
+[3000, 20000, 60000, 180000].forEach(ms => {
+  setTimeout(() => { resendUnsentRecords().catch(() => {}); }, ms);
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') resendUnsentRecords().catch(() => {});
+});
 
 // -------------------------------------------------------
 // スカウト送信履歴の管理
@@ -1099,18 +1108,21 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
         })(),
       },
     };
+    // 送信を試みる「前」に必ずページ側へ退避しておく。
+    // 以前は送信失敗のcatchの中で退避していたが、それだとcatchに入る前に例外が出た
+    // 場合や、呼び出し元の catch(_){} に吸われた場合に、記録ごと消えてしまう。
+    // 先に退避しておけば、この先どこで失敗しても記録は残り、次回の再送で拾える。
+    // 拡張機能から切り離されてもページ自身のlocalStorageは使えるため、退避先として
+    // 適している（実データで、ある担当者の1週間分176件が失われていた）
+    stashUnsentRecord(supabasePayload);
     try {
       await chrome.runtime.sendMessage({ type: 'queueSupabaseScout', payload: supabasePayload });
+      // background側のキューに積めた時点で、以降の送信とリトライはそちらの責任に移る。
+      // ここで退避を消さないと、次回の再送で二重に送られてしまう
+      unstashRecord(supabasePayload.candidateId);
     } catch (e) {
       // 拡張機能を更新・再読み込みすると、開いたままのタブの内容は拡張機能から
-      // 切り離され、ここが必ず失敗する。従来はこのエラーだけ警告も出さずに
-      // 握り潰していたため、ユーザーは気づかないまま送り続け、その間の記録が
-      // すべて失われていた（実データで、ある担当者の1週間分176件が失われていた）。
-      // 画面に警告を出すだけでは「再読み込みを忘れない」という人の注意に頼ることに
-      // なるため、ページ側の保存領域に退避して次回読み込み時に自動送信する。
-      // 拡張機能から切り離されてもページ自身のlocalStorageは使えるため、ここに
-      // 置いておけば記録は失われない
-      stashUnsentRecord(supabasePayload);
+      // 切り離され、ここが必ず失敗する。退避は済んでいるので記録は失われない
       if (e.message?.includes('Extension context invalidated')) {
         showExtensionInvalidatedBanner();
       } else {
@@ -1140,7 +1152,31 @@ function stashUnsentRecord(payload) {
   }
 }
 
+// 送信できた記録を退避から取り除く。消し損ねると次回の再送で二重に送られる
+function unstashRecord(candidateId) {
+  try {
+    const list = JSON.parse(localStorage.getItem(UNSENT_KEY) || '[]');
+    const next = list.filter(p => p?.candidateId !== candidateId);
+    if (next.length === list.length) return;
+    if (next.length === 0) localStorage.removeItem(UNSENT_KEY);
+    else localStorage.setItem(UNSENT_KEY, JSON.stringify(next));
+  } catch (_) {}
+}
+
+// 複数のタイミングから呼ばれるため、同時に走ると同じ記録を二重に送ってしまう
+let _resendInFlight = false;
+
 async function resendUnsentRecords() {
+  if (_resendInFlight) return;
+  _resendInFlight = true;
+  try {
+    await _resendUnsentRecordsInner();
+  } finally {
+    _resendInFlight = false;
+  }
+}
+
+async function _resendUnsentRecordsInner() {
   let list;
   try {
     list = JSON.parse(localStorage.getItem(UNSENT_KEY) || '[]');
@@ -2314,7 +2350,16 @@ document.addEventListener('click', e => {
           console.log('[Snow-we] recordScoutSent 呼び出し id:', pending.id, '/ template:', pending.templateName || 'なし', '/ fallback:', latestPosition || 'なし');
           recordScoutSent(pending.id, pending.info || {}, pending.templateName || '', pending.bodyText || '', latestPosition);
         }
-      } catch (_) {}
+      } catch (err) {
+        // ここを無言で握り潰していたため、テンプレート照合等の途中で例外が出ると
+        // recordScoutSentに到達しないまま記録が消え、しかも何が起きたか分からなかった。
+        // せめて候補者IDが分かっていれば記録を残せるので、最低限の内容で記録を試みる
+        console.warn('[Snow-we] 送信時の記録処理でエラー:', err?.message || err);
+        try {
+          const p = JSON.parse(raw);
+          if (p?.id) recordScoutSent(p.id, p.info || {}, p.templateName || '', p.bodyText || '', p.fallbackPosition || '');
+        } catch (_) {}
+      }
     })();
   }
 }, true);
