@@ -41,7 +41,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
       || '';
     // 設定画面で担当者名を意図的に消した場合を除き、空で上書きしてキャッシュを
     // 失わせない（空になる原因の大半は読み込み側の一時的な不調のため）
-    if (next) _cachedRecruiterName = next;
+    if (next) {
+      _cachedRecruiterName = next;
+      // 未設定を知らせる警告を出していたら、設定された時点で自動的に消す
+      try { document.getElementById('snowwe-recruiter-overlay')?.remove(); } catch (_) {}
+    }
   }
   if (area === 'local' && changes.currentPosition) {
     _cachedCurrentPosition = changes.currentPosition.newValue || '';
@@ -86,44 +90,84 @@ window.addEventListener('error', event => {
   }
 });
 
+// 記録に影響する警告は、見落とされると数十件が失われる・担当者不明のまま積み上がる。
+// 隅の小さなバナーでは実際に見落とされていたため、画面全体を覆う大きな表示にして、
+// 閉じるまでページを操作できないようにする（気づかずに送り続けるのを止めるのが目的）
+function showBigWarningOverlay({ id, title, message, actionLabel, onAction, onClose }) {
+  try {
+    if (document.getElementById(id)) return;
+    const overlay = document.createElement('div');
+    overlay.id = id;
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:2147483647;
+      background:rgba(0,0,0,0.72);
+      display:flex;align-items:center;justify-content:center;
+      font-family:sans-serif;padding:24px;box-sizing:border-box;
+    `;
+    const card = document.createElement('div');
+    card.style.cssText = `
+      background:#b91c1c;color:#fff;max-width:760px;width:100%;
+      border-radius:16px;padding:40px 44px;box-sizing:border-box;
+      box-shadow:0 12px 48px rgba(0,0,0,0.5);text-align:center;
+      border:6px solid #fca5a5;
+    `;
+    const h = document.createElement('div');
+    h.style.cssText = 'font-size:34px;font-weight:800;line-height:1.3;margin-bottom:18px;';
+    h.textContent = title;
+    card.appendChild(h);
+
+    const p = document.createElement('div');
+    p.style.cssText = 'font-size:19px;font-weight:600;line-height:1.8;margin-bottom:28px;';
+    p.textContent = message;
+    card.appendChild(p);
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:12px;justify-content:center;flex-wrap:wrap;';
+    if (actionLabel) {
+      const act = document.createElement('button');
+      act.textContent = actionLabel;
+      act.style.cssText = `
+        background:#fff;color:#b91c1c;border:none;border-radius:10px;
+        padding:16px 32px;font-size:19px;font-weight:800;cursor:pointer;
+      `;
+      act.addEventListener('click', () => { if (onAction) onAction(); });
+      row.appendChild(act);
+    }
+    // onCloseが渡された場合だけ閉じられる。記録が失われ続ける状態では閉じさせない
+    // （隅の小さなバナーでは見落とされ、実際に数十件が失われていたため）
+    if (onClose) {
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = '閉じる';
+      closeBtn.style.cssText = `
+        background:transparent;color:#fff;border:2px solid #fca5a5;border-radius:10px;
+        padding:16px 28px;font-size:17px;font-weight:700;cursor:pointer;
+      `;
+      closeBtn.addEventListener('click', () => {
+        overlay.remove();
+        onClose();
+      });
+      row.appendChild(closeBtn);
+    }
+    card.appendChild(row);
+    overlay.appendChild(card);
+    document.documentElement.appendChild(overlay);
+  } catch (_) {}
+}
+
 let _extensionInvalidatedBannerShown = false;
 function showExtensionInvalidatedBanner() {
   if (_extensionInvalidatedBannerShown) return;
   _extensionInvalidatedBannerShown = true;
-  try {
-    // 画面上部いっぱいに固定すると、ページ自体の閉じるボタン等（右上に多い）と
-    // 重なって操作しづらくなるという報告があったため、他の通知バッジ類と同じく
-    // 画面下部の隅に小さく表示する形に変更
-    const banner = document.createElement('div');
-    banner.style.cssText = `
-      position:fixed;bottom:12px;left:12px;z-index:2147483647;max-width:360px;
-      background:#fef3c7;color:#78350f;font-family:sans-serif;font-size:12px;
-      font-weight:600;padding:10px 40px 10px 14px;border-radius:8px;
-      box-shadow:0 2px 12px rgba(0,0,0,0.25);
-    `;
-    const text = document.createElement('span');
-    text.textContent = '⚠️ Snow-we拡張機能が更新されました。この操作以降は記録されない可能性があります。ページを再読み込みしてください。';
-    banner.appendChild(text);
-
-    // ページ側の閉じるボタン等と重なって操作しづらいという報告があったため、
-    // このバナー自体をすぐ閉じられるようにする
-    const closeBtn = document.createElement('button');
-    closeBtn.textContent = '×';
-    closeBtn.style.cssText = `
-      position:absolute;top:0;right:0;height:100%;width:32px;
-      background:transparent;border:none;color:#78350f;font-size:18px;
-      font-weight:700;cursor:pointer;line-height:1;
-    `;
-    // 閉じたら再表示できるようにする。この状態のまま操作を続けると記録が
-    // 失われ続けるため、次にスカウト操作をした時点でもう一度警告する必要がある
-    closeBtn.addEventListener('click', () => {
-      banner.remove();
-      _extensionInvalidatedBannerShown = false;
-    });
-    banner.appendChild(closeBtn);
-
-    document.documentElement.appendChild(banner);
-  } catch (_) {}
+  // この状態で送り続けると記録が失われ続ける（実データで1週間分176件が失われていた）。
+  // 再読み込みでしか直らないので、閉じさせずに再読み込みを促す
+  showBigWarningOverlay({
+    id: 'snowwe-invalidated-overlay',
+    title: '⚠️ このタブでは記録が保存されません',
+    message: 'Snow-we拡張機能が更新されたため、このページは拡張機能から切り離されています。'
+      + 'このままスカウトを送ると記録が残りません。ページを再読み込みしてから再開してください。',
+    actionLabel: '🔄 ページを再読み込みする',
+    onAction: () => { location.reload(); },
+  });
 }
 
 // 担当者名が未設定のまま記録すると、その行は「担当者×日」の集計から丸ごと外れ、
@@ -131,35 +175,28 @@ function showExtensionInvalidatedBanner() {
 // 古いバージョンのまま設定せずに送り続けている人がいた。
 // 記録時のトーストだけでは気づかれずに数十件が積み上がるため、ページを開いた
 // 時点で消えないバナーを出し、設定するまで気づき続けられるようにする
-let _recruiterMissingBannerShown = false;
 function showRecruiterMissingBanner() {
-  if (_recruiterMissingBannerShown) return;
-  _recruiterMissingBannerShown = true;
-  try {
-    const banner = document.createElement('div');
-    banner.style.cssText = `
-      position:fixed;bottom:12px;left:12px;z-index:2147483647;max-width:380px;
-      background:#fee2e2;color:#7f1d1d;font-family:sans-serif;font-size:12px;
-      font-weight:600;padding:10px 40px 10px 14px;border-radius:8px;
-      box-shadow:0 2px 12px rgba(0,0,0,0.25);line-height:1.6;
-    `;
-    banner.appendChild(document.createTextNode(
-      '⚠️ Snow-we: 担当者名が未設定です。このままスカウトを送ると、記録はされますが誰が送ったか分からない状態になります。'
-      + 'サイドパネルの「⚙️ 設定」で担当者名を入力して保存してください。'));
-    const closeBtn = document.createElement('button');
-    closeBtn.textContent = '×';
-    closeBtn.style.cssText = `
-      position:absolute;top:0;right:0;height:100%;width:32px;
-      background:transparent;border:none;color:#7f1d1d;font-size:18px;
-      font-weight:700;cursor:pointer;line-height:1;
-    `;
-    closeBtn.addEventListener('click', () => {
-      banner.remove();
-      _recruiterMissingBannerShown = false;
-    });
-    banner.appendChild(closeBtn);
-    document.documentElement.appendChild(banner);
-  } catch (_) {}
+  // 担当者名を設定するまで閉じられない。設定が済めば自動的に消える
+  // （設定タブで保存すると storage.onChanged が発火してキャッシュが更新される）
+  showBigWarningOverlay({
+    id: 'snowwe-recruiter-overlay',
+    title: '⚠️ 担当者名を設定してください',
+    message: '担当者名が未設定のままスカウトを送ると、記録は残りますが「誰が送ったか不明」の状態になり、'
+      + '担当者別の集計から漏れます。サイドパネルの「⚙️ 設定」タブで担当者名を入力して保存してください。',
+    actionLabel: '設定したので確認する',
+    onAction: () => {
+      chrome.storage.local.get(['gasSettings', 'recruiterName']).then(r => {
+        const name = (r.gasSettings && r.gasSettings.recruiter) || r.recruiterName || '';
+        if (name) {
+          _cachedRecruiterName = name;
+          document.getElementById('snowwe-recruiter-overlay')?.remove();
+          showAutoStatus(`✅ 担当者名「${name}」を確認しました`, 4000);
+        } else {
+          showAutoStatus('担当者名がまだ設定されていません。設定タブで保存してください', 5000);
+        }
+      }).catch(() => {});
+    },
+  });
 }
 
 // ページを開いた時点で担当者名を確認する。設定済みならキャッシュにも載るので、
