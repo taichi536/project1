@@ -1386,6 +1386,21 @@ function stripFirmPrefix(s) {
   return (s || '').replace(/^[^｜]{1,30}｜/, '').trim();
 }
 
+// 会社名の欄に入ってはいけない値かどうか。学歴・部署役職・画面のラベルを弾く。
+// 法人格（株式会社・大学法人等）が付いている場合は、学校法人や「〇〇大学」を名乗る
+// 企業もあるため弾かない
+function isNotCompanyName(s) {
+  const v = (s || '').trim();
+  if (!v) return true;
+  if (/(株式会社|有限会社|合同会社|㈱|法人|Inc|Co\.|Corp|Ltd|LLC|銀行|省|庁)/i.test(v)) return false;
+  if (/(大学|大学院|学部|学科|高等専門学校|専門学校|高校)/.test(v)) return true;
+  if (/(部長|課長|係長|次長|室長|本部長|グループ長|リーダー|マネージャー|代理|担当)\s*$/.test(v)) return true;
+  if (/(推進部|企画部|営業部|開発部|管理部|事業部|統括部|本部|支店|部署)/.test(v) && !/会社/.test(v)) return true;
+  if (/^(基本情報|希望条件|職歴|職務経歴|経歴|現職|前職|プロフィール|在籍企業)$/.test(v)) return true;
+  if (v.length <= 1) return true;   // 「物」のような壊れた1文字
+  return false;
+}
+
 function isMessageLine(line) {
   const l = (line || '').trim();
   if (!l) return true;
@@ -1421,7 +1436,11 @@ function extractBasicInfo(cardEl) {
   // 実在の大学名に「学歴」という文字列が含まれることはないため、これを含む候補は除外する
   const isGenericUnivPhrase = s => /^(?:[0-9０-９]{1,2}|[一二三四五六七八九十]{1,2})年制(?:大学院|大学)?$/.test(s)
     || /^(?:国公立|国立|公立|私立|有名|難関|一般)(?:大学院|大学)$/.test(s)
-    || s.includes('学歴');
+    || s.includes('学歴')
+    // 学校名ではなく、大学に言及しただけの文をそのまま拾っていた。
+    // 実データで「学生時代にはイギリスの大学」が大学名として記録されていた
+    || /(学生時代|時代に|留学|卒業後|在学中|その後|海外の|国内の|などの|といった|における)/.test(s)
+    || /^(?:の|は|に|で|を|と|も|や)/.test(s);
   const extractUnivFromText = (t) => {
     // 「学歴」「最終学歴」セクション以降から優先的に抽出
     const eduIdx = t.search(/学歴|最終学歴/);
@@ -1452,6 +1471,12 @@ function extractBasicInfo(cardEl) {
     if (panel) {
       univ = extractUnivFromText(panel.innerText || '');
     }
+  }
+  // 学校名の体をなしていない値は残さない。実データで「物」という1文字が
+  // 大学名として記録されていた（誤った値を残すより空欄の方が後から補いやすい）
+  if (univ && !/(大学院|大学|高専|高等専門学校|専門学校|学院|カレッジ|College|University)/i.test(univ)) {
+    console.warn('[Snow-we] 大学名として不適切な値のため空欄にします:', univ);
+    univ = '';
   }
 
   // 会社名を抽出
@@ -1680,6 +1705,17 @@ function extractBasicInfo(cardEl) {
   // 「ハイクラス転職エージェント、株式会社Snow-we.Inc代表の桝井と申します。」が
   // ちょうど40文字で下の長文ガード(>40)を通過し、会社名として記録され続けていた
   if (company && isMessageLine(company)) company = '';
+
+  // 会社名の欄に、会社名でないものが入っていた実例への対処。
+  // 実データで確認したもの：
+  //   「東京外国語大学 国際社会学部国際社会学科」「大阪大学 経済学部 経済・経営学科」（学歴欄を拾った）
+  //   「運用企画部部長代理 責任投資推進室 グループ長」「ソリューション推進部　戦略G グループリーダー」（部署・役職欄を拾った）
+  //   「基本情報」（画面のラベルそのもの）
+  // 社名として使えない以上、誤った値を残すより空欄にする方が安全（後から手で補える）
+  if (company && isNotCompanyName(company)) {
+    console.warn('[Snow-we] 会社名として不適切な値のため空欄にします:', company);
+    company = '';
+  }
 
   if (company.length > 30) {
     const head = company.match(/^[^\s　。、]{2,40}?(?:株式会社|合同会社|有限会社|ホールディングス)/)
