@@ -850,6 +850,16 @@ function showBadge(cls, text, tooltip = '', profileSummary = '', aiVerdict = '')
 // クリックトラッキング開始
 setupClickTracking();
 
+// このタブに読み込まれているコードのバージョンを出す。拡張機能を更新しても、
+// 既に開いているタブでは古いコードが動き続けるため、「拡張機能のバージョン」と
+// 「このタブで動いているバージョン」は一致しないことがある。不具合の調査時に
+// どちらを見ているのか分からなくなるので、必ず出しておく
+try {
+  console.log(`[Snow-we] content.js 起動 v${chrome.runtime.getManifest().version} / ${location.host}`);
+} catch (_) {
+  console.warn('[Snow-we] content.js 起動（拡張機能から切り離された状態です）');
+}
+
 // 拡張機能から切り離されたことを、自分から定期的に確認する。
 // 以前は「スカウトボタンを押した」「記録に失敗した」等の操作を起点にしか警告を
 // 出していなかったため、拡張機能を更新した直後は画面に何も出ず、次に操作するまで
