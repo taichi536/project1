@@ -850,6 +850,21 @@ function showBadge(cls, text, tooltip = '', profileSummary = '', aiVerdict = '')
 // クリックトラッキング開始
 setupClickTracking();
 
+// 拡張機能から切り離されたことを、自分から定期的に確認する。
+// 以前は「スカウトボタンを押した」「記録に失敗した」等の操作を起点にしか警告を
+// 出していなかったため、拡張機能を更新した直後は画面に何も出ず、次に操作するまで
+// 気づけなかった（その1件目の記録は既に失われている）。
+// 5秒おきに確認しておけば、作業を再開する前に気づける
+setInterval(() => {
+  if (!isExtensionAlive()) showExtensionInvalidatedBanner();
+}, 5000);
+// タブを離れて戻ってきたときも確認する（別タブで作業している間に更新された場合）
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !isExtensionAlive()) {
+    showExtensionInvalidatedBanner();
+  }
+});
+
 // 前回、拡張機能との接続が切れていて送信できなかった記録があれば送り直す。
 // ページを読み込み直した時点では接続が回復しているため、ここで回収できる。
 //
