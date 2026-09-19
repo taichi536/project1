@@ -126,6 +126,54 @@ function showExtensionInvalidatedBanner() {
   } catch (_) {}
 }
 
+// 担当者名が未設定のまま記録すると、その行は「担当者×日」の集計から丸ごと外れ、
+// 実在するのに未登録と誤判定される。実データではBizreachの44%が担当者不明で、
+// 古いバージョンのまま設定せずに送り続けている人がいた。
+// 記録時のトーストだけでは気づかれずに数十件が積み上がるため、ページを開いた
+// 時点で消えないバナーを出し、設定するまで気づき続けられるようにする
+let _recruiterMissingBannerShown = false;
+function showRecruiterMissingBanner() {
+  if (_recruiterMissingBannerShown) return;
+  _recruiterMissingBannerShown = true;
+  try {
+    const banner = document.createElement('div');
+    banner.style.cssText = `
+      position:fixed;bottom:12px;left:12px;z-index:2147483647;max-width:380px;
+      background:#fee2e2;color:#7f1d1d;font-family:sans-serif;font-size:12px;
+      font-weight:600;padding:10px 40px 10px 14px;border-radius:8px;
+      box-shadow:0 2px 12px rgba(0,0,0,0.25);line-height:1.6;
+    `;
+    banner.appendChild(document.createTextNode(
+      '⚠️ Snow-we: 担当者名が未設定です。このままスカウトを送ると、記録はされますが誰が送ったか分からない状態になります。'
+      + 'サイドパネルの「⚙️ 設定」で担当者名を入力して保存してください。'));
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = `
+      position:absolute;top:0;right:0;height:100%;width:32px;
+      background:transparent;border:none;color:#7f1d1d;font-size:18px;
+      font-weight:700;cursor:pointer;line-height:1;
+    `;
+    closeBtn.addEventListener('click', () => {
+      banner.remove();
+      _recruiterMissingBannerShown = false;
+    });
+    banner.appendChild(closeBtn);
+    document.documentElement.appendChild(banner);
+  } catch (_) {}
+}
+
+// ページを開いた時点で担当者名を確認する。設定済みならキャッシュにも載るので、
+// 記録時に chrome.storage の読み込みが空を返しても取り違えない
+chrome.storage.local.get(['gasSettings', 'recruiterName']).then(r => {
+  const name = (r.gasSettings && r.gasSettings.recruiter) || r.recruiterName || '';
+  if (name) {
+    _cachedRecruiterName = name;
+  } else {
+    console.warn('[Snow-we] 担当者名が未設定です。記録しても担当者不明になります');
+    setTimeout(showRecruiterMissingBanner, 2000);
+  }
+}).catch(() => {});
+
 // Supabase設定
 const SUPABASE_URL = 'https://ovwnyivqnqqiagutjxoo.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_tEQ4TOve0uCydsGiEm1cDA_D1LQ49wN';
@@ -1062,6 +1110,9 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     sharedRecruiter = _cachedRecruiterName;
     console.log('[Snow-we] 担当者名を再読み込みでも取得できなかったためキャッシュ値で補完:', sharedRecruiter);
   }
+  // それでも空 ＝ そもそも設定されていない。記録自体は残すが（消えるより良い）、
+  // 消えないバナーで知らせて、次の1件までに設定してもらう
+  if (!sharedRecruiter) showRecruiterMissingBanner();
 
   // ② スカウト実績のスプレッドシート(GAS)への記録は廃止した。
   // 以前はGASとSupabaseの両方に書いていたが、書き込み条件が両者で異なっていたため
