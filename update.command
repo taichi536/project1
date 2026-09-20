@@ -1,17 +1,6 @@
 #!/bin/bash
-cd "$(dirname "$0")"
-echo "================================"
-echo " Snow-we 拡張機能 アップデート"
-echo "================================"
-echo ""
-
-git pull
-
-echo ""
-echo "✅ 更新完了！"
-echo ""
-echo "次に Chrome で以下を行ってください："
-echo "  1. アドレスバーに chrome://extensions と入力してEnter"
-echo "  2. 「Snow-we」の「再読み込み」ボタンを押す"
-echo ""
-read -p "Enterキーを押すと閉じます..."
+# Mac でダブルクリックして実行するための入口。中身は update.sh に一本化している。
+# 以前は update.sh と update.command でそれぞれ案内文を持っており、片方だけが
+# 「5分以内に自動更新されます」という古い（いまは成り立たない）案内のまま残って
+# いた。同じ説明を二箇所で持たないようにする。
+bash "$(dirname "$0")/update.sh"
