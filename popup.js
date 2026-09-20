@@ -17,7 +17,20 @@ const _ANTHROPIC_HEADERS = {
 // なるため。コンソールを開かなくても分かるよう、結果カードの下に出す
 let _usageTally = null;
 
+// APIを呼ぶ前に、利用額が上限に達していないか確認する。
+// 利用額を表示するだけでは、気づいたときには使い切っている
+async function assertWithinApiBudget() {
+  let res;
+  try {
+    res = await chrome.runtime.sendMessage({ type: 'checkApiBudget' });
+  } catch (_) {
+    return; // 確認できない場合は止めない（費用と無関係な理由で業務を止めないため）
+  }
+  if (res && res.ok === false) throw new Error(res.reason || 'API利用額が上限に達しました');
+}
+
 async function claudeFetch(apiKey, body, maxRetries = 4) {
+  await assertWithinApiBudget();
   let delay = 3000;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -78,6 +91,39 @@ function renderApiCostDisplay(stats) {
   const todayUSD = stats.byDate[today] || 0;
   el.textContent = `API利用額 — 本日: $${todayUSD.toFixed(3)} / 累計: $${(stats.totalUSD || 0).toFixed(2)}`;
 }
+
+// API利用額の上限。上限に達したらAPIを呼ばないので、いまの消化状況を常に出しておく
+async function refreshBudgetUI() {
+  const res = await chrome.runtime.sendMessage({ type: 'getApiBudget' });
+  if (!res || res.error) return;
+  const daily = $('budget-daily');
+  const monthly = $('budget-monthly');
+  if (daily && document.activeElement !== daily) daily.value = res.budget.dailyUSD;
+  if (monthly && document.activeElement !== monthly) monthly.value = res.budget.monthlyUSD;
+  const el = $('budget-status');
+  if (!el) return;
+  const over = (used, limit) => limit > 0 && used >= limit;
+  const stopped = over(res.todayUSD, res.budget.dailyUSD) || over(res.monthUSD, res.budget.monthlyUSD);
+  el.style.color = stopped ? '#B91C1C' : '#888780';
+  el.textContent = stopped
+    ? `⛔ 上限に達しています（本日 $${res.todayUSD.toFixed(2)} / 今月 $${res.monthUSD.toFixed(2)}）。上限を上げるまでAI機能は動きません`
+    : `本日 $${res.todayUSD.toFixed(2)} / 今月 $${res.monthUSD.toFixed(2)}（0で無制限）`;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = $('budget-save-btn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    await chrome.runtime.sendMessage({
+      type: 'setApiBudget',
+      dailyUSD: $('budget-daily').value,
+      monthlyUSD: $('budget-monthly').value,
+    });
+    await refreshBudgetUI();
+    const el = $('budget-status');
+    if (el) el.textContent = `保存しました — ${el.textContent}`;
+  });
+});
 
 // ホスト名から媒体名を判定（フィードバック記録用。content.jsのgetPlatform()と同じ対応）
 function platformFromHostname(hostname = '') {
@@ -171,6 +217,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const costResult = await chrome.storage.local.get(['apiCostStats']);
     renderApiCostDisplay(costResult.apiCostStats || { totalUSD: 0, byDate: {} });
   } catch (_) {}
+
+  refreshBudgetUI().catch(() => {});
 
   // background.js からポジション一覧を取得してセレクタを初期化
   // MV3サービスワーカーが停止中の場合 sendMessage が失敗することがあるため try-catch
@@ -950,6 +998,10 @@ ${profileText}
     .map(p => p.description ? `${p.label}: ${p.description}` : p.label)
     .join('\n');
   const result = await suggestPositionSingleStep(apiKey, profileText, detailList, candidateAttrs);
+  // AIが返す配列の順番をそのまま順位として表示していたため、スコア順に並んでいない
+  // ことがあった（実機で「最推奨62点 / 次点48点 / 候補71点」と表示され、最高点が
+  // 一番下に出ていた）。表示・初期選択の両方がスコアと食い違うので、ここで並べ替える
+  (result.suggestions || []).sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
 
   // 提案結果に求人URLとファーム名を紐づける。AIが返すのは表示名だけなので、
   // ここで元のポジションに突き合わせる
@@ -999,13 +1051,16 @@ ${positionListText}
 【候補者プロフィール】
 ${profileText}
 
+【出力する件数】
+合致度の高い順に8件出してください。候補者に合うものが8件に満たない場合は、無理に埋めず合うものだけを出してください。
+
 以下のJSON形式のみで出力してください（コードブロック・前置き・説明は一切不要）:
 {"suggestions":[{"position":"ポジション名","match_score":90,"reason":"推奨理由を1文で記述"}]}
-※必ず守ること: reasonは1文で簡潔に。ダブルクォート・改行・バックスラッシュを含めないこと。`;
+※必ず守ること: match_scoreの高い順に並べること。reasonは1文で簡潔に。ダブルクォート・改行・バックスラッシュを含めないこと。`;
 
   const data = await claudeFetch(apiKey, {
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 1500,
+    max_tokens: 2500,
     messages: [{ role: 'user', content: prompt }]
   });
   const text = (data.content?.[0]?.text || '').trim();

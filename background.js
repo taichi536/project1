@@ -298,6 +298,55 @@ async function recordApiCostInBackground(model, usage) {
   return stats;
 }
 
+// ── API利用額の上限 ───────────────────────────────────────────────
+// 利用額を表示するだけでは、気づいたときには使い切っている。「止まる仕組み」が
+// 無いと、使うほど際限なく積み上がる。呼び出しの直前に必ず上限を確認し、
+// 超えていたらAPIを叩かない。
+//
+// 上限は端末ごと（chrome.storage.local）。担当者ごとに歯止めがかかる形になる。
+// 0を設定すると無制限。設定タブから変更できる
+const API_BUDGET_DEFAULT = { dailyUSD: 10, monthlyUSD: 150 };
+
+async function getApiBudget() {
+  const { apiBudget } = await chrome.storage.local.get(['apiBudget']);
+  return {
+    dailyUSD: Number.isFinite(apiBudget?.dailyUSD) ? apiBudget.dailyUSD : API_BUDGET_DEFAULT.dailyUSD,
+    monthlyUSD: Number.isFinite(apiBudget?.monthlyUSD) ? apiBudget.monthlyUSD : API_BUDGET_DEFAULT.monthlyUSD,
+  };
+}
+
+function apiSpendSummary(stats) {
+  const today = new Date().toISOString().slice(0, 10);
+  const month = today.slice(0, 7);
+  const byDate = stats?.byDate || {};
+  const monthUSD = Object.entries(byDate)
+    .filter(([d]) => d.startsWith(month))
+    .reduce((sum, [, v]) => sum + (v || 0), 0);
+  return { todayUSD: byDate[today] || 0, monthUSD };
+}
+
+// APIを呼ぶ前に必ず通す。超えていたら ok:false を返し、呼び出し側は中止する。
+// 今回の費用は呼ぶ前には分からないため、厳密な上限ではなく歯止めとして扱う
+// （止まるのは上限を1回分超えた時点）
+async function checkApiBudget() {
+  const [budget, { apiCostStats }] = await Promise.all([
+    getApiBudget(),
+    chrome.storage.local.get(['apiCostStats']),
+  ]);
+  const spend = apiSpendSummary(apiCostStats);
+  if (budget.dailyUSD > 0 && spend.todayUSD >= budget.dailyUSD) {
+    return { ok: false, ...spend, budget,
+      reason: `本日のAPI利用額が上限に達しました（$${spend.todayUSD.toFixed(2)} / 上限 $${budget.dailyUSD.toFixed(2)}）。`
+        + '続ける場合は設定タブで上限を引き上げてください。' };
+  }
+  if (budget.monthlyUSD > 0 && spend.monthUSD >= budget.monthlyUSD) {
+    return { ok: false, ...spend, budget,
+      reason: `今月のAPI利用額が上限に達しました（$${spend.monthUSD.toFixed(2)} / 上限 $${budget.monthlyUSD.toFixed(2)}）。`
+        + '続ける場合は設定タブで上限を引き上げてください。' };
+  }
+  return { ok: true, ...spend, budget };
+}
+
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'snowWeAutoRun') startAutoRun();
   if (alarm.name === 'snowWeAnomalyCheck') checkAnomalies();
@@ -1000,6 +1049,39 @@ function setAutoRunAlarm(autoRunConfig) {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // API利用額の記録（popup/content.jsの短命なコンテキストに依存しないよう、
   // service worker側で書き込みを完結させる）
+  // APIを呼ぶ直前の歯止め。popup.js / content.js の claudeFetch から必ず通す
+  if (msg.type === 'checkApiBudget') {
+    checkApiBudget()
+      .then(r => sendResponse(r))
+      // 上限の確認自体に失敗したときに止めてしまうと、費用とは無関係な理由で
+      // 業務が止まる。確認できない場合は通す
+      .catch(() => sendResponse({ ok: true }));
+    return true;
+  }
+
+  if (msg.type === 'getApiBudget') {
+    Promise.all([getApiBudget(), chrome.storage.local.get(['apiCostStats'])])
+      .then(([budget, { apiCostStats }]) => sendResponse({ budget, ...apiSpendSummary(apiCostStats) }))
+      .catch(e => sendResponse({ error: e.message }));
+    return true;
+  }
+
+  if (msg.type === 'setApiBudget') {
+    const clean = (v, fallback) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= 0 ? n : fallback;
+    };
+    chrome.storage.local.set({
+      apiBudget: {
+        dailyUSD: clean(msg.dailyUSD, API_BUDGET_DEFAULT.dailyUSD),
+        monthlyUSD: clean(msg.monthlyUSD, API_BUDGET_DEFAULT.monthlyUSD),
+      },
+    })
+      .then(() => sendResponse({ ok: true }))
+      .catch(e => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+
   if (msg.type === 'recordApiCost') {
     recordApiCostInBackground(msg.model, msg.usage)
       .then(stats => sendResponse({ ok: true, stats }))

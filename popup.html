@@ -487,6 +487,18 @@
     <button class="save-btn" id="save-btn">保存</button>
   </div>
   <div id="api-cost-display" style="font-size:10px; color:#888780; margin-top:4px;"></div>
+  <!-- 利用額を表示するだけでは、気づいたときには使い切っている。
+       上限に達したらAPIを呼ばないようにする（0で無制限） -->
+  <div style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:10px; color:#888780;">
+    <span>上限 1日</span>
+    <span>$</span><input type="number" id="budget-daily" min="0" step="1"
+      style="width:52px; padding:2px 4px; font-size:10px;" />
+    <span>／ 1か月</span>
+    <span>$</span><input type="number" id="budget-monthly" min="0" step="10"
+      style="width:60px; padding:2px 4px; font-size:10px;" />
+    <button class="save-btn" id="budget-save-btn" style="padding:2px 8px; font-size:10px;">保存</button>
+  </div>
+  <div id="budget-status" style="font-size:10px; color:#888780; margin-top:3px;"></div>
 </div>
 
 <div class="tabs">

@@ -2930,6 +2930,16 @@ function showPreviousResultsBanner(progress) {
 
 // Claude API fetch with retry on 529 (overloaded)
 async function claudeFetch(apiKey, body, maxRetries = 4) {
+  // 利用額が上限に達していたらAPIを叩かない。一括処理はここから何十回も
+  // 呼ばれるため、歯止めが無いと一度の実行で使い切れてしまう
+  try {
+    const budget = await chrome.runtime.sendMessage({ type: 'checkApiBudget' });
+    if (budget && budget.ok === false) throw new Error(budget.reason || 'API利用額が上限に達しました');
+  } catch (e) {
+    // 拡張機能のコンテキストが切れている等、確認自体ができない場合は止めない。
+    // ただし上限超過のエラーはそのまま投げる
+    if (/上限/.test(e.message || '')) throw e;
+  }
   let delay = 3000;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -5816,7 +5826,7 @@ ${indexedList}
   }
   if (shortlist.length === 0) throw new Error('ポジションの絞り込みに失敗しました');
 
-  // ── Step2: 絞り込んだ分だけ要件付きで取り直し、トップ3を選ぶ ──
+  // ── Step2: 絞り込んだ分だけ要件付きで取り直し、上位5件を選ぶ ──
   const detailRes = await chrome.runtime.sendMessage({
     type: 'getPositionDetails',
     ids: shortlist.map(p => p.id),
@@ -5830,9 +5840,9 @@ ${indexedList}
 
   const data = await claudeFetch(apiKey, {
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 400,
+    max_tokens: 700,
     messages: [{ role: 'user', content: `あなたは日本の転職エージェントのアシスタントです。
-候補者のプロフィールを分析し、以下のポジション一覧の中からこの候補者の経験・スキルに最もマッチするポジションをトップ3選んでください。
+候補者のプロフィールを分析し、以下のポジション一覧の中からこの候補者の経験・スキルに最もマッチするポジションを上位5件選んでください。
 
 選定ポイント：
 - 候補者の直近の職種・業界経験が活かせるか
@@ -5849,7 +5859,9 @@ ${posList}
 {"suggestions":[
   {"rank":1,"index":0,"reason":"マッチ理由を25文字以内で"},
   {"rank":2,"index":0,"reason":"マッチ理由を25文字以内で"},
-  {"rank":3,"index":0,"reason":"マッチ理由を25文字以内で"}
+  {"rank":3,"index":0,"reason":"マッチ理由を25文字以内で"},
+  {"rank":4,"index":0,"reason":"マッチ理由を25文字以内で"},
+  {"rank":5,"index":0,"reason":"マッチ理由を25文字以内で"}
 ]}` }]
   });
 
@@ -5858,6 +5870,9 @@ ${posList}
   if (!jsonMatch) throw new Error('AI応答のJSON解析失敗: ' + text.slice(0, 80));
   const parsed = JSON.parse(jsonMatch[0]);
   const suggestions = (parsed.suggestions || [])
+    // 返ってきた配列の順番をそのまま順位にすると、rankと表示が食い違うことがある
+    .slice()
+    .sort((a, b) => (Number(a.rank) || 99) - (Number(b.rank) || 99))
     .map(s => {
       const p = detailed[Number(s.index)];
       if (!p) return null;
