@@ -608,16 +608,32 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.positionsApiToken) _positionsMemCache = null;
 });
 
-// ポジションAPIは認証なしで読める。返すのは各ファームの採用ページに元から公開
-// されている求人情報だけで、秘密にする必要のあるものが無いため。
-// 認証を付けると共有トークンをここに埋め込むことになるが、この拡張機能の
-// リポジトリは公開されているのでトークンも公開されてしまい、秘密として機能しない。
+// ポジションAPIの認証トークン。
 //
-// サーバー側で認証を有効にした場合に備えて、設定タブで入力されたトークンがあれば
-// 送る余地だけは残してある（通常は未設定で運用する）
+// ■ なぜ認証が要るか
+// 返しているのは求人情報だけではない。ポジション提案は呼ぶたびに外部APIへ
+// 課金が発生し、スカウト文面にはファームごとの年収レンジや訴求が入っている。
+// URLを知っていれば誰でも呼べる状態にしておくと、費用が他人に使われる。
+//
+// ■ なぜここに書いてよいか
+// このリポジトリは非公開で、読める人を限っているため。
+// 公開リポジトリに移す場合は、トークンがそのまま公開されるので、
+// ここに置いたままにしてはいけない。
+//
+// ■ 置き換え方
+// scripts/set-api-token.sh を使う。手で書き換えると、サーバー側の .env と
+// 食い違ったまま気づきにくい。
+const POSITIONS_API_TOKEN = '__POSITIONS_API_TOKEN__';
+
+// 設定タブで入力があれば、そちらを優先する。特定の人だけ別のトークンを
+// 使いたい場合や、入れ替えの途中で一時的に上書きしたい場合のため。
+// 通常は空欄のままで、上の埋め込みトークンが使われる
 async function getPositionsApiToken() {
   const { positionsApiToken } = await chrome.storage.local.get(['positionsApiToken']);
-  return (positionsApiToken || '').trim();
+  const override = (positionsApiToken || '').trim();
+  if (override) return override;
+  // 置き換え前のプレースホルダーをそのまま送ると、原因の分かりにくい401になる
+  return POSITIONS_API_TOKEN.startsWith('__') ? '' : POSITIONS_API_TOKEN;
 }
 
 async function fetchPositionsApi(query) {
@@ -627,7 +643,7 @@ async function fetchPositionsApi(query) {
   });
   if (!res.ok) {
     throw new Error(res.status === 401
-      ? 'ポジションAPIの認証に失敗しました（設定タブのトークンを空欄にしてお試しください）'
+      ? 'ポジションAPIの認証に失敗しました。拡張機能が古い可能性があります。update を実行して最新にしてください。'
       : `ポジションAPI取得失敗: ${res.status}`);
   }
   const data = await res.json();

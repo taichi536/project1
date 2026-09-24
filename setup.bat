@@ -28,13 +28,20 @@ echo.
 :: デスクトップに保存先フォルダを作成
 set DEST=%USERPROFILE%\Desktop\snow-we
 
+:: リポジトリは非公開なので、読み取り専用トークン入りのURLで取得する。
+:: これによりGitHubアカウントもログインも不要になる。
+:: トークンは clone したフォルダに記録されるので、以降の update.bat は
+:: そのまま通る。
+:: 値の入れ方: ./tools/set-github-token.sh <トークン>
+set REPO=https://oauth2:__GITHUB_READ_TOKEN__@github.com/taichi536/project1.git
+
 if exist "%DEST%" (
   echo フォルダが既に存在します: %DEST%
   echo 既存のフォルダを更新します...
   cd /d "%DEST%"
   git pull
 ) else (
-  git clone https://github.com/taichi536/project1.git "%DEST%"
+  git clone %REPO% "%DEST%"
 )
 
 if %errorlevel% neq 0 (
