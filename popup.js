@@ -948,6 +948,9 @@ async function suggestPosition(apiKey, profileText) {
   // 全件と比べる。読み飛ばしが構造的に起きず、「需給調整」と「S&OP」のように
   // 言い方が違うだけで落ちることもない。中身がほぼ同じ求人（管理職版など）は
   // サーバー側で1件にまとめられる。
+  // 検索に渡した職務経歴の長さも出す。短すぎる場合、ページからプロフィールを
+  // 取り切れておらず、経歴の後半（前職・前々職）が検索に効いていない可能性がある
+  console.log(`[Snow-we] 検索に使う職務経歴: ${profileText.length}文字`);
   setStatus('suggest', 'loading', `${all.length}件から候補者に近い求人を検索中...`);
   let shortlist = [];
   let matchInfo = '';
@@ -960,6 +963,14 @@ async function suggestPosition(apiKey, profileText) {
     if (res?.ok && res.positions?.length) {
       shortlist = res.positions;
       matchInfo = `意味の近さで ${res.considered}件 → ${shortlist.length}件`;
+      // 絞り込んだ30件をコンソールに出す。最終的に表示されるのは8件なので、
+      // 提案に出てこない求人が「そもそも30件に入っていなかった」のか
+      // 「30件には入ったがAIが選ばなかった」のかを、これで切り分けられる。
+      // どちらなのかで直す場所がまったく変わる（検索側か、順位付けのプロンプト側か）
+      console.log(
+        `[Snow-we] 絞り込んだ${shortlist.length}件（この中から最終的に8件が選ばれます）:\n`
+        + shortlist.map((p, i) => `${String(i + 1).padStart(2)}. ${(p.score ?? 0).toFixed(3)}  ${p.label}`).join('\n')
+      );
     } else if (res?.error) {
       console.warn('[Snow-we] 求人の検索に失敗:', res.error);
       matchInfo = `⚠ 求人の検索に失敗したため、AIに一覧から選ばせています（${res.error}）`;
