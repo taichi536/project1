@@ -44,19 +44,26 @@ website/
 
 ## 公開手順（Cloudflare Pages）
 
+ドメイン snow-we.jp の DNS は **Squarespace Domains**（旧 Google Domains）で管理しています。ネームサーバーは移さず、Squarespace のまま使います。
+
 1. Cloudflare のアカウントを作り、「Workers & Pages」→「Create」→「Pages」→ GitHub の `taichi536/project1` を接続する
 2. ビルドの設定
    - Production branch：公開に使うブランチ（例：`main`）
    - Build command：空欄のまま
    - Build output directory：`website/public`
-3. 発行された `xxxx.pages.dev` のURLで表示を確認する
-4. 「Custom domains」で `www.snow-we.jp` を追加し、案内に従ってドメインのDNS設定（現在は Google Sites 向けの CNAME）を Cloudflare 向けに変更する
-5. `snow-we.jp`（www なし）は現在どこにも接続されていません。こちらも Cloudflare に追加し、`www.snow-we.jp` へリダイレクトする
-6. 切り替えを確認したら、Google Sites 側のサイトは非公開にする（同じ内容が2か所にあると評価が分散するため）
+3. 発行された `xxxx.pages.dev` のURLで表示とフォーム送信を確認する
+4. Cloudflare Pages の「Custom domains」で `www.snow-we.jp` を追加し、案内された CNAME の値（`xxxx.pages.dev`）を控える
+5. Squarespace Domains（https://account.squarespace.com/domains）→ snow-we.jp →「DNS」→「DNS Settings」で、`www` の CNAME（現在は Google Sites 向けの `ghs.googlehosted.com`）を手順4の値に変更する
+6. `snow-we.jp`（www なし）は、Squarespace の「Domain forwarding（転送）」で `https://www.snow-we.jp` へ転送する
+7. 切り替えを確認したら、Google Sites 側のサイトは非公開にする（同じ内容が2か所にあると評価が分散するため）
+
+**Squarespace の DNS で消してはいけないレコード**
+- Search Console の所有権確認用 TXT（`google-site-verification=…`）
+- Google Workspace のメール用レコード（MX、`v=spf1` の TXT など）
 
 ## 公開後にやること
 
-1. Search Console で `https://www.snow-we.jp/sitemap.xml` を送信する
+1. Search Console（ドメインプロパティ `snow-we.jp`、2026年9月に登録済み）で `https://www.snow-we.jp/sitemap.xml` を送信する
 2. 「URL検査」で各ページをインデックス登録リクエストする
 3. GA4 で `generate_lead` イベントをキーイベント（コンバージョン）に設定する
 4. 2〜4週間後、Search Console の「ページ」レポートで全ページがインデックスされたか確認する
