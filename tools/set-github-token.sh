@@ -35,7 +35,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if [ $# -lt 1 ]; then
-  echo "使い方: ./tools/set-github-token.sh --clipboard"
+  echo "使い方: ./tools/set-github-token.sh --clipboard    （コピーした値を読む）"
+  echo "        ./tools/set-github-token.sh --from-setup  （setup.bat の値を残りに複製）"
   echo "        ./tools/set-github-token.sh <トークン>"
   exit 1
 fi
@@ -49,7 +50,17 @@ fi
 # この形なら、先にコマンドだけ貼り付けて Enter を押さずに待ち、そのあとで
 # トークンをコピーしてから Enter を押せる。実行の瞬間に必要なのは
 # クリップボードの中身だけなので、コマンドのコピーと競合しない。
-if [ "$1" = "--clipboard" ]; then
+if [ "$1" = "--from-setup" ]; then
+  # 既に setup.bat に入っている値を、残りのファイルに複製する。
+  # 取得先URLを持つファイルが増えたときに、GitHubからトークンを取り直さずに
+  # 揃えられるようにするため。実際、update.bat と update.sh を後から足したとき、
+  # 既に正しい値が setup.bat にあるのにクリップボードから入れ直そうとして失敗した
+  TOKEN="$(grep -o 'oauth2:[^@]*' setup.bat | head -1 | cut -d: -f2)"
+  if [ -z "$TOKEN" ] || [ "$TOKEN" = "__GITHUB_READ_TOKEN__" ]; then
+    echo "❌ setup.bat にトークンが入っていません。--clipboard で入れてください。"
+    exit 1
+  fi
+elif [ "$1" = "--clipboard" ]; then
   if ! command -v pbpaste > /dev/null 2>&1; then
     echo "❌ pbpaste が見つかりません（macOS以外では使えません）。"
     echo "   ./tools/set-github-token.sh <トークン> の形で渡してください。"
