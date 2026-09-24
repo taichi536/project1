@@ -6839,7 +6839,20 @@ function findMynaviDetailPanel() {
 // -------------------------------------------------------
 // メイン抽出関数
 // -------------------------------------------------------
-function extractProfile() {
+// プロフィールから取り出す文字数の上限。
+//
+// 既定の2,500字は、一次選定の一括処理（候補者ごとにAIを呼ぶ）で費用が膨らまない
+// ようにするための値。一方でポジション提案には短すぎた。実機で、詳細パネルに
+// 5,386字ある職務経歴書が2,500字で切られており、切り落とされていたのは末尾の
+// 前職・前々職だった（アクセンチュア戦略本部6年・営業変革5年超）。その結果、
+// 営業改革系と戦略系の求人が1件も提案されなかった。
+//
+// 職務経歴書は「職務要約 → 現職 → 前職 → 前々職」の順に書かれるため、
+// 末尾を切ると古い経歴から順に消える。提案のときは長く取る
+const PROFILE_MAX_CHARS_DEFAULT = 2500;
+const PROFILE_MAX_CHARS_FULL = 8000;
+
+function extractProfile(maxChars) {
   const host = location.hostname;
   const url  = location.href;
   let text   = '';
@@ -6984,7 +6997,7 @@ function extractProfile() {
     ], detailPanel);
     if (text) text = removeNonProfileSections(text);
     if (!text || text.length < 100) {
-      text = detailPanel ? removeNonProfileSections(extractMainText(detailPanel, 3000)) : '';
+      text = detailPanel ? removeNonProfileSections(extractMainText(detailPanel, maxChars || PROFILE_MAX_CHARS_DEFAULT)) : '';
     }
 
   } else if (host.includes('ambi') || host.includes('en-ambi')) {
@@ -7022,10 +7035,10 @@ function extractProfile() {
       console.log('[Snow-we] AMBI抽出診断 → フォールバック(extractMainText)へ');
       // タブ見出しの直後に来る「ユーザー情報」を起点にすることで、フォールバック側でも
       // 同じタブ見出し起因の誤カットを避ける
-      let mainText = extractMainText(detailPanel, 3000);
+      let mainText = extractMainText(detailPanel, maxChars || PROFILE_MAX_CHARS_DEFAULT);
       const anchorIdx = mainText.indexOf('ユーザー情報');
       if (anchorIdx > 0 && anchorIdx < 100) mainText = mainText.slice(anchorIdx);
-      text = detailPanel ? removeNonProfileSections(mainText).slice(0, 2500) : '';
+      text = detailPanel ? removeNonProfileSections(mainText).slice(0, maxChars || PROFILE_MAX_CHARS_DEFAULT) : '';
       console.log('[Snow-we] AMBI抽出診断 extractMainText後 長さ=', text.length, '冒頭50字=', text.slice(0, 50));
     }
 
@@ -7061,7 +7074,7 @@ function extractProfile() {
     text = byKeyword.length >= bySelector.length ? byKeyword : bySelector;
     if (text) text = removeNonProfileSections(text);
     if (!text || text.length < 100) {
-      text = detailPanel ? removeNonProfileSections(extractMainText(root, 2500)) : '';
+      text = detailPanel ? removeNonProfileSections(extractMainText(root, maxChars || PROFILE_MAX_CHARS_DEFAULT)) : '';
     }
 
   } else if (host.includes('recruitdirect') || host.includes('rds')) {
@@ -7090,11 +7103,11 @@ function extractProfile() {
     }
 
   } else {
-    text = extractMainText(null, 2500);
+    text = extractMainText(null, maxChars || PROFILE_MAX_CHARS_DEFAULT);
   }
 
   if (!text || text.trim().length < 80) {
-    text = extractMainText(null, 2500);
+    text = extractMainText(null, maxChars || PROFILE_MAX_CHARS_DEFAULT);
   }
 
   // dodaXの候補者検索結果ページには、絞り込みフィルター欄の見出しに「学歴」「経験業種」
@@ -7114,7 +7127,7 @@ function extractProfile() {
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
-    .substring(0, 2500);
+    .substring(0, maxChars || PROFILE_MAX_CHARS_DEFAULT);
 }
 
 // -------------------------------------------------------
@@ -7237,16 +7250,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // findDodaxDetailPanelが別のタイミングの状態を拾ってしまい効果が
         // なかった（実機で再現）ため、extractProfile自体を結果が安定するまで
         // リトライする（AMBIの.leftCell待機と同じ考え方）
+        // 呼び出し側が fullProfile を指定した場合は長く取る（ポジション提案用）。
+        // 既定のままだと前職・前々職が切り落とされ、検索に効かない
+        const maxChars = request.fullProfile ? PROFILE_MAX_CHARS_FULL : PROFILE_MAX_CHARS_DEFAULT;
         let profileText;
         if (getPlatform() === 'dodax') {
           profileText = '';
           for (let i = 0; i < 10; i++) {
-            profileText = extractProfile();
+            profileText = extractProfile(maxChars);
             if (profileText.trim().length > 200) break;
             await sleep(300);
           }
         } else {
-          profileText = extractProfile();
+          profileText = extractProfile(maxChars);
         }
         // デバッグ表示用のパネル取得もプラットフォームに合わせる（以前はAMBI以外だと
         // 常にRDS用の関数にフォールバックしていたため、dodaX等の調査時にログの

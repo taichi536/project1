@@ -633,7 +633,9 @@ ${personalizedLine}
 }
 
 // content.jsが動いているか確認し、必要なら再注入してからプロフィール取得
-async function getProfileSafe(tab) {
+// fullProfile を指定すると、職務経歴を長め（8,000字）に取る。既定の2,500字だと
+// 前職・前々職が切り落とされ、ポジション提案の検索に効かないため
+async function getProfileSafe(tab, { fullProfile = false } = {}) {
   // pingでcontent.js動作確認
   const isAlive = await chrome.tabs.sendMessage(tab.id, { action: 'ping' })
     .then(() => true).catch(() => false);
@@ -650,7 +652,7 @@ async function getProfileSafe(tab) {
 
   // プロフィール取得
   try {
-    return await chrome.tabs.sendMessage(tab.id, { action: 'getProfile' });
+    return await chrome.tabs.sendMessage(tab.id, { action: 'getProfile', fullProfile });
   } catch (e) {
     throw new Error('プロフィールの取得に失敗しました。ページを再読み込みしてください。');
   }
@@ -837,7 +839,10 @@ async function runSuggestPosition() {
   let profileData;
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    profileData = await getProfileSafe(tab);
+    // 提案だけは職務経歴を長く取る。既定の2,500字では前職・前々職が切り落とされ、
+    // 実機で「アクセンチュア戦略本部6年・営業変革5年超」が検索に渡っておらず、
+    // 営業改革系と戦略系の求人が1件も提案されなかった
+    profileData = await getProfileSafe(tab, { fullProfile: true });
   } catch (e) {
     setStatus('suggest', 'error', 'プロフィールを取得できませんでした。ページを再読み込みして再度お試しください。');
     $('suggest-btn').disabled = false;
