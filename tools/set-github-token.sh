@@ -82,15 +82,24 @@ if ! printf '%s' "$TOKEN" | grep -Eq '^(github_pat_|ghp_)[A-Za-z0-9_]{20,}$'; th
   exit 1
 fi
 
-if ! grep -q "^set REPO=https://oauth2:" setup.bat; then
-  echo "❌ setup.bat に REPO の行が見つかりません。"
-  exit 1
-fi
+# 取得先URLを持つファイルは3つある。setup.bat は初回用、update.bat と
+# update.sh は毎回の更新で取得先を入れ直すため。1つでも古いトークンのまま
+# 残ると、その経路だけログイン画面が出て原因が分かりにくいので、まとめて入れる
+FILES="setup.bat update.bat update.sh"
 
-sed "s|^set REPO=https://oauth2:.*@github.com/|set REPO=https://oauth2:${TOKEN}@github.com/|" setup.bat > setup.bat.tmp
-mv setup.bat.tmp setup.bat
+for f in $FILES; do
+  if ! grep -q "REPO=\"\?https://oauth2:" "$f"; then
+    echo "❌ $f に REPO の行が見つかりません。"
+    exit 1
+  fi
+done
 
-echo "✅ setup.bat に書き込みました（先頭10文字: ${TOKEN:0:10}…）"
+for f in $FILES; do
+  sed "s|oauth2:[^@]*@github.com/|oauth2:${TOKEN}@github.com/|" "$f" > "$f.tmp"
+  mv "$f.tmp" "$f"
+done
+
+echo "✅ setup.bat / update.bat / update.sh に書き込みました（先頭10文字: ${TOKEN:0:10}…）"
 echo ""
 echo "動作確認（一時フォルダに取得してすぐ消します）:"
 echo "  rm -rf /tmp/clone-test && git clone --depth 1 \"\$(grep '^set REPO=' setup.bat | cut -d= -f2-)\" /tmp/clone-test && rm -rf /tmp/clone-test"

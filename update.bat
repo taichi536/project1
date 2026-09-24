@@ -14,6 +14,14 @@ echo  Snow-we 拡張機能 アップデート
 echo ================================
 echo.
 
+rem 取得先を毎回入れ直す。このリポジトリは非公開なので、読み取り専用トークンを
+rem 含むURLでないとログイン画面が出る。トークンを入れ替えたときも、この行の
+rem おかげで次の更新から自動で新しいURLに切り替わる（入れ替え前に一度でも
+rem 更新できていれば、新しいトークン入りのこのファイル自体が届いているため）。
+rem 値の入れ方: ./tools/set-github-token.sh --clipboard
+set REPO=https://oauth2:__GITHUB_READ_TOKEN__@github.com/taichi536/project1.git
+git remote set-url origin %REPO%
+
 rem git pull の成否を必ず見る。以前は失敗しても「更新完了」と表示していたため、
 rem ネットワークが切れていても、ローカルに変更が残って pull が止まっていても、
 rem 画面上は成功したように見えていた
