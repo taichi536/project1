@@ -34,10 +34,20 @@ fi
 
 TOKEN="$1"
 
+# 接頭辞が二重になっているのを先に弾く。コピーした値自体が github_pat_ で
+# 始まるので、案内を読み違えて前に付け足してしまうことがある。素通しすると
+# 不正な値のまま書き込まれ、メンバーのセットアップが失敗してから気づくことになる
+if printf '%s' "$TOKEN" | grep -Eq '^(github_pat_|ghp_){2}'; then
+  echo "❌ 接頭辞が二重になっています。コピーした値をそのまま渡してください。"
+  echo "   （値は github_pat_ で始まっているので、前に付け足す必要はありません）"
+  exit 1
+fi
+
 # GitHubのトークンは github_pat_... / ghp_... の形。記号が混じると
 # sed の置換で壊れるので、英数字とアンダースコアだけに限る
-if ! printf '%s' "$TOKEN" | grep -Eq '^[A-Za-z0-9_]{20,}$'; then
-  echo "❌ トークンの形が想定と違います（英数字とアンダースコアのみ、20文字以上）。"
+if ! printf '%s' "$TOKEN" | grep -Eq '^(github_pat_|ghp_)[A-Za-z0-9_]{20,}$'; then
+  echo "❌ トークンの形が想定と違います。"
+  echo "   github_pat_ または ghp_ で始まる、英数字とアンダースコアだけの値を渡してください。"
   exit 1
 fi
 
