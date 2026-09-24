@@ -53,7 +53,7 @@ website/
    - Build output directory：`website/public`
 3. 発行された `xxxx.pages.dev` のURLで表示とフォーム送信を確認する
 4. Cloudflare Pages の「Custom domains」で `www.snow-we.jp` を追加し、案内された CNAME の値（`xxxx.pages.dev`）を控える
-5. Squarespace Domains（https://account.squarespace.com/domains）→ snow-we.jp →「DNS」→「DNS Settings」で、`www` の CNAME（現在は Google Sites 向けの `ghs.googlehosted.com`）を手順4の値に変更する
+5. Squarespace Domains（https://account.squarespace.com/domains）→ snow-we.jp →「DNS」→「DNS Settings」で、`www` の CNAME（Google Sites 向けの値。通常は `ghs.googlehosted.com`）を手順4の値に変更する
 6. `snow-we.jp`（www なし）は、Squarespace の「Domain forwarding（転送）」で `https://www.snow-we.jp` へ転送する
 7. 切り替えを確認したら、Google Sites 側のサイトは非公開にする（同じ内容が2か所にあると評価が分散するため）
 
