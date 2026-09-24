@@ -587,13 +587,19 @@ function buildPositionMatchText(p) {
   return [p.title, p.industry].filter(Boolean).join(' / ');
 }
 
+const POSITION_REQUIREMENTS_MAX_CHARS = 1200;
+
 function buildApiPositionRequirementsText(p) {
   const parts = [];
   if (p.categoryLabel)  parts.push('【カテゴリ】' + p.categoryLabel);
   if (p.location)       parts.push('【勤務地】' + p.location);
   if (p.jobContent)     parts.push('【職務内容】' + p.jobContent);
   if (p.qualification)  parts.push('【応募要件】' + p.qualification);
-  return parts.join(' / ').substring(0, 2500);
+  // 1件あたりの上限。最後の順位付けで30件ぶんをAIに渡すため、ここが費用を直接決める。
+  // 2,500字だと30件で約44,000トークン＝1回$0.049かかっていた（実測）。
+  // 募集要件の後半は「働き方」「選考プロセス」などの定型文が多く、
+  // どの候補者に合うかの判断にはほとんど効かないため、冒頭側を残して切る
+  return parts.join(' / ').substring(0, POSITION_REQUIREMENTS_MAX_CHARS);
 }
 
 // トークンを差し替えたら、サービスワーカー内のメモリキャッシュも捨てる。
