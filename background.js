@@ -275,13 +275,18 @@ const POSITION_LIST = [
 // ページ遷移で破棄される）なため、chrome.storage.localへの書き込みが完了する
 // 前にコンテキストごと消えて記録が失われることがある。永続的なservice worker
 // 側で一元的に書き込むことで、この取りこぼしを防ぐ。
+// 価格は100万トークンあたりのドル。モデルを足したらここにも必ず足すこと。
+// 載っていないモデルは費用が集計されず、上限にも当たらないまま使い続けられる
 const CLAUDE_PRICING = {
+  'claude-sonnet-5': { input: 3.00, output: 15.00 },
   'claude-sonnet-4-6': { input: 3.00, output: 15.00 },
   'claude-haiku-4-5-20251001': { input: 1.00, output: 5.00 },
 };
 
 async function recordApiCostInBackground(model, usage) {
   const pricing = CLAUDE_PRICING[model];
+  // 黙って0円として扱うと、上限を設けた意味が無くなる。気づけるように残す
+  if (!pricing) console.warn(`[Snow-we] 価格表に無いモデルです。費用が集計されません: ${model}`);
   if (!pricing || !usage) return null;
   const cost = ((usage.input_tokens || 0) / 1e6) * pricing.input
     + ((usage.output_tokens || 0) / 1e6) * pricing.output;
