@@ -897,6 +897,11 @@ JSON形式のみで出力（コードブロック不要）:
   try { return JSON.parse(match[0]); } catch (_) { return null; }
 }
 
+// 意味の近さで絞り込んで残す件数。この数だけ職務内容・応募要件つきで取り直し、
+// 最後にAIが読んで順位を付ける。増やすほど取りこぼしは減るが、最後の1回に渡す
+// 募集要件が増えて費用が上がる（30件で約$0.017）
+const SHORTLIST_SIZE = 30;
+
 async function suggestPosition(apiKey, profileText) {
   apiKey = sanitizeApiKey(apiKey);
 
@@ -929,7 +934,45 @@ async function suggestPosition(apiKey, profileText) {
     return await suggestPositionSingleStep(apiKey, profileText, positionListText, candidateAttrs);
   }
 
-  // ── Step 1: Haikuで全件から上位15件に絞り込み ──
+  // ── Step 1: 候補者の職務経歴に近い求人を、意味の近さで探す ──
+  //
+  // ここは元々「763件の求人名をAIに見せて15件選ばせる」処理だった。取りこぼしを
+  // 防ぐ仕組みが無く、実機では化学・素材の候補者に対してアクセンチュア352件
+  // （全体の46%）から1件も候補に上がらなかった。一覧はファーム名順のため
+  // アクセンチュアが先頭352行を占めており、そこがまるごと読み飛ばされていた。
+  // 語彙の辞書で機械的に採点する方式も試したが、求人名の多くは中身を表しておらず
+  // （「戦略コンサルタント」等）、辞書に無い言い回しの候補者が落ちた。
+  //
+  // 候補者管理システム側で、求人を「どんな経歴の人に向いた仕事か」に要約して
+  // ベクトル化してある。候補者の職務経歴も同じ方法でベクトルにして、意味の近さで
+  // 全件と比べる。読み飛ばしが構造的に起きず、「需給調整」と「S&OP」のように
+  // 言い方が違うだけで落ちることもない。中身がほぼ同じ求人（管理職版など）は
+  // サーバー側で1件にまとめられる。
+  setStatus('suggest', 'loading', `${all.length}件から候補者に近い求人を検索中...`);
+  let shortlist = [];
+  let matchInfo = '';
+  try {
+    const res = await chrome.runtime.sendMessage({
+      type: 'matchPositions',
+      profileText,
+      limit: SHORTLIST_SIZE,
+    });
+    if (res?.ok && res.positions?.length) {
+      shortlist = res.positions;
+      matchInfo = `意味の近さで ${res.considered}件 → ${shortlist.length}件`;
+    } else if (res?.error) {
+      console.warn('[Snow-we] 求人の検索に失敗:', res.error);
+      matchInfo = `⚠ 求人の検索に失敗したため、AIに一覧から選ばせています（${res.error}）`;
+    }
+  } catch (e) {
+    console.warn('[Snow-we] 求人の検索に失敗:', e.message);
+    matchInfo = `⚠ 求人の検索に失敗したため、AIに一覧から選ばせています（${e.message}）`;
+  }
+  if (_usageTally) _usageTally.matchInfo = matchInfo;
+
+  // ── 退避：ベクトル検索が使えないときだけ、従来どおりAIに一覧から選ばせる ──
+  // 精度は落ちるが（上記の取りこぼしが起きうる）、提案が出ないよりはよい
+  if (shortlist.length === 0) {
   // ポジション名を書き写させると表記ゆれで照合できないため、行番号で返させる
   setStatus('suggest', 'loading', `Step1: ${all.length}件から候補を絞り込み中...`);
   const indexedList = all.map((p, i) => `${i}\t${p.firmJa}\t${p.matchText || p.title}`).join('\n');
@@ -955,25 +998,25 @@ ${profileText}
   });
   const step1Text = (step1Data.content?.[0]?.text || '').trim();
   const arrMatch = step1Text.match(/\[[\s\S]*?\]/);
-  let shortlist = [];
   if (arrMatch) {
     try {
       shortlist = JSON.parse(arrMatch[0]).map(n => all[Number(n)]).filter(Boolean).slice(0, 15);
     } catch (_) {}
   }
-  // Step1でどのファームが残ったかを出す。Step1が見ているのはポジション名・カテゴリ・
-  // 勤務地だけなので、求人名の書き方がファームごとに違うと、職務内容を読む前の段階で
-  // 特定のファームが落ちている可能性がある。母数と見比べれば偏りが分かる
+  }
+  // 絞り込みでどのファームが残ったかを出す。0件のファームも必ず出すこと。
+  // 「入っていない」ことが見えないと取りこぼしに気づけない。実際、この表示を
+  // 0件込みにして初めて「アクセンチュア 0件（母数352件）」が見つかった
   if (shortlist.length > 0) {
     const shortCount = {};
     shortlist.forEach(p => { shortCount[p.firmJa] = (shortCount[p.firmJa] || 0) + 1; });
     const allCount = {};
     all.forEach(p => { allCount[p.firmJa] = (allCount[p.firmJa] || 0) + 1; });
-    const breakdown = Object.entries(shortCount)
+    const breakdown = Object.entries(allCount)
       .sort((a, b) => b[1] - a[1])
-      .map(([f, n]) => `${f} ${n}件（母数${allCount[f] || 0}件）`)
+      .map(([f, n]) => `${f} ${shortCount[f] || 0}件（母数${n}件）`)
       .join(' / ');
-    console.log('[Snow-we] Step1 絞り込み結果（ファーム別）:', breakdown);
+    console.log('[Snow-we] 絞り込み結果（ファーム別）:', breakdown);
     if (_usageTally) _usageTally.firmBreakdown = breakdown;
   }
 
@@ -1163,6 +1206,7 @@ function renderSuggestDiagnostics(container) {
       今回の分析: $${t.cost.toFixed(4)}（入力${totalIn.toLocaleString()} / 出力${totalOut.toLocaleString()}トークン）
     </div>
     <div>${perCall}</div>
+    ${t.matchInfo ? `<div style="margin-top:4px;">${escapeHtml(t.matchInfo)}</div>` : ''}
     ${t.firmBreakdown ? `<div style="margin-top:4px;">絞り込み: ${escapeHtml(t.firmBreakdown)}</div>` : ''}
   `;
   container.appendChild(el);

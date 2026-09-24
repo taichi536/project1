@@ -681,6 +681,36 @@ async function fetchScoutTemplate(id) {
   return res.json();
 }
 
+// 候補者の職務経歴に近い求人を、候補者管理システムに探してもらう。
+//
+// 絞り込みをこちら側でやらないのは、方式を2度変えて2度とも同じ場所で失敗したため。
+//   ・AIに全件の求人名を見せて選ばせる → 一覧の途中がまるごと読み飛ばされる
+//     （実機でアクセンチュア352件から0件。先頭352行が無視されていた）
+//   ・語彙の辞書で機械的に採点する → 求人名の多くは中身を表しておらず
+//     （「戦略コンサルタント」等）、辞書に無い言い回しの候補者が落ちる
+// サーバー側では、求人を「どんな経歴の人に向いた仕事か」に要約したうえでベクトル化
+// してあり、候補者の職務経歴も同じ方法でベクトルにして意味の近さで比べる。
+// 「需給調整」と「S&OP」のように言い方が違うだけで落ちることがない。
+//
+// ベクトル化には別ベンダーのAPIキーが要るが、それをここに置くわけにはいかない
+// （このリポジトリに載る）ので、計算はサーバー側で完結させ、結果だけ受け取る。
+async function fetchPositionMatches(profileText, limit) {
+  const token = await getPositionsApiToken();
+  const res = await fetch(`${POSITIONS_API_URL}/match`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ profileText, limit }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || `求人の検索に失敗しました (${res.status})`);
+  }
+  return data;
+}
+
 async function fetchPositionDetails(ids) {
   const unique = [...new Set((ids || []).filter(Boolean))];
   if (unique.length === 0) return [];
@@ -1297,6 +1327,24 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse({ ok: false, error: e.message });
       }
     })();
+    return true;
+  }
+
+  // 候補者の職務経歴に近い求人を、意味の近さ（ベクトル）で探して返す。
+  // 語彙の一致ではないので、辞書に無い言い回しでも取りこぼさない
+  if (msg.type === 'matchPositions') {
+    fetchPositionMatches(msg.profileText || '', Math.max(1, Math.min(100, msg.limit || 30)))
+      .then(data => sendResponse({
+        ok: true,
+        considered: data.considered || 0,
+        model: data.model || '',
+        positions: (data.positions || []).map(p => ({
+          ...p,
+          label: positionLabel(p),
+          firmJa: firmToJa(p.firm),
+        })),
+      }))
+      .catch(e => sendResponse({ ok: false, error: e.message, positions: [] }));
     return true;
   }
 
