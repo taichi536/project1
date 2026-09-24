@@ -1,5 +1,21 @@
 // Snow-we.Inc コーポレートサイト 共通スクリプト
 (function () {
+  // 画像がまだ置かれていない・読み込めない場合の代替表示
+  // ロゴは非表示にし、人物写真は紺色の丸（写真と同じ大きさ）に差し替える
+  var PLACEHOLDER = 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+    '<stop offset="0" stop-color="#0a1628"/><stop offset="1" stop-color="#1a3a5c"/></linearGradient></defs>' +
+    '<rect width="240" height="240" fill="url(#g)"/><circle cx="120" cy="96" r="40" fill="#fff" fill-opacity=".25"/>' +
+    '<path d="M48 216c8-44 40-68 72-68s64 24 72 68z" fill="#fff" fill-opacity=".25"/></svg>');
+  function onImageError(img) {
+    if (img.closest('.brand')) { img.style.display = 'none'; return; }
+    if (img.src !== PLACEHOLDER) img.src = PLACEHOLDER;
+  }
+  document.querySelectorAll('img').forEach(function (img) {
+    if (img.complete && img.naturalWidth === 0 && img.getAttribute('src')) onImageError(img);
+    else img.addEventListener('error', function () { onImageError(img); });
+  });
+
   // モバイルメニュー
   var toggle = document.querySelector('.menu-toggle');
   var nav = document.getElementById('global-nav');
