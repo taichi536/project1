@@ -34,9 +34,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# 取得先URLを持つファイルは3つある。setup.bat は初回用、update.bat と
+# update.sh は毎回の更新で取得先を入れ直すため。1つでも古いトークンのまま
+# 残ると、その経路だけログイン画面が出て原因が分かりにくいので、まとめて入れる
+FILES="setup.bat update.bat update.sh"
+
 if [ $# -lt 1 ]; then
   echo "使い方: ./tools/set-github-token.sh --clipboard    （コピーした値を読む）"
-  echo "        ./tools/set-github-token.sh --from-setup  （setup.bat の値を残りに複製）"
+  echo "        ./tools/set-github-token.sh --sync        （既に入っている値で3つを揃える）"
   echo "        ./tools/set-github-token.sh <トークン>"
   exit 1
 fi
@@ -50,14 +55,25 @@ fi
 # この形なら、先にコマンドだけ貼り付けて Enter を押さずに待ち、そのあとで
 # トークンをコピーしてから Enter を押せる。実行の瞬間に必要なのは
 # クリップボードの中身だけなので、コマンドのコピーと競合しない。
-if [ "$1" = "--from-setup" ]; then
-  # 既に setup.bat に入っている値を、残りのファイルに複製する。
-  # 取得先URLを持つファイルが増えたときに、GitHubからトークンを取り直さずに
-  # 揃えられるようにするため。実際、update.bat と update.sh を後から足したとき、
-  # 既に正しい値が setup.bat にあるのにクリップボードから入れ直そうとして失敗した
-  TOKEN="$(grep -o 'oauth2:[^@]*' setup.bat | head -1 | cut -d: -f2)"
-  if [ -z "$TOKEN" ] || [ "$TOKEN" = "__GITHUB_READ_TOKEN__" ]; then
-    echo "❌ setup.bat にトークンが入っていません。--clipboard で入れてください。"
+if [ "$1" = "--sync" ] || [ "$1" = "--from-setup" ]; then
+  # 既にどれかのファイルに入っている値を見つけて、3つとも揃える。
+  #
+  # ファイルごとに入っていたり入っていなかったりする状態が実際に2回起きた。
+  # 1回目は update.bat と update.sh を後から足したとき、2回目は置き換え前の
+  # 印に戻した setup.bat をコミットに混ぜてしまったとき。どちらも正しい値は
+  # 手元の別のファイルに残っていたので、GitHubから取り直す必要はなかった。
+  #
+  # どれが欠けていても復旧できるよう、探す先は特定のファイルに限らない。
+  TOKEN=""
+  for f in $FILES; do
+    found="$(grep -o 'oauth2:[^@]*' "$f" 2>/dev/null | head -1 | cut -d: -f2)"
+    if [ -n "$found" ] && [ "$found" != "__GITHUB_READ_TOKEN__" ]; then
+      TOKEN="$found"
+      break
+    fi
+  done
+  if [ -z "$TOKEN" ]; then
+    echo "❌ どのファイルにもトークンが入っていません。--clipboard で入れてください。"
     exit 1
   fi
 elif [ "$1" = "--clipboard" ]; then
@@ -92,11 +108,6 @@ if ! printf '%s' "$TOKEN" | grep -Eq '^(github_pat_|ghp_)[A-Za-z0-9_]{20,}$'; th
   echo "   github_pat_ または ghp_ で始まる、英数字とアンダースコアだけの値を渡してください。"
   exit 1
 fi
-
-# 取得先URLを持つファイルは3つある。setup.bat は初回用、update.bat と
-# update.sh は毎回の更新で取得先を入れ直すため。1つでも古いトークンのまま
-# 残ると、その経路だけログイン画面が出て原因が分かりにくいので、まとめて入れる
-FILES="setup.bat update.bat update.sh"
 
 for f in $FILES; do
   if ! grep -q "REPO=\"\?https://oauth2:" "$f"; then
