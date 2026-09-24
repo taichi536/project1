@@ -33,7 +33,7 @@ set DEST=%USERPROFILE%\Desktop\snow-we
 :: トークンは clone したフォルダに記録されるので、以降の update.bat は
 :: そのまま通る。
 :: 値の入れ方: ./tools/set-github-token.sh <トークン>
-set REPO=https://oauth2:__GITHUB_READ_TOKEN__@github.com/taichi536/project1.git
+set REPO=https://oauth2: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@github.com/taichi536/project1.git
 
 if exist "%DEST%" (
   echo フォルダが既に存在します: %DEST%
