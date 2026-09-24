@@ -16,7 +16,7 @@ echo ""
 # おかげで次の更新から自動で新しいURLに切り替わる（入れ替え前に一度でも
 # 更新できていれば、新しいトークン入りのこのファイル自体が届いているため）。
 # 値の入れ方: ./tools/set-github-token.sh --clipboard
-REPO="https://oauth2:__GITHUB_READ_TOKEN__@github.com/taichi536/project1.git"
+REPO="https://oauth2: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@github.com/taichi536/project1.git"
 git remote set-url origin "$REPO"
 
 # git pull の成否を必ず見る。以前は失敗しても「更新完了」と表示していたため、
