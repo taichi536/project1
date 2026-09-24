@@ -623,7 +623,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // ■ 置き換え方
 // scripts/set-api-token.sh を使う。手で書き換えると、サーバー側の .env と
 // 食い違ったまま気づきにくい。
-const POSITIONS_API_TOKEN = '__POSITIONS_API_TOKEN__';
+const POSITIONS_API_TOKEN = 'a3afa7569e89676dee1fef937efa6b60d7ee6d3177e37a1e66e23fc5040783e1';
 
 // 設定タブで入力があれば、そちらを優先する。特定の人だけ別のトークンを
 // 使いたい場合や、入れ替えの途中で一時的に上書きしたい場合のため。
