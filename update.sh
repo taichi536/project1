@@ -18,6 +18,13 @@ echo ""
 # 値の入れ方: ./tools/set-github-token.sh --clipboard
 REPO="https://oauth2:__GITHUB_READ_TOKEN__@github.com/taichi536/project1.git"
 git remote set-url origin "$REPO"
+echo "取得先を設定しました。"
+echo ""
+
+# 認証が通らないとき、既定ではGitHubのログイン画面が出る。メンバーはGitHub
+# アカウントを持っていないので答えようがなく、何が悪いのか分からないまま止まる。
+# その場で失敗させて原因を出す
+export GIT_TERMINAL_PROMPT=0
 
 # git pull の成否を必ず見る。以前は失敗しても「更新完了」と表示していたため、
 # ネットワークが切れていても、ローカルに変更が残って pull が止まっていても、
@@ -32,6 +39,9 @@ if ! git pull; then
   echo "  ・インターネットに接続できていない"
   echo "  ・このフォルダの中のファイルを直接編集してしまった"
   echo "  ・フォルダを移動・コピーした"
+  echo ""
+  echo "「Authentication failed」と出ている場合は、管理者に連絡してください。"
+  echo "取得用のトークンが期限切れになっている可能性があります。"
   echo ""
   echo "※ このまま Chrome を再読み込みしても、バージョンは変わりません。"
   echo ""
