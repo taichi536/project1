@@ -35,10 +35,17 @@ set DEST=%USERPROFILE%\Desktop\snow-we
 :: 値の入れ方: ./tools/set-github-token.sh <トークン>
 set REPO=https://oauth2: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@github.com/taichi536/project1.git
 
+rem 認証が通らないときにGitHubのログイン画面を出さない。メンバーはアカウントを
+rem 持っていないので答えようがなく、原因も分からないまま止まってしまう
+set GIT_TERMINAL_PROMPT=0
+
 if exist "%DEST%" (
   echo フォルダが既に存在します: %DEST%
   echo 既存のフォルダを更新します...
   cd /d "%DEST%"
+  rem 既にあるフォルダは、取得先にトークンが入っていないことがある。
+  rem ここで入れ直さないと git pull がログイン画面を出す
+  git remote set-url origin %REPO%
   git pull
 ) else (
   git clone %REPO% "%DEST%"
