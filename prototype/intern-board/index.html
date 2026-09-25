@@ -145,26 +145,57 @@ th{font-size:11.5px;color:var(--muted);font-weight:700;background:var(--surface-
 tr:last-child td{border-bottom:0}
 td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
 .acts{display:flex;gap:6px;flex-wrap:wrap}
+.choose{margin-top:28px;display:flex;flex-direction:column;gap:16px}
+.doors{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.door{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:22px;display:flex;flex-direction:column;gap:8px;text-align:left;cursor:pointer;transition:border-color .15s}
+.door:hover{border-color:var(--accent)}
+.door:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.door .who{font-family:var(--display);font-size:20px;font-weight:900}
+.door .what{font-size:13.5px;color:var(--muted)}
+.door .url{font-family:var(--mono);font-size:11.5px;color:var(--accent)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
 <header class="top">
   <div class="in">
-    <div class="brand"><h1>有給インターン掲示板</h1><span class="tag">VIETNAM · PROTOTYPE</span></div>
-    <nav class="tabs" role="tablist" aria-label="画面">
-      <button role="tab" id="tab-browse" aria-selected="true" data-view="browse">学生：探す</button>
-      <button role="tab" id="tab-me" aria-selected="false" data-view="me">学生：マイページ</button>
-      <button role="tab" id="tab-post" aria-selected="false" data-view="post">企業：掲載する</button>
-      <button role="tab" id="tab-admin" aria-selected="false" data-view="admin" hidden>運営：審査</button>
+    <div class="brand"><h1>有給インターン掲示板</h1><span class="tag" id="mode-tag">VIETNAM · PROTOTYPE</span></div>
+    <nav class="tabs" role="tablist" aria-label="画面" id="tabs" hidden>
+      <button role="tab" id="tab-browse" aria-selected="false" data-view="browse" data-mode="student">求人を探す</button>
+      <button role="tab" id="tab-me" aria-selected="false" data-view="me" data-mode="student">マイページ</button>
+      <button role="tab" id="tab-post" aria-selected="false" data-view="post" data-mode="company">求人の掲載・申請状況</button>
+      <button role="tab" id="tab-admin" aria-selected="false" data-view="admin" data-mode="admin">審査・応募管理</button>
     </nav>
+    <button class="btn ghost sm" type="button" id="switch" hidden>入口を選び直す</button>
   </div>
 </header>
 
 <main class="wrap">
   <div id="banner" class="banner" hidden></div>
 
+  <!-- 入口 -->
+  <section id="view-choose" class="choose" aria-label="入口を選ぶ">
+    <p class="lead">学生と企業で入口が分かれています。試作品のため、データは共通です。</p>
+    <div class="doors">
+      <button class="door" type="button" data-go="student">
+        <span class="who">学生の方</span>
+        <span class="what">手当が明記された有給インターンを探して、プロフィールで応募</span>
+        <span class="url">入口 URL の末尾：#student</span>
+      </button>
+      <button class="door" type="button" data-go="company">
+        <span class="who">企業の方</span>
+        <span class="what">インターン求人の掲載を申請して、審査・公開の状況を確認</span>
+        <span class="url">入口 URL の末尾：#company</span>
+      </button>
+      <button class="door" type="button" data-go="admin" id="door-admin" hidden>
+        <span class="who">運営</span>
+        <span class="what">求人の審査、応募者の確認と状況の更新、通報の対応</span>
+        <span class="url">入口 URL の末尾：#admin</span>
+      </button>
+    </div>
+  </section>
+
   <!-- 学生 -->
-  <section id="view-browse" aria-labelledby="tab-browse">
+  <section id="view-browse" aria-labelledby="tab-browse" hidden>
     <div class="pledge">
       <span><b>手当は全件明記</b>（VND/月）</span>
       <span><b>学生から費用を取らない</b>ことを企業が誓約</span>
@@ -321,10 +352,40 @@ function banner(text){ const b=$("#banner"); if(!text){ b.hidden=true; return; }
 // ---------- tabs ----------
 function show(view){
   for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.view===view));
-  for (const v of ["browse","me","post","admin"]) $("#view-"+v).hidden = v!==view;
+  for (const v of ["choose","browse","me","post","admin"]) $("#view-"+v).hidden = v!==view;
   try { localStorage.setItem("ib-view", view); } catch(e){}
 }
 for (const b of document.querySelectorAll(".tabs button")) b.addEventListener("click", ()=>show(b.dataset.view));
+
+// 入口（学生 / 企業 / 運営）
+const MODES = {
+  student: { tag:"FOR STUDENTS · 学生向け", first:"browse" },
+  company: { tag:"FOR COMPANIES · 企業向け", first:"post" },
+  admin:   { tag:"ADMIN · 運営", first:"admin" },
+};
+function setMode(mode, view){
+  if (mode==="admin" && !state.isAdmin) mode = null;
+  state.mode = MODES[mode] ? mode : null;
+  if (!state.mode){
+    $("#tabs").hidden = true; $("#switch").hidden = true;
+    $("#mode-tag").textContent = "VIETNAM · PROTOTYPE";
+    show("choose");
+    try { localStorage.removeItem("ib-mode"); } catch(e){}
+    return;
+  }
+  const tabs = [...document.querySelectorAll(".tabs button")];
+  for (const b of tabs) b.hidden = b.dataset.mode !== state.mode;
+  $("#tabs").hidden = tabs.filter(b=>!b.hidden).length < 2;
+  $("#switch").hidden = false;
+  $("#mode-tag").textContent = MODES[state.mode].tag;
+  const ok = view && tabs.some(b => !b.hidden && b.dataset.view===view);
+  show(ok ? view : MODES[state.mode].first);
+  try { localStorage.setItem("ib-mode", state.mode); } catch(e){}
+}
+for (const d of document.querySelectorAll(".door")) d.addEventListener("click", ()=>setMode(d.dataset.go));
+$("#switch").addEventListener("click", ()=>{ closePanel(); setMode(null); });
+function modeFromHash(){ const m = (location.hash||"").replace("#",""); return MODES[m] ? m : null; }
+window.addEventListener("hashchange", ()=>{ const m = modeFromHash(); if (m) setMode(m); });
 
 // ---------- selects ----------
 for (const c of CATS){ $("#q-cat").append(h("option",null,c)); $("#p-cat").append(h("option",null,c)); }
@@ -611,7 +672,12 @@ function renderAdmin(){
 }
 
 // ---------- boot ----------
-try { const v = localStorage.getItem("ib-view"); if (v==="post"||v==="me") show(v); } catch(e){}
+function startMode(){
+  let saved = null, view = null;
+  try { saved = localStorage.getItem("ib-mode"); view = localStorage.getItem("ib-view"); } catch(e){}
+  setMode(modeFromHash() || saved, view);
+}
+startMode();
 renderBrowse(); renderMine(); renderMyApps();
 
 (async () => {
@@ -621,7 +687,7 @@ renderBrowse(); renderMine(); renderMyApps();
   if (!db){ banner("この表示ではデータを読み込めません。claude.ai 上でページを開いてください。"); $("#count").textContent=""; return; }
   state.uid = user ? await user.id() : null;
   state.isAdmin = user ? await user.canEdit() : false;
-  if (state.isAdmin){ $("#tab-admin").hidden=false; try { if (localStorage.getItem("ib-view")==="admin") show("admin"); } catch(e){} }
+  if (state.isAdmin){ $("#door-admin").hidden = false; if (!state.mode) startMode(); }
 
   db.collection("jobs").onSnapshot(snap => {
     state.jobs = snap.docs.map(d => Object.assign({id:d.id}, d.data()));
