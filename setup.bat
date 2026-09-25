@@ -28,12 +28,8 @@ echo.
 :: デスクトップに保存先フォルダを作成
 set DEST=%USERPROFILE%\Desktop\snow-we
 
-:: リポジトリは非公開なので、読み取り専用トークン入りのURLで取得する。
-:: これによりGitHubアカウントもログインも不要になる。
-:: トークンは clone したフォルダに記録されるので、以降の update.bat は
-:: そのまま通る。
-:: 値の入れ方: ./tools/set-github-token.sh <トークン>
-set REPO=https://oauth2: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@github.com/taichi536/project1.git
+:: 公開リポジトリなので、GitHubアカウントもログインも不要。
+set REPO=https://github.com/taichi536/project1.git
 
 rem 認証が通らないときにGitHubのログイン画面を出さない。メンバーはアカウントを
 rem 持っていないので答えようがなく、原因も分からないまま止まってしまう
