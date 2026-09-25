@@ -11,12 +11,11 @@ echo " Snow-we 拡張機能 アップデート"
 echo "================================"
 echo ""
 
-# 取得先を毎回入れ直す。このリポジトリは非公開なので、読み取り専用トークンを
-# 含むURLでないとログイン画面が出る。トークンを入れ替えたときも、この行の
-# おかげで次の更新から自動で新しいURLに切り替わる（入れ替え前に一度でも
-# 更新できていれば、新しいトークン入りのこのファイル自体が届いているため）。
-# 値の入れ方: ./tools/set-github-token.sh --clipboard
-REPO="https://oauth2:__GITHUB_READ_TOKEN__@github.com/taichi536/project1.git"
+# 取得先を毎回入れ直す。
+# 一時期このリポジトリを非公開にしており、その間はトークン入りのURLで
+# 取得していた。その設定が手元に残っていると、トークンを失効させたあとに
+# 取得できなくなる。ここで毎回入れ直すことで、古い設定のまま止まらない。
+REPO="https://github.com/taichi536/project1.git"
 git remote set-url origin "$REPO"
 echo "取得先を設定しました。"
 echo ""

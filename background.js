@@ -613,32 +613,20 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.positionsApiToken) _positionsMemCache = null;
 });
 
-// ポジションAPIの認証トークン。
+// ポジションAPIは共有トークンを持たない。
 //
-// ■ なぜ認証が要るか
-// 返しているのは求人情報だけではない。ポジション提案は呼ぶたびに外部APIへ
-// 課金が発生し、スカウト文面にはファームごとの年収レンジや訴求が入っている。
-// URLを知っていれば誰でも呼べる状態にしておくと、費用が他人に使われる。
+// 一度、トークンをここに埋め、そのためにリポジトリを非公開にした。すると
+// 更新スクリプト自体を取りに行く git pull に認証が要るようになり、新しい
+// ファイルを全員に手渡ししないと更新できなくなった。運用が回らないので戻した。
 //
-// ■ なぜここに書いてよいか
-// このリポジトリは非公開で、読める人を限っているため。
-// 公開リポジトリに移す場合は、トークンがそのまま公開されるので、
-// ここに置いたままにしてはいけない。
+// サーバー側は「Chrome拡張機能からの呼び出しであること」と呼び出し回数で
+// 絞っている。どちらも配るものが無いので、リポジトリを公開にしておける。
 //
-// ■ 置き換え方
-// scripts/set-api-token.sh を使う。手で書き換えると、サーバー側の .env と
-// 食い違ったまま気づきにくい。
-const POSITIONS_API_TOKEN = 'a3afa7569e89676dee1fef937efa6b60d7ee6d3177e37a1e66e23fc5040783e1';
-
-// 設定タブで入力があれば、そちらを優先する。特定の人だけ別のトークンを
-// 使いたい場合や、入れ替えの途中で一時的に上書きしたい場合のため。
-// 通常は空欄のままで、上の埋め込みトークンが使われる
+// 設定タブで入力があれば送る余地だけ残してある（サーバー側でトークンを
+// 有効にしたときや、拡張機能以外から確認したいときのため）。通常は空欄。
 async function getPositionsApiToken() {
   const { positionsApiToken } = await chrome.storage.local.get(['positionsApiToken']);
-  const override = (positionsApiToken || '').trim();
-  if (override) return override;
-  // 置き換え前のプレースホルダーをそのまま送ると、原因の分かりにくい401になる
-  return POSITIONS_API_TOKEN.startsWith('__') ? '' : POSITIONS_API_TOKEN;
+  return (positionsApiToken || '').trim();
 }
 
 async function fetchPositionsApi(query) {
