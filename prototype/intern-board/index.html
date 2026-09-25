@@ -4,21 +4,11 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 :root{
-  --bg:#F3F6F4;
-  --surface:#FFFFFF;
-  --surface-2:#EAF0ED;
-  --ink:#15221D;
-  --muted:#5A6B64;
-  --line:#D6DFDA;
-  --accent:#0E6655;
-  --accent-ink:#FFFFFF;
-  --accent-soft:#DDEEE7;
-  --warn:#9A5B0B;
-  --warn-soft:#F7ECD9;
-  --bad:#A23B2C;
-  --bad-soft:#F6E3DF;
-  --info:#2F5C8F;
-  --info-soft:#E2EBF6;
+  --bg:#F3F6F4;--surface:#FFFFFF;--surface-2:#EAF0ED;--ink:#15221D;--muted:#5A6B64;--line:#D6DFDA;
+  --accent:#0E6655;--accent-ink:#FFFFFF;--accent-soft:#DDEEE7;
+  --keep:#B7791F;--keep-soft:#FBF1DE;
+  --warn:#9A5B0B;--warn-soft:#F7ECD9;--bad:#A23B2C;--bad-soft:#F6E3DF;--info:#2F5C8F;--info-soft:#E2EBF6;
+  --cv1:#D9EDE5;--cv2:#E2EAF5;--cv3:#F4E9D8;--cv4:#EDE3F1;--cv5:#F3E1DC;--cv-ink:#15221D;
   --shadow:0 12px 32px rgba(21,34,29,.16);
   --display:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
   --body:"Noto Sans JP","Hiragino Sans","Yu Gothic",system-ui,sans-serif;
@@ -28,131 +18,229 @@
   :root:not([data-theme="light"]){
     color-scheme:dark;
     --bg:#0F1614;--surface:#16201D;--surface-2:#1C2925;--ink:#E4ECE9;--muted:#9AAAA4;--line:#2A3834;
-    --accent:#56C2A6;--accent-ink:#0F1614;--accent-soft:#18322B;
+    --accent:#56C2A6;--accent-ink:#0F1614;--accent-soft:#18322B;--keep:#E9B458;--keep-soft:#33291A;
     --warn:#E3AC57;--warn-soft:#33281A;--bad:#E88A7B;--bad-soft:#3A2220;--info:#8DB5E6;--info-soft:#1C2A3A;
+    --cv1:#1D3A32;--cv2:#1F2D40;--cv3:#3A2F1F;--cv4:#322638;--cv5:#3B2621;--cv-ink:#E4ECE9;
     --shadow:0 12px 32px rgba(0,0,0,.5);
   }
 }
 :root[data-theme="dark"]{
   color-scheme:dark;
   --bg:#0F1614;--surface:#16201D;--surface-2:#1C2925;--ink:#E4ECE9;--muted:#9AAAA4;--line:#2A3834;
-  --accent:#56C2A6;--accent-ink:#0F1614;--accent-soft:#18322B;
+  --accent:#56C2A6;--accent-ink:#0F1614;--accent-soft:#18322B;--keep:#E9B458;--keep-soft:#33291A;
   --warn:#E3AC57;--warn-soft:#33281A;--bad:#E88A7B;--bad-soft:#3A2220;--info:#8DB5E6;--info-soft:#1C2A3A;
+  --cv1:#1D3A32;--cv2:#1F2D40;--cv3:#3A2F1F;--cv4:#322638;--cv5:#3B2621;--cv-ink:#E4ECE9;
   --shadow:0 12px 32px rgba(0,0,0,.5);
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:14.5px;line-height:1.7;margin:0}
 button,input,select,textarea{font:inherit;color:inherit}
 h1,h2,h3{font-family:var(--display);margin:0;line-height:1.35;text-wrap:balance}
 p{margin:0}
-.wrap{max-width:1040px;margin:0 auto;padding-inline:20px;padding-block:0 64px}
+.wrap{max-width:1080px;margin:0 auto;padding-inline:20px;padding-block:0 64px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* top bar */
 .top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
-.top .in{max-width:1040px;margin:0 auto;padding-inline:20px;padding-block:14px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 20px}
+.top .in{max-width:1080px;margin:0 auto;padding-inline:20px;padding-block:12px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px}
 .brand{display:flex;align-items:baseline;gap:10px;margin-right:auto}
-.brand h1{font-size:19px;font-weight:900;letter-spacing:.01em}
+.brand h1{font-size:19px;font-weight:900}
 .brand .tag{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.06em}
-.tabs{display:flex;gap:4px;background:var(--surface-2);padding:4px;border-radius:8px}
+.tabs{display:flex;gap:4px;background:var(--surface-2);padding:4px;border-radius:8px;flex-wrap:wrap}
 .tabs button{border:0;background:transparent;padding:6px 14px;border-radius:6px;cursor:pointer;font-weight:500;color:var(--muted)}
 .tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
-.tabs button:focus-visible,.btn:focus-visible,.card:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.keepbtn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--keep);color:var(--keep);background:transparent;border-radius:999px;padding:4px 12px;font-weight:700;font-size:13px;cursor:pointer}
+.keepbtn svg{width:15px;height:15px;fill:currentColor}
 
 .banner{margin-top:16px;padding:10px 14px;border-radius:6px;font-size:13px;background:var(--warn-soft);color:var(--warn)}
-.pledge{margin-top:20px;display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px;color:var(--muted)}
-.pledge b{color:var(--ink);font-weight:700}
 
-/* browse */
+/* hero */
+.hero{margin-top:22px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:24px;display:flex;flex-direction:column;gap:18px}
+.hero h2{font-size:clamp(20px,3.4vw,28px);font-weight:900}
+.hero h2 em{font-style:normal;color:var(--accent)}
+.hero .sub{color:var(--muted);font-size:13.5px}
+.search{display:flex;gap:8px}
+.search input{flex:1;min-width:0;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.entries{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:640px){.entries{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.entry{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);cursor:pointer;font-weight:700}
+.entry:hover,.entry[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+.entry svg{width:28px;height:28px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.pledge{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--muted)}
+.pledge b{color:var(--ink)}
+
+/* filters */
 .filters{margin-top:18px;display:flex;flex-wrap:wrap;gap:10px 14px;align-items:end}
 .f{display:flex;flex-direction:column;gap:4px}
 .f label{font-size:12px;color:var(--muted)}
 select,input[type=text],input[type=number],input[type=email],textarea{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:7px 10px;min-width:0}
-textarea{resize:vertical;min-height:96px;width:100%}
+textarea{resize:vertical;min-height:90px;width:100%}
+.tagrow{margin-top:12px;display:flex;flex-wrap:wrap;gap:6px}
+.tagbtn{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:3px 12px;font-size:12.5px;cursor:pointer}
+.tagbtn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .check{display:flex;align-items:center;gap:6px;font-size:13.5px;cursor:pointer}
 .check input{accent-color:var(--accent);width:16px;height:16px}
-.count{font-size:13px;color:var(--muted);margin-left:auto;align-self:center;font-variant-numeric:tabular-nums}
 
-.grid{margin-top:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:10px;cursor:pointer;text-align:left;transition:border-color .15s}
+/* sections */
+.sect{margin-top:30px;display:flex;flex-direction:column;gap:12px}
+.sect-hd{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.sect-hd h2{font-size:18px;font-weight:900}
+.sect-hd .n{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.linkbtn{border:0;background:none;color:var(--accent);font-weight:700;cursor:pointer;padding:0;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px}
+
+/* card */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;overflow:hidden;transition:border-color .15s}
 .card:hover{border-color:var(--accent)}
+.cover{height:78px;display:flex;align-items:flex-end;justify-content:space-between;padding:10px 14px;color:var(--cv-ink);cursor:pointer}
+.cover .ini{font-family:var(--display);font-weight:900;font-size:34px;line-height:1;opacity:.85}
+.cover .ind{font-size:11.5px;font-weight:700;opacity:.8}
+.cv1{background:var(--cv1)}.cv2{background:var(--cv2)}.cv3{background:var(--cv3)}.cv4{background:var(--cv4)}.cv5{background:var(--cv5)}
+.card .bd{padding:14px 16px;display:flex;flex-direction:column;gap:9px;cursor:pointer;flex:1}
 .card .co{font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.card h3{font-size:16px;font-weight:700}
-.money{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:17px;font-weight:500;color:var(--accent);line-height:1.3}
-.money small{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
-.facts{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px;color:var(--muted)}
-.chips{display:flex;flex-wrap:wrap;gap:6px}
+.card h3{font-size:15.5px;font-weight:700}
+.rows{display:flex;flex-direction:column;gap:3px;font-size:13px}
+.rows > div{display:grid;grid-template-columns:44px 1fr;gap:8px}
+.rows dt{color:var(--muted);font-size:12px}
+.rows dd{margin:0}
+.pay{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:500;color:var(--accent)}
+.pay small{color:var(--muted);font-weight:400;margin-left:6px;font-family:var(--body)}
+.card .ft{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line)}
+.card .ft button{border:0;background:transparent;padding:10px;font-weight:700;cursor:pointer;font-size:13px}
+.card .ft .k{color:var(--keep);border-right:1px solid var(--line)}
+.card .ft .k[aria-pressed="true"]{background:var(--keep-soft)}
+.card .ft .go{color:var(--accent)}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
 .chip{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.75}
 .chip.ok{background:var(--accent-soft);color:var(--accent)}
 .chip.warn{background:var(--warn-soft);color:var(--warn)}
 .chip.bad{background:var(--bad-soft);color:var(--bad)}
 .chip.info{background:var(--info-soft);color:var(--info)}
 .chip.plain{background:var(--surface-2);color:var(--muted)}
-.empty{margin-top:16px;padding:28px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center}
+.chip.line{border:1px solid var(--line);color:var(--muted);font-weight:500}
+.empty{padding:28px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center}
 
 /* panel */
 .scrim{position:fixed;inset:0;background:rgba(10,18,15,.45);z-index:20}
-.panel{position:fixed;top:0;right:0;bottom:0;width:min(520px,100%);background:var(--surface);z-index:21;box-shadow:var(--shadow);display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.panel{position:fixed;top:0;right:0;bottom:0;width:min(540px,100%);background:var(--surface);z-index:21;box-shadow:var(--shadow);display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 .panel .hd{display:flex;align-items:start;gap:12px;padding:18px 20px;border-bottom:1px solid var(--line)}
 .panel .hd h2{font-size:18px;flex:1}
-.panel .bd{overflow-y:auto;padding:18px 20px 28px;display:flex;flex-direction:column;gap:18px}
+.panel .pbd{overflow-y:auto;padding:18px 20px 28px;display:flex;flex-direction:column;gap:18px}
 .x{border:0;background:var(--surface-2);width:32px;height:32px;border-radius:6px;cursor:pointer;font-size:18px;line-height:1;flex:none}
-.dl{display:grid;grid-template-columns:110px 1fr;gap:6px 12px;font-size:13.5px}
+.dl{display:grid;grid-template-columns:110px 1fr;gap:6px 12px;font-size:13.5px;margin:0}
 .dl dt{color:var(--muted)}
 .dl dd{margin:0}
 .desc{white-space:pre-wrap;font-size:14px}
-.sec{display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--line);padding-top:16px}
-.sec h3{font-size:15px}
+.psec{display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--line);padding-top:16px}
+.psec h3{font-size:15px}
 
-/* forms */
+/* forms & boxes */
 form.stack{display:flex;flex-direction:column;gap:12px}
-.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
 .fld{display:flex;flex-direction:column;gap:4px}
-.fld label{font-size:12.5px;font-weight:500}
+.fld label,.fld .lb{font-size:12.5px;font-weight:500}
 .fld .hint{font-size:11.5px;color:var(--muted)}
 .fld input,.fld select,.fld textarea{width:100%}
+.checks{display:flex;flex-wrap:wrap;gap:6px 16px}
 .req{color:var(--bad);font-weight:700;margin-left:2px}
 .btn{border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);padding:8px 16px;border-radius:6px;font-weight:700;cursor:pointer}
 .btn.ghost{background:transparent;color:var(--accent)}
 .btn.danger{border-color:var(--bad);background:transparent;color:var(--bad)}
+.btn.keep{border-color:var(--keep);background:transparent;color:var(--keep)}
+.btn.keep[aria-pressed="true"]{background:var(--keep-soft)}
 .btn.sm{padding:4px 10px;font-size:12.5px}
 .btn[disabled]{opacity:.5;cursor:not-allowed}
 .msg{font-size:13px;padding:8px 12px;border-radius:6px}
 .msg.ok{background:var(--accent-soft);color:var(--accent)}
 .msg.err{background:var(--bad-soft);color:var(--bad)}
-
-/* post page */
-.two{margin-top:22px;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:20px;align-items:start}
-@media (max-width:820px){.two{grid-template-columns:1fr}}
-.box{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:20px;display:flex;flex-direction:column;gap:14px}
+.two{margin-top:22px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:860px){.two{grid-template-columns:1fr}}
+.col{display:flex;flex-direction:column;gap:20px}
+.box{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:14px}
 .box h2{font-size:17px}
 .lead{color:var(--muted);font-size:13.5px}
-.list{display:flex;flex-direction:column}
-.li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 12px;padding:10px 0;border-bottom:1px solid var(--line);font-size:13.5px}
-.li:last-child{border-bottom:0}
-.li .t{font-weight:700}
 .s{color:var(--muted);font-size:12.5px}
+.list{display:flex;flex-direction:column}
+.li{display:flex;flex-direction:column;gap:8px;padding:12px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.li:last-child{border-bottom:0}
+.li .top{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 12px;align-items:start}
+.li .t{font-weight:700}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+
+/* thread */
+.thread{display:flex;flex-direction:column;gap:8px;background:var(--bg);border-radius:8px;padding:12px}
+.bubble{max-width:85%;padding:7px 11px;border-radius:10px;font-size:13.5px;white-space:pre-wrap}
+.bubble.me{align-self:flex-end;background:var(--accent);color:var(--accent-ink)}
+.bubble.them{align-self:flex-start;background:var(--surface);border:1px solid var(--line)}
+.bubble .when{display:block;font-size:10.5px;opacity:.75;margin-top:2px}
+.sendrow{display:flex;gap:8px}
+.sendrow textarea{min-height:44px;flex:1}
+
+/* entrance */
+.choose{margin-top:28px;display:flex;flex-direction:column;gap:16px}
+.doors{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.door{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:22px;display:flex;flex-direction:column;gap:8px;text-align:left;cursor:pointer}
+.door:hover{border-color:var(--accent)}
+.door .who{font-family:var(--display);font-size:20px;font-weight:900}
+.door .what{font-size:13.5px;color:var(--muted)}
+.door .url{font-family:var(--mono);font-size:11.5px;color:var(--accent)}
 
 /* admin */
-.stats{margin-top:22px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.stats{margin-top:22px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .stat{background:var(--surface);padding:14px 16px}
 .stat .n{font-family:var(--mono);font-size:24px;font-variant-numeric:tabular-nums}
 .stat .l{font-size:12px;color:var(--muted)}
 .adm{margin-top:20px;display:flex;flex-direction:column;gap:20px}
 .tbl{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
-table{border-collapse:collapse;width:100%;font-size:13px;min-width:640px}
+table{border-collapse:collapse;width:100%;font-size:13px;min-width:680px}
 th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
 th{font-size:11.5px;color:var(--muted);font-weight:700;background:var(--surface-2)}
 tr:last-child td{border-bottom:0}
 td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
-.acts{display:flex;gap:6px;flex-wrap:wrap}
-.choose{margin-top:28px;display:flex;flex-direction:column;gap:16px}
-.doors{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
-.door{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:22px;display:flex;flex-direction:column;gap:8px;text-align:left;cursor:pointer;transition:border-color .15s}
-.door:hover{border-color:var(--accent)}
-.door:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.door .who{font-family:var(--display);font-size:20px;font-weight:900}
-.door .what{font-size:13.5px;color:var(--muted)}
-.door .url{font-family:var(--mono);font-size:11.5px;color:var(--accent)}
+/* cover heart / hiring */
+.cover{position:relative}
+.heart{position:absolute;top:8px;right:8px;width:34px;height:34px;border-radius:999px;border:0;background:var(--surface);color:var(--keep);display:grid;place-items:center;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.heart svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2}
+.heart[aria-pressed="true"] svg{fill:currentColor}
+.hot{position:absolute;top:10px;left:12px;font-size:11px;font-weight:700;padding:1px 9px;border-radius:999px;background:var(--bad);color:#fff}
+.newb{font-family:var(--mono);font-size:10.5px;font-weight:500;color:var(--bad);letter-spacing:.04em}
+.card .ft{grid-template-columns:1fr}
+.card .ft .go{color:var(--accent)}
+
+/* quick links with counts */
+.quick{margin-top:30px;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.qbox{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.qbox h3{font-size:14.5px}
+.pills{display:flex;flex-wrap:wrap;gap:6px}
+.pill{border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:4px 12px;font-size:12.5px;cursor:pointer}
+.pill:hover{border-color:var(--accent);color:var(--accent)}
+.pill .c{font-family:var(--mono);color:var(--muted);margin-left:4px;font-size:11.5px}
+.pill[disabled]{opacity:.45;cursor:default}
+
+/* register CTA / FAQ */
+.cta{margin-top:30px;border-radius:10px;padding:20px 22px;background:var(--accent);color:var(--accent-ink);display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;justify-content:space-between}
+.cta h2{font-size:17px}
+.cta p{font-size:13px;opacity:.9}
+.cta .btn{background:var(--accent-ink);color:var(--accent);border-color:var(--accent-ink)}
+.faq{margin-top:30px;display:flex;flex-direction:column;gap:8px}
+.faq h2{font-size:18px;font-weight:900;margin-bottom:4px}
+.faq details{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 16px}
+.faq summary{cursor:pointer;font-weight:700}
+.faq details p{margin-top:8px;color:var(--muted);font-size:13.5px}
+.sorttabs{display:flex;gap:4px;flex-wrap:wrap}
+.sorttabs button{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:3px 12px;font-size:12.5px;cursor:pointer}
+.sorttabs button[aria-pressed="true"]{border-color:var(--ink);background:var(--ink);color:var(--bg)}
+.skills{display:flex;flex-wrap:wrap;gap:5px}
+.skill{font-size:11.5px;padding:1px 8px;border-radius:4px;background:var(--surface-2)}
+
+/* mobile bottom bar */
+.mbar{display:none}
+@media (max-width:640px){
+  .mbar:not([hidden]){display:grid;grid-template-columns:1fr 1.4fr;gap:8px;position:fixed;left:0;right:0;bottom:0;z-index:10;padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));background:var(--surface);border-top:1px solid var(--line)}
+  .mbar .btn{width:100%}
+  body.has-mbar .wrap{padding-bottom:96px}
+}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -165,6 +253,10 @@ td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:now
       <button role="tab" id="tab-post" aria-selected="false" data-view="post" data-mode="company">求人の掲載・申請状況</button>
       <button role="tab" id="tab-admin" aria-selected="false" data-view="admin" data-mode="admin">審査・応募管理</button>
     </nav>
+    <button class="keepbtn" type="button" id="keep-top" hidden aria-label="キープした求人">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z"/></svg>
+      キープ <span id="keep-n">0</span>
+    </button>
     <button class="btn ghost sm" type="button" id="switch" hidden>入口を選び直す</button>
   </div>
 </header>
@@ -176,66 +268,87 @@ td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:now
   <section id="view-choose" class="choose" aria-label="入口を選ぶ">
     <p class="lead">学生と企業で入口が分かれています。試作品のため、データは共通です。</p>
     <div class="doors">
-      <button class="door" type="button" data-go="student">
-        <span class="who">学生の方</span>
-        <span class="what">手当が明記された有給インターンを探して、プロフィールで応募</span>
-        <span class="url">入口 URL の末尾：#student</span>
-      </button>
-      <button class="door" type="button" data-go="company">
-        <span class="who">企業の方</span>
-        <span class="what">インターン求人の掲載を申請して、審査・公開の状況を確認</span>
-        <span class="url">入口 URL の末尾：#company</span>
-      </button>
-      <button class="door" type="button" data-go="admin" id="door-admin" hidden>
-        <span class="who">運営</span>
-        <span class="what">求人の審査、応募者の確認と状況の更新、通報の対応</span>
-        <span class="url">入口 URL の末尾：#admin</span>
-      </button>
+      <button class="door" type="button" data-go="student"><span class="who">学生の方</span><span class="what">手当が明記された有給インターンを探して、キープ・応募・メッセージ</span><span class="url">入口 URL の末尾：#student</span></button>
+      <button class="door" type="button" data-go="company"><span class="who">企業の方</span><span class="what">インターン求人の掲載を申請して、審査・公開の状況を確認</span><span class="url">入口 URL の末尾：#company</span></button>
+      <button class="door" type="button" data-go="admin" id="door-admin" hidden><span class="who">運営</span><span class="what">求人の審査、応募者の確認、学生とのメッセージ、通報の対応</span><span class="url">入口 URL の末尾：#admin</span></button>
     </div>
   </section>
 
-  <!-- 学生 -->
+  <!-- 学生：探す -->
   <section id="view-browse" aria-labelledby="tab-browse" hidden>
-    <div class="pledge">
-      <span><b>手当は全件明記</b>（VND/月）</span>
-      <span><b>学生から費用を取らない</b>ことを企業が誓約</span>
-      <span><b>運営が審査</b>してから公開</span>
+    <div class="hero">
+      <div>
+        <h2>手当が明記された、<em>有給インターン</em>だけ。</h2>
+        <p class="sub">掲載前に運営が審査。学生に費用を請求しないことを、すべての企業が誓約しています。</p>
+      </div>
+      <form class="search" id="search-form" role="search">
+        <input type="text" id="q-kw" placeholder="キーワード（例：マーケティング、日本語、React）" aria-label="キーワード">
+        <button class="btn" type="submit">検索<span id="hit-n"></span></button>
+      </form>
+      <div class="entries" role="group" aria-label="条件から探す">
+        <button class="entry" type="button" data-focus="q-city" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>都市</button>
+        <button class="entry" type="button" data-focus="q-cat" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M3 12h18"/></svg>職種</button>
+        <button class="entry" type="button" data-focus="q-ind" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V5l6-2v18M10 21h10V9l-10-3M7 8h.01M7 12h.01M7 16h.01M14 12h2M14 16h2"/></svg>業種</button>
+        <button class="entry" type="button" data-focus="tags" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h10M9 12h10M9 19h10"/><path d="M4 5l1 1 2-2M4 12l1 1 2-2M4 19l1 1 2-2"/></svg>こだわり</button>
+      </div>
+      <div class="pledge">
+        <span><b>手当は全件明記</b>（VND/月）</span>
+        <span><b>費用請求なし</b>を企業が誓約</span>
+        <span><b>サイト内メッセージ</b>で気軽に相談</span>
+      </div>
     </div>
-    <div class="filters">
-      <div class="f"><label for="q-city">都市</label>
-        <select id="q-city"><option value="">すべて</option><option>ハノイ</option><option>ホーチミン</option><option>ダナン</option><option>リモート</option></select></div>
-      <div class="f"><label for="q-cat">職種</label>
-        <select id="q-cat"><option value="">すべて</option></select></div>
-      <div class="f"><label for="q-min">手当の下限</label>
-        <select id="q-min"><option value="0">指定なし</option><option value="3000000">300万 VND 以上</option><option value="5000000">500万 VND 以上</option><option value="7000000">700万 VND 以上</option></select></div>
-      <div class="f"><label for="q-sort">並び順</label>
-        <select id="q-sort"><option value="new">新着順</option><option value="pay">手当の高い順</option></select></div>
+
+    <div class="filters" id="filters">
+      <div class="f"><label for="q-city">都市</label><select id="q-city"><option value="">すべて</option><option>ハノイ</option><option>ホーチミン</option><option>ダナン</option><option>リモート</option></select></div>
+      <div class="f"><label for="q-cat">職種</label><select id="q-cat"><option value="">すべて</option></select></div>
+      <div class="f"><label for="q-ind">業種</label><select id="q-ind"><option value="">すべて</option></select></div>
+      <div class="f"><label for="q-min">手当の下限</label><select id="q-min"><option value="0">指定なし</option><option value="3000000">300万 VND 以上</option><option value="5000000">500万 VND 以上</option><option value="7000000">700万 VND 以上</option></select></div>
       <label class="check"><input type="checkbox" id="q-jp"> 日系企業のみ</label>
-      <label class="check"><input type="checkbox" id="q-conv"> 正社員登用あり</label>
-      <span class="count" id="count"></span>
+      <label class="check"><input type="checkbox" id="q-hot"> 積極採用中のみ</label>
+      <div class="f"><span class="s">並び順</span><div class="sorttabs" id="q-sort" role="group" aria-label="並び順">
+        <button type="button" data-sort="new" aria-pressed="true">新着順</button><button type="button" data-sort="pay" aria-pressed="false">手当の高い順</button><button type="button" data-sort="hot" aria-pressed="false">積極採用中を優先</button>
+      </div></div>
     </div>
-    <div class="grid" id="grid"></div>
-    <div class="empty" id="grid-empty" hidden>条件に合うインターンはまだありません。条件をゆるめてみてください。</div>
+    <div class="tagrow" id="tagrow" role="group" aria-label="こだわり条件"></div>
+
+    <div id="home"></div>
   </section>
 
-  <!-- 学生マイページ -->
+  <!-- 学生：マイページ -->
   <section id="view-me" aria-labelledby="tab-me" hidden>
     <div class="two">
+      <div class="col">
+        <div class="box">
+          <h2>応募済み＆選考状況</h2>
+          <p class="lead">応募した求人の状況と、運営・企業とのメッセージです。</p>
+          <div class="list" id="my-apps"></div>
+          <p class="lead" id="my-apps-empty">まだ応募していません。</p>
+        </div>
+        <div class="box" id="keep-box">
+          <h2>キープした求人</h2>
+          <div class="list" id="my-keeps"></div>
+          <p class="lead" id="my-keeps-empty">気になる求人の「キープする」を押すと、ここに集まります。</p>
+        </div>
+      </div>
       <div class="box">
         <h2>プロフィール</h2>
-        <p class="lead">一度登録すれば、応募のときにこの内容がそのまま企業に送られます。応募するまで、ほかの人には見えません。</p>
+        <p class="lead">一度登録すれば、応募のときにこの内容がそのまま送られます。応募するまで、ほかの人には見えません。</p>
         <form id="me-form" class="stack" novalidate>
           <div class="row">
-            <div class="fld"><label for="m-name">名前<span class="req">*</span></label><input type="text" id="m-name" required maxlength="60" placeholder="Nguyễn Văn A"></div>
-            <div class="fld"><label for="m-uni">大学<span class="req">*</span></label><input type="text" id="m-uni" required maxlength="80" placeholder="例：国民経済大学"></div>
+            <div class="fld"><label for="m-name">名前<span class="req">*</span></label><input type="text" id="m-name" maxlength="60" placeholder="Nguyễn Văn A"></div>
+            <div class="fld"><label for="m-uni">大学<span class="req">*</span></label><input type="text" id="m-uni" maxlength="80" placeholder="例：国民経済大学"></div>
           </div>
           <div class="row">
-            <div class="fld"><label for="m-major">学部・専攻</label><input type="text" id="m-major" maxlength="80" placeholder="例：国際経営"></div>
+            <div class="fld"><label for="m-major">学部・専攻</label><input type="text" id="m-major" maxlength="80"></div>
             <div class="fld"><label for="m-year">学年<span class="req">*</span></label><select id="m-year"></select></div>
             <div class="fld"><label for="m-grad">卒業予定</label><input type="text" id="m-grad" maxlength="20" placeholder="例：2027年6月"></div>
           </div>
           <div class="row">
-            <div class="fld"><label for="m-email">メール<span class="req">*</span></label><input type="email" id="m-email" required maxlength="120"></div>
+            <div class="fld"><label for="m-email">メール<span class="req">*</span></label><input type="email" id="m-email" maxlength="120"></div>
             <div class="fld"><label for="m-phone">Zalo / 電話</label><input type="text" id="m-phone" maxlength="30"></div>
           </div>
           <div class="row">
@@ -249,11 +362,6 @@ td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:now
           <div><button class="btn" type="submit" id="me-submit">プロフィールを保存</button></div>
         </form>
       </div>
-      <div class="box">
-        <h2>応募した求人</h2>
-        <div class="list" id="my-apps"></div>
-        <p class="lead" id="my-apps-empty">まだ応募していません。</p>
-      </div>
     </div>
   </section>
 
@@ -265,29 +373,33 @@ td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:now
         <p class="lead">運営が内容を確認してから公開します。手当の金額は必須です。学生から研修費・手続き費などを取ることは禁止しています。</p>
         <form id="post-form" class="stack" novalidate>
           <div class="row">
-            <div class="fld"><label for="p-company">会社名<span class="req">*</span></label><input type="text" id="p-company" required maxlength="80"></div>
-            <div class="fld"><label for="p-ctype">企業の種類<span class="req">*</span></label>
-              <select id="p-ctype" required><option value="日系">日系</option><option value="ローカル">ローカル</option><option value="外資">外資（日系以外）</option></select></div>
+            <div class="fld"><label for="p-company">会社名<span class="req">*</span></label><input type="text" id="p-company" maxlength="80"></div>
+            <div class="fld"><label for="p-ctype">企業の種類<span class="req">*</span></label><select id="p-ctype"><option value="日系">日系</option><option value="ローカル">ローカル</option><option value="外資">外資（日系以外）</option></select></div>
           </div>
-          <div class="fld"><label for="p-title">求人タイトル<span class="req">*</span></label><input type="text" id="p-title" required maxlength="80" placeholder="例：マーケティングインターン（SNS運用）"></div>
+          <div class="fld"><label for="p-title">求人タイトル<span class="req">*</span></label><input type="text" id="p-title" maxlength="80" placeholder="例：マーケティングインターン（SNS運用）"></div>
           <div class="row">
-            <div class="fld"><label for="p-city">勤務地<span class="req">*</span></label>
-              <select id="p-city" required><option>ハノイ</option><option>ホーチミン</option><option>ダナン</option><option>リモート</option></select></div>
-            <div class="fld"><label for="p-cat">職種<span class="req">*</span></label><select id="p-cat" required></select></div>
-          </div>
-          <div class="row">
-            <div class="fld"><label for="p-min">手当 下限（VND/月）<span class="req">*</span></label><input type="number" id="p-min" required min="500000" step="100000" placeholder="3000000"></div>
-            <div class="fld"><label for="p-max">手当 上限（VND/月）<span class="req">*</span></label><input type="number" id="p-max" required min="500000" step="100000" placeholder="5000000"></div>
+            <div class="fld"><label for="p-city">勤務地<span class="req">*</span></label><select id="p-city"><option>ハノイ</option><option>ホーチミン</option><option>ダナン</option><option>リモート</option></select></div>
+            <div class="fld"><label for="p-cat">職種<span class="req">*</span></label><select id="p-cat"></select></div>
+            <div class="fld"><label for="p-ind">業種<span class="req">*</span></label><select id="p-ind"></select></div>
           </div>
           <div class="row">
-            <div class="fld"><label for="p-months">期間（か月）<span class="req">*</span></label><input type="number" id="p-months" required min="1" max="12" value="3"><span class="hint">3か月を超える場合は契約形態を確認してください</span></div>
-            <div class="fld"><label for="p-days">週の勤務日数<span class="req">*</span></label><input type="number" id="p-days" required min="1" max="6" value="3"></div>
+            <div class="fld"><label for="p-min">手当 下限（VND/月）<span class="req">*</span></label><input type="number" id="p-min" min="500000" step="100000" placeholder="3000000"></div>
+            <div class="fld"><label for="p-max">手当 上限（VND/月）<span class="req">*</span></label><input type="number" id="p-max" min="500000" step="100000" placeholder="5000000"></div>
           </div>
-          <div class="fld"><label for="p-desc">仕事内容・学べること<span class="req">*</span></label><textarea id="p-desc" required maxlength="1500" placeholder="担当する業務、指導担当者、1日の流れ、応募条件など"></textarea></div>
-          <div class="fld"><label for="p-contact">採用担当の連絡先<span class="req">*</span></label><input type="email" id="p-contact" required maxlength="120" placeholder="hr@example.com"><span class="hint">学生には公開しません。運営からの連絡に使います</span></div>
+          <div class="row">
+            <div class="fld"><label for="p-months">期間（か月）<span class="req">*</span></label><input type="number" id="p-months" min="1" max="12" value="3"><span class="hint">3か月を超える場合は契約形態を確認してください</span></div>
+            <div class="fld"><label for="p-days">週の勤務日数<span class="req">*</span></label><input type="number" id="p-days" min="1" max="6" value="3"></div>
+            <div class="fld"><label for="p-hours">1日の勤務時間<span class="req">*</span></label><input type="number" id="p-hours" min="2" max="8" value="4"><span class="hint">時間〜</span></div>
+          </div>
+          <div class="fld"><label for="p-desc">仕事内容<span class="req">*</span></label><textarea id="p-desc" maxlength="1500" placeholder="担当する業務、指導担当者、1日の流れなど"></textarea></div>
+          <div class="fld"><label for="p-req">必須・歓迎の条件</label><textarea id="p-req" maxlength="600" placeholder="必須：週3日・3か月以上勤務できる方&#10;歓迎：日本語 N3 以上、SNS 運用の経験"></textarea></div>
+          <div class="fld"><label for="p-skills">身につくスキル</label><input type="text" id="p-skills" maxlength="120" placeholder="例：SNS 分析、企画書作成、日本語ビジネスメール"><span class="hint">読点（、）かカンマで区切ってください。求人カードに表示されます</span></div>
+          <label class="check"><input type="checkbox" id="p-hot"> 積極採用中（すぐに面談できる）として表示する</label>
+          <div class="fld"><span class="lb">こだわり条件</span><div class="checks" id="p-tags"></div></div>
+          <div class="fld"><label for="p-contact">採用担当の連絡先<span class="req">*</span></label><input type="email" id="p-contact" maxlength="120" placeholder="hr@example.com"><span class="hint">学生には公開しません。運営からの連絡に使います</span></div>
           <label class="check"><input type="checkbox" id="p-conv"> 正社員（新卒）登用の可能性がある</label>
           <label class="check"><input type="checkbox" id="p-cert"> 実習証明書（押印）・評価書の発行に対応する</label>
-          <label class="check"><input type="checkbox" id="p-pledge" required> <span>学生から研修費・手続き費・保証金などの費用を一切取らないことを誓約します<span class="req">*</span></span></label>
+          <label class="check"><input type="checkbox" id="p-pledge"> <span>学生から研修費・手続き費・保証金などの費用を一切取らないことを誓約します<span class="req">*</span></span></label>
           <div id="post-msg" class="msg" hidden></div>
           <div><button class="btn" type="submit" id="post-submit">審査を申請する</button></div>
         </form>
@@ -312,328 +424,451 @@ td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:now
   </section>
 </main>
 
+<div class="mbar" id="mbar" hidden>
+  <button class="btn keep" type="button" id="mb-keep">☆ キープ <span id="mb-keep-n">0</span></button>
+  <button class="btn" type="button" id="mb-main">プロフィールを登録</button>
+</div>
+
 <div class="scrim" id="scrim" hidden></div>
 <aside class="panel" id="panel" hidden aria-modal="true" role="dialog" aria-labelledby="pn-title">
   <div class="hd"><h2 id="pn-title"></h2><button class="x" id="pn-close" aria-label="閉じる">×</button></div>
-  <div class="bd" id="pn-body"></div>
+  <div class="pbd" id="pn-body"></div>
 </aside>
 
 <script>
 (function(){
 const JPY = 175; // 1円 ≈ 175 VND
-const CATS = ["マーケティング","営業","人事","経理・財務","IT・エンジニア","デザイン","通訳・翻訳","その他"];
+const CATS = ["マーケティング","営業","人事","経理・財務","IT・エンジニア","デザイン","通訳・翻訳","事務・アシスタント","その他"];
+const INDS = ["IT・ソフトウェア","製造・メーカー","商社・物流","小売・消費財","コンサル・人材","金融・会計","教育","メディア・広告","その他"];
+const TAGS = ["1・2年生歓迎","未経験歓迎","土日OK","リモート可","日本語を活かせる","英語を活かせる","交通費支給","理系向け","卒業実習として参加可"];
 const YEARS = ["1年生","2年生","3年生","4年生","5年生以上","卒業生"];
 const APP_STATUS = ["応募済み","企業に共有済み","面談調整中","採用","見送り"];
-const state = { jobs: [], inbox: [], mine: null, profile: null, uid: null, isAdmin: false, db: null, openJob: null };
+const STATUS = { pending:["審査中","warn"], approved:["公開中","ok"], rejected:["見送り","bad"] };
+const state = { jobs:[], inbox:[], mine:null, profile:null, keep:[], uid:null, isAdmin:false, db:null, mode:null, openJob:null, tags:new Set(), kw:"", sort:"new" };
 const $ = (s) => document.querySelector(s);
 
 function h(tag, attrs, ...kids){
   const e = document.createElement(tag);
   if (attrs) for (const [k,v] of Object.entries(attrs)){
-    if (v === null || v === undefined || v === false) continue;
-    if (k === "class") e.className = v;
+    if (v===null||v===undefined||v===false) continue;
+    if (k==="class") e.className=v;
     else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
-    else e.setAttribute(k, v === true ? "" : v);
+    else e.setAttribute(k, v===true?"":v);
   }
-  for (const k of kids.flat()){ if (k === null || k === undefined || k === false) continue; e.append(k instanceof Node ? k : document.createTextNode(String(k))); }
+  for (const k of kids.flat()){ if (k===null||k===undefined||k===false) continue; e.append(k instanceof Node?k:document.createTextNode(String(k))); }
   return e;
 }
 const vnd = (n) => (Number(n)||0).toLocaleString("ja-JP");
-const man = (n) => { const m = (Number(n)||0)/10000; return (Math.round(m*10)/10).toLocaleString("ja-JP") + "万"; };
-const yen = (n) => Math.round((Number(n)||0)/JPY/1000)*1000;
-const payText = (j) => j.allowanceMin === j.allowanceMax ? man(j.allowanceMin) : man(j.allowanceMin)+"〜"+man(j.allowanceMax);
-const yenText = (j) => "約" + (yen(j.allowanceMin)/10000).toFixed(1) + "〜" + (yen(j.allowanceMax)/10000).toFixed(1) + "万円";
-const dateText = (iso) => { try { const d = new Date(iso); return (d.getMonth()+1)+"/"+d.getDate(); } catch(e){ return ""; } };
-const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
-const typeChip = (t) => h("span",{class:"chip " + (t==="日系"?"info":"plain")}, t);
-
+const man = (n) => { const m=(Number(n)||0)/10000; return (Math.round(m*10)/10).toLocaleString("ja-JP")+"万"; };
+const payText = (j) => j.allowanceMin===j.allowanceMax ? man(j.allowanceMin) : man(j.allowanceMin)+"〜"+man(j.allowanceMax);
+const yenText = (j) => "約"+((Number(j.allowanceMin)||0)/JPY/10000).toFixed(1)+"〜"+((Number(j.allowanceMax)||0)/JPY/10000).toFixed(1)+"万円";
+const dateText = (iso) => { try { const d=new Date(iso); return (d.getMonth()+1)+"/"+d.getDate(); } catch(e){ return ""; } };
+const timeText = (iso) => { try { const d=new Date(iso); return (d.getMonth()+1)+"/"+d.getDate()+" "+d.getHours()+":"+String(d.getMinutes()).padStart(2,"0"); } catch(e){ return ""; } };
+const newId = () => Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const typeChip = (t) => h("span",{class:"chip "+(t==="日系"?"info":"plain")}, t);
+const coverClass = (j) => "cv"+(1+Math.abs([...String(j.industry||j.company||"")].reduce((a,c)=>a+c.charCodeAt(0),0))%5);
 function banner(text){ const b=$("#banner"); if(!text){ b.hidden=true; return; } b.textContent=text; b.hidden=false; }
+function say(el, text, ok){ el.textContent=text; el.className="msg "+(ok?"ok":"err"); el.hidden=false; return false; }
+const myApps = () => (state.mine && Array.isArray(state.mine.applications)) ? state.mine.applications : [];
+const isKept = (id) => state.keep.includes(id);
+const jobById = (id) => state.jobs.find(j=>j.id===id);
 
-// ---------- tabs ----------
+// ---------- 画面・入口 ----------
 function show(view){
   for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.view===view));
   for (const v of ["choose","browse","me","post","admin"]) $("#view-"+v).hidden = v!==view;
+  state.view = view;
   try { localStorage.setItem("ib-view", view); } catch(e){}
+  renderMbar(view);
+}
+function renderMbar(view){
+  const on = state.mode==="student" && (view==="browse" || view==="me");
+  $("#mbar").hidden = !on; document.body.classList.toggle("has-mbar", on);
+  $("#mb-main").textContent = view==="me" ? "求人を探す" : state.profile ? "マイページ" : "プロフィールを登録";
 }
 for (const b of document.querySelectorAll(".tabs button")) b.addEventListener("click", ()=>show(b.dataset.view));
-
-// 入口（学生 / 企業 / 運営）
-const MODES = {
-  student: { tag:"FOR STUDENTS · 学生向け", first:"browse" },
-  company: { tag:"FOR COMPANIES · 企業向け", first:"post" },
-  admin:   { tag:"ADMIN · 運営", first:"admin" },
-};
+const MODES = { student:{tag:"FOR STUDENTS · 学生向け",first:"browse"}, company:{tag:"FOR COMPANIES · 企業向け",first:"post"}, admin:{tag:"ADMIN · 運営",first:"admin"} };
 function setMode(mode, view){
-  if (mode==="admin" && !state.isAdmin) mode = null;
+  if (mode==="admin" && !state.isAdmin) mode=null;
   state.mode = MODES[mode] ? mode : null;
+  $("#keep-top").hidden = state.mode!=="student";
   if (!state.mode){
-    $("#tabs").hidden = true; $("#switch").hidden = true;
-    $("#mode-tag").textContent = "VIETNAM · PROTOTYPE";
-    show("choose");
-    try { localStorage.removeItem("ib-mode"); } catch(e){}
-    return;
+    $("#tabs").hidden=true; $("#switch").hidden=true; $("#mode-tag").textContent="VIETNAM · PROTOTYPE"; show("choose");
+    try { localStorage.removeItem("ib-mode"); } catch(e){} return;
   }
-  const tabs = [...document.querySelectorAll(".tabs button")];
-  for (const b of tabs) b.hidden = b.dataset.mode !== state.mode;
-  $("#tabs").hidden = tabs.filter(b=>!b.hidden).length < 2;
-  $("#switch").hidden = false;
-  $("#mode-tag").textContent = MODES[state.mode].tag;
-  const ok = view && tabs.some(b => !b.hidden && b.dataset.view===view);
-  show(ok ? view : MODES[state.mode].first);
+  const tabs=[...document.querySelectorAll(".tabs button")];
+  for (const b of tabs) b.hidden = b.dataset.mode!==state.mode;
+  $("#tabs").hidden = tabs.filter(b=>!b.hidden).length<2;
+  $("#switch").hidden=false; $("#mode-tag").textContent=MODES[state.mode].tag;
+  const ok = view && tabs.some(b=>!b.hidden && b.dataset.view===view);
+  show(ok?view:MODES[state.mode].first);
   try { localStorage.setItem("ib-mode", state.mode); } catch(e){}
 }
 for (const d of document.querySelectorAll(".door")) d.addEventListener("click", ()=>setMode(d.dataset.go));
 $("#switch").addEventListener("click", ()=>{ closePanel(); setMode(null); });
-function modeFromHash(){ const m = (location.hash||"").replace("#",""); return MODES[m] ? m : null; }
-window.addEventListener("hashchange", ()=>{ const m = modeFromHash(); if (m) setMode(m); });
+function modeFromHash(){ const m=(location.hash||"").replace("#",""); return MODES[m]?m:null; }
+window.addEventListener("hashchange", ()=>{ const m=modeFromHash(); if(m) setMode(m); });
+const goKeeps = ()=>{ show("me"); $("#keep-box").scrollIntoView({behavior:"smooth",block:"start"}); };
+const goProfile = ()=>{ show("me"); $("#m-name").scrollIntoView({behavior:"smooth",block:"center"}); $("#m-name").focus({preventScroll:true}); };
+$("#keep-top").addEventListener("click", goKeeps);
+$("#mb-keep").addEventListener("click", goKeeps);
+$("#mb-main").addEventListener("click", ()=>{ if ($("#view-me").hidden===false) show("browse"); else if (state.profile) show("me"); else goProfile(); });
 
-// ---------- selects ----------
+// ---------- 選択肢 ----------
 for (const c of CATS){ $("#q-cat").append(h("option",null,c)); $("#p-cat").append(h("option",null,c)); }
+for (const c of INDS){ $("#q-ind").append(h("option",null,c)); $("#p-ind").append(h("option",null,c)); }
 for (const y of YEARS) $("#m-year").append(h("option",null,y));
+for (const t of TAGS){
+  const b=h("button",{class:"tagbtn",type:"button","aria-pressed":"false"},t);
+  b.addEventListener("click",()=>{ state.tags.has(t)?state.tags.delete(t):state.tags.add(t); b.setAttribute("aria-pressed",String(state.tags.has(t))); renderBrowse(); });
+  $("#tagrow").append(b);
+  $("#p-tags").append(h("label",{class:"check"}, h("input",{type:"checkbox",value:t}), t));
+}
 
-// ---------- browse ----------
+// ---------- 探す ----------
+function filtersActive(){
+  return !!(state.kw || $("#q-city").value || $("#q-cat").value || $("#q-ind").value || Number($("#q-min").value) || $("#q-jp").checked || $("#q-hot").checked || state.tags.size);
+}
 function filtered(){
-  const city=$("#q-city").value, cat=$("#q-cat").value, min=Number($("#q-min").value), jp=$("#q-jp").checked, conv=$("#q-conv").checked;
-  let list = state.jobs.filter(j => (!city||j.city===city) && (!cat||j.category===cat) && (j.allowanceMax>=min) && (!jp||j.companyType==="日系") && (!conv||j.conversion));
-  if ($("#q-sort").value==="pay") list.sort((a,b)=>b.allowanceMax-a.allowanceMax);
-  else list.sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
-  return list;
+  const city=$("#q-city").value, cat=$("#q-cat").value, ind=$("#q-ind").value, min=Number($("#q-min").value), jp=$("#q-jp").checked, hot=$("#q-hot").checked, kw=state.kw.toLowerCase();
+  let list = state.jobs.filter(j => (!city||j.city===city) && (!cat||j.category===cat) && (!ind||j.industry===ind) && (j.allowanceMax>=min) && (!jp||j.companyType==="日系") && (!hot||j.hiring)
+    && [...state.tags].every(t => (j.tags||[]).includes(t))
+    && (!kw || [j.title,j.company,j.description,j.requirements,j.category,j.industry,(j.tags||[]).join(" "),(j.skills||[]).join(" ")].join(" ").toLowerCase().includes(kw)));
+  return sortJobs(list);
 }
+function sortJobs(list){
+  const byNew = (a,b)=>String(b.createdAt).localeCompare(String(a.createdAt));
+  if (state.sort==="pay") return [...list].sort((a,b)=>b.allowanceMax-a.allowanceMax || byNew(a,b));
+  if (state.sort==="hot") return [...list].sort((a,b)=>(b.hiring?1:0)-(a.hiring?1:0) || byNew(a,b));
+  return [...list].sort(byNew);
+}
+const isNew = (j) => { const t=Date.parse(j.createdAt); return t && Date.now()-t < 7*864e5; };
+const workText = (j) => "週"+j.daysPerWeek+"日〜"+(j.hoursPerDay?"・1日"+j.hoursPerDay+"時間〜":"")+"・"+j.months+"か月";
+const HEART = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.4-9.2-8.6C1.3 8.5 3 5 6.4 5c2 0 3.4 1.1 4.1 2.3h3C14.2 6.1 15.6 5 17.6 5 21 5 22.7 8.5 21.2 11.4 19 15.6 12 20 12 20z"/></svg>';
+function card(j){
+  const applied = myApps().some(a=>a.jobId===j.id);
+  const kept = isKept(j.id);
+  const heart = h("button",{class:"heart",type:"button","aria-pressed":String(kept),"aria-label":kept?"キープをはずす":"キープする",title:kept?"キープ済み":"キープする"});
+  heart.innerHTML = HEART;
+  heart.addEventListener("click", e=>{ e.stopPropagation(); toggleKeep(j.id); });
+  const open = ()=>openJob(j.id);
+  const skills = (j.skills||[]).slice(0,3);
+  return h("article",{class:"card"},
+    h("div",{class:"cover "+coverClass(j),onclick:open},
+      j.hiring?h("span",{class:"hot"},"積極採用中"):null,
+      h("span",{class:"ini","aria-hidden":"true"}, (j.company||"?").replace(/^サンプル[・]?/,"").slice(0,1)), h("span",{class:"ind",style:"margin-right:40px"}, j.industry||""), heart),
+    h("div",{class:"bd",onclick:open},
+      h("div",{class:"co"}, j.company, typeChip(j.companyType), j.sample?h("span",{class:"chip warn"},"サンプル"):null, applied?h("span",{class:"chip info"},"応募済み"):null, isNew(j)?h("span",{class:"newb"},"NEW"):null),
+      h("h3",null,j.title),
+      h("div",{class:"chips"}, h("span",{class:"chip line"}, j.city), ...(j.tags||[]).slice(0,3).map(t=>h("span",{class:"chip line"},t))),
+      h("dl",{class:"rows"},
+        h("div",null,h("dt",null,"職種"),h("dd",null,j.category)),
+        h("div",null,h("dt",null,"手当"),h("dd",{class:"pay"}, payText(j)+" VND/月", h("small",null,yenText(j)))),
+        h("div",null,h("dt",null,"勤務"),h("dd",null,workText(j))),
+        skills.length?h("div",null,h("dt",null,"スキル"),h("dd",null,h("div",{class:"skills"}, skills.map(x=>h("span",{class:"skill"},x))))):null),
+      h("div",{class:"chips"}, h("span",{class:"chip ok"},"費用請求なし"), j.conversion?h("span",{class:"chip ok"},"正社員登用あり"):null, j.certificate?h("span",{class:"chip ok"},"実習証明あり"):null)),
+    h("div",{class:"ft"}, h("button",{class:"go",type:"button",onclick:open},"詳しく見る →")));
+}
+function section(title, list, extra){
+  if (!list.length) return null;
+  return h("section",{class:"sect"}, h("div",{class:"sect-hd"}, h("h2",null,title), extra||null), h("div",{class:"grid"}, list.map(card)));
+}
+function recentIds(){ try { return JSON.parse(localStorage.getItem("ib-recent")||"[]"); } catch(e){ return []; } }
+function countPills(values, key, sel){
+  return h("div",{class:"pills"}, values.map(v=>{
+    const n = state.jobs.filter(j=>j[key]===v).length;
+    return h("button",{class:"pill",type:"button",disabled:!n,onclick:()=>{ $(sel).value=v; renderBrowse(); $("#filters").scrollIntoView({behavior:"smooth",block:"start"}); }}, v, h("span",{class:"c"},n));
+  }));
+}
+const FAQ = [
+  ["本当に手当はもらえますか？","掲載している求人はすべて手当の金額（VND/月）を明記しています。支払われない・金額が違う場合は、求人の「通報する」から運営に知らせてください。"],
+  ["お金を請求されることはありますか？","ありません。掲載企業は、学生から研修費・手続き費・保証金などを取らないことを誓約しています。請求されたらすぐに通報してください。"],
+  ["大学の卒業実習（thực tập）として参加できますか？","「卒業実習として参加可」のタグがある求人は、実習証明書（押印）や評価書の発行に対応しています。"],
+  ["日本語ができなくても応募できますか？","できます。「日本語を活かせる」以外の求人は、日本語を必須にしていないものが多くあります。条件は各求人の「必須・歓迎」を確認してください。"],
+  ["応募したあとはどうなりますか？","運営が内容を確認して企業に共有します。面談の調整などは、マイページのメッセージで連絡します。"]
+];
 function renderBrowse(){
-  const list = filtered(), g=$("#grid");
-  g.replaceChildren(...list.map(j => h("button",{class:"card",type:"button",onclick:()=>openJob(j.id)},
-    h("div",{class:"co"}, typeChip(j.companyType), j.company, j.sample ? h("span",{class:"chip warn"},"サンプル") : null),
-    h("h3",null,j.title),
-    h("div",{class:"money"}, payText(j)+" VND/月", h("small",null,yenText(j))),
-    h("div",{class:"facts"}, h("span",null,j.city), h("span",null,j.category), h("span",null,j.months+"か月"), h("span",null,"週"+j.daysPerWeek+"日")),
-    h("div",{class:"chips"},
-      myApps().some(a=>a.jobId===j.id) ? h("span",{class:"chip info"},"応募済み") : null,
-      h("span",{class:"chip ok"},"費用請求なし"),
-      j.conversion ? h("span",{class:"chip ok"},"正社員登用あり") : null,
-      j.certificate ? h("span",{class:"chip ok"},"実習証明あり") : null)
-  )));
-  $("#grid-empty").hidden = list.length>0 || !state.db;
-  $("#count").textContent = list.length + " 件 / 全 " + state.jobs.length + " 件";
+  const home = $("#home");
+  $("#hit-n").textContent = state.db && filtersActive() ? "（"+filtered().length+"件）" : "";
+  if (!state.db){ home.replaceChildren(); return; }
+  if (filtersActive()){
+    const list = filtered();
+    const clear = h("button",{class:"linkbtn",type:"button"},"条件をクリア");
+    clear.addEventListener("click", clearFilters);
+    home.replaceChildren(h("section",{class:"sect"},
+      h("div",{class:"sect-hd"}, h("h2",null,"検索結果"), h("span",{class:"n"}, list.length+" 件"), clear),
+      list.length ? h("div",{class:"grid"}, list.map(card)) : h("div",{class:"empty"},"条件に合うインターンはまだありません。条件をゆるめてみてください。")));
+    return;
+  }
+  const byNew = [...state.jobs].sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+  const recent = recentIds().map(jobById).filter(Boolean).slice(0,3);
+  const all = h("button",{class:"linkbtn",type:"button"},"すべて見る");
+  all.addEventListener("click", ()=>{ home.replaceChildren(section("すべてのインターン（"+state.jobs.length+"件）", sortJobs(state.jobs))); });
+  const cta = state.profile ? null : h("div",{class:"cta"},
+    h("div",null, h("h2",null,"プロフィールを登録して、ボタン1つで応募"), h("p",null,"名前・大学・連絡先だけで始められます。キープした求人もマイページにまとまります。")),
+    h("button",{class:"btn",type:"button",onclick:goProfile},"プロフィールを登録する"));
+  home.replaceChildren(...[
+    section("積極採用中のインターン", byNew.filter(j=>j.hiring).slice(0,3)),
+    section("新着のインターン", byNew.slice(0,6), all),
+    cta,
+    section("日系企業のインターン", byNew.filter(j=>j.companyType==="日系").slice(0,3)),
+    section("最近見た求人", recent),
+    state.jobs.length ? h("div",{class:"quick"},
+      h("div",{class:"qbox"}, h("h3",null,"職種から探す"), countPills(CATS,"category","#q-cat")),
+      h("div",{class:"qbox"}, h("h3",null,"業種から探す"), countPills(INDS,"industry","#q-ind")),
+      h("div",{class:"qbox"}, h("h3",null,"都市から探す"), countPills(["ハノイ","ホーチミン","ダナン","リモート"],"city","#q-city")))
+      : h("div",{class:"empty",style:"margin-top:24px"},"公開中の求人はまだありません。"),
+    h("section",{class:"faq"}, h("h2",null,"よくある質問"), FAQ.map(([q,a])=>h("details",null,h("summary",null,q),h("p",null,a))))
+  ].filter(Boolean));
 }
-for (const id of ["#q-city","#q-cat","#q-min","#q-sort","#q-jp","#q-conv"]) $(id).addEventListener("change", renderBrowse);
+function clearFilters(){
+  state.kw=""; $("#q-kw").value=""; for (const id of ["#q-city","#q-cat","#q-ind"]) $(id).value=""; $("#q-min").value="0"; $("#q-jp").checked=false; $("#q-hot").checked=false;
+  state.tags.clear(); for (const b of document.querySelectorAll(".tagbtn")) b.setAttribute("aria-pressed","false");
+  renderBrowse();
+}
+for (const id of ["#q-city","#q-cat","#q-ind","#q-min","#q-jp","#q-hot"]) $(id).addEventListener("change", renderBrowse);
+for (const b of document.querySelectorAll("#q-sort button")) b.addEventListener("click", ()=>{
+  state.sort=b.dataset.sort; for (const x of document.querySelectorAll("#q-sort button")) x.setAttribute("aria-pressed", String(x===b));
+  const home=$("#home"); if (filtersActive()) renderBrowse(); else home.replaceChildren(section("すべてのインターン（"+state.jobs.length+"件）", sortJobs(state.jobs)) || h("div",{class:"empty"},"公開中の求人はまだありません。"));
+});
+$("#search-form").addEventListener("submit", e=>{ e.preventDefault(); state.kw=$("#q-kw").value.trim(); renderBrowse(); });
+for (const b of document.querySelectorAll(".entry")) b.addEventListener("click", ()=>{
+  for (const x of document.querySelectorAll(".entry")) x.setAttribute("aria-pressed", String(x===b));
+  const t = b.dataset.focus==="tags" ? $("#tagrow") : $("#"+b.dataset.focus);
+  t.scrollIntoView({behavior:"smooth",block:"center"});
+  if (t.tagName==="SELECT") t.focus(); else { const f=t.querySelector("button"); if(f) f.focus(); }
+});
 
-// ---------- panel ----------
+// ---------- キープ ----------
+async function toggleKeep(id){
+  if (!state.db || !state.uid){ banner("キープにはサインインが必要です。"); return; }
+  const next = isKept(id) ? state.keep.filter(x=>x!==id) : [...state.keep, id];
+  state.keep = next; renderKeep(); renderBrowse(); if (state.openJob===id) openJob(id);
+  try { await state.db.doc("data/users/"+state.uid+"/keep").set({ids:next, updatedAt:new Date().toISOString()}); }
+  catch(e){ banner("キープを保存できませんでした。このページへの権限（Contributor 以上）が必要です。"); }
+}
+function renderKeep(){
+  const list = state.keep.map(jobById).filter(Boolean);
+  $("#keep-n").textContent = list.length; $("#mb-keep-n").textContent = list.length;
+  $("#my-keeps").replaceChildren(...list.map(j => h("div",{class:"li"},
+    h("div",{class:"top"}, h("div",null, h("div",{class:"t"},j.title), h("div",{class:"s"}, j.company+" ・ "+payText(j)+" VND/月")),
+      h("div",{class:"acts"}, h("button",{class:"btn ghost sm",type:"button",onclick:()=>openJob(j.id)},"詳しく見る"), h("button",{class:"btn keep sm",type:"button","aria-pressed":"true",onclick:()=>toggleKeep(j.id)},"キープをはずす"))))));
+  $("#my-keeps-empty").hidden = list.length>0;
+}
+
+// ---------- 詳細パネル ----------
 function closePanel(){ $("#panel").hidden=true; $("#scrim").hidden=true; state.openJob=null; }
 $("#pn-close").addEventListener("click", closePanel);
 $("#scrim").addEventListener("click", closePanel);
-document.addEventListener("keydown", e => { if (e.key==="Escape" && !$("#panel").hidden) closePanel(); });
+document.addEventListener("keydown", e=>{ if (e.key==="Escape" && !$("#panel").hidden) closePanel(); });
+function openPanel(title, nodes){ $("#pn-title").textContent=title; $("#pn-body").replaceChildren(...nodes); $("#scrim").hidden=false; $("#panel").hidden=false; $("#pn-close").focus(); }
+function field(label, input, hint, req){ return h("div",{class:"fld"}, h("label",{for:input.id}, label, req?h("span",{class:"req"},"*"):null), input, hint?h("span",{class:"hint"},hint):null); }
 
-function field(label, input, hint, req){
-  return h("div",{class:"fld"}, h("label",{for:input.id}, label, req?h("span",{class:"req"},"*"):null), input, hint?h("span",{class:"hint"},hint):null);
-}
 function openJob(id){
-  const j = state.jobs.find(x=>x.id===id); if(!j) return;
+  const j = jobById(id); if(!j) return;
   state.openJob = id;
-  $("#pn-title").textContent = j.title;
-  const body = $("#pn-body");
-  const applyBox = h("div",{class:"stack",style:"display:flex;flex-direction:column;gap:12px"});
+  try { const r=recentIds().filter(x=>x!==id); r.unshift(id); localStorage.setItem("ib-recent", JSON.stringify(r.slice(0,10))); } catch(e){}
+  const kb = h("button",{class:"btn keep sm",type:"button","aria-pressed":String(isKept(id))}, isKept(id)?"♥ キープ済み":"♡ キープする");
+  kb.addEventListener("click", ()=>toggleKeep(id));
+  const applyBox = h("div",{style:"display:flex;flex-direction:column;gap:12px"});
   renderApply(j, applyBox);
-
   const rReason = h("select",{id:"r-reason"}, ["費用を請求された","手当や条件が掲載と違う","連絡がとれない・不審","その他"].map(r=>h("option",null,r)));
   const rMsg = h("div",{class:"msg",hidden:true});
-  const reportForm = h("form",{class:"stack",novalidate:true},
-    field("理由",rReason), rMsg,
-    h("div",null, h("button",{class:"btn danger sm",type:"submit"},"この求人を通報する")));
-  reportForm.addEventListener("submit", async e => {
-    e.preventDefault();
-    const ok = await saveMine("reports", { id:newId(), jobId:j.id, jobTitle:j.title, company:j.company, reason:rReason.value, createdAt:new Date().toISOString() }, rMsg);
-    if (ok) say(rMsg,"通報を受け付けました。運営が確認します。",true);
-  });
-
-  body.replaceChildren(
-    h("div",{class:"co chips"}, typeChip(j.companyType), h("span",{class:"chip plain"}, j.company), j.sample?h("span",{class:"chip warn"},"サンプル"):null),
-    h("div",{class:"money"}, payText(j)+" VND/月", h("small",null, vnd(j.allowanceMin)+"〜"+vnd(j.allowanceMax)+" VND（"+yenText(j)+"）")),
+  const reportForm = h("form",{class:"stack",novalidate:true}, field("理由",rReason), rMsg, h("div",null, h("button",{class:"btn danger sm",type:"submit"},"この求人を通報する")));
+  reportForm.addEventListener("submit", async e=>{ e.preventDefault();
+    const ok = await saveMine("reports", {id:newId(), jobId:j.id, jobTitle:j.title, company:j.company, reason:rReason.value, createdAt:new Date().toISOString()}, rMsg);
+    if (ok) say(rMsg,"通報を受け付けました。運営が確認します。",true); });
+  openPanel(j.title, [
+    h("div",{class:"chips"}, typeChip(j.companyType), h("span",{class:"chip plain"}, j.company), j.sample?h("span",{class:"chip warn"},"サンプル"):null),
+    h("div",{class:"pay",style:"font-size:18px"}, payText(j)+" VND/月", h("small",null, vnd(j.allowanceMin)+"〜"+vnd(j.allowanceMax)+" VND（"+yenText(j)+"）")),
+    h("div",null,kb),
     h("dl",{class:"dl"},
-      h("dt",null,"勤務地"),h("dd",null,j.city),
-      h("dt",null,"職種"),h("dd",null,j.category),
-      h("dt",null,"期間"),h("dd",null,j.months+"か月・週"+j.daysPerWeek+"日"),
+      h("dt",null,"勤務地"),h("dd",null,j.city), h("dt",null,"職種"),h("dd",null,j.category), h("dt",null,"業種"),h("dd",null,j.industry||"—"),
+      h("dt",null,"勤務条件"),h("dd",null,workText(j)),
       h("dt",null,"正社員登用"),h("dd",null,j.conversion?"可能性あり":"なし"),
       h("dt",null,"実習証明"),h("dd",null,j.certificate?"押印・評価書に対応":"対応なし"),
       h("dt",null,"費用"),h("dd",null,"学生への費用請求なし（企業が誓約済み）")),
-    h("p",{class:"desc"}, j.description),
-    h("div",{class:"sec"}, h("h3",null,"応募する"), applyBox),
-    h("div",{class:"sec"}, h("h3",null,"気になる点があれば"), reportForm)
-  );
-  $("#scrim").hidden=false; $("#panel").hidden=false; $("#pn-close").focus();
+    (j.tags&&j.tags.length) ? h("div",{class:"chips"}, j.tags.map(t=>h("span",{class:"chip line"},t))) : null,
+    j.hiring?h("div",{class:"msg ok"},"積極採用中：応募から1週間以内をめどに面談を調整します。"):null,
+    h("div",null, h("h3",{style:"font-size:14px;margin-bottom:4px"},"仕事内容"), h("p",{class:"desc"}, j.description)),
+    j.requirements?h("div",null, h("h3",{style:"font-size:14px;margin-bottom:4px"},"必須・歓迎の条件"), h("p",{class:"desc"}, j.requirements)):null,
+    (j.skills&&j.skills.length)?h("div",null, h("h3",{style:"font-size:14px;margin-bottom:6px"},"身につくスキル"), h("div",{class:"skills"}, j.skills.map(x=>h("span",{class:"skill"},x)))):null,
+    h("div",{class:"psec"}, h("h3",null,"応募する"), applyBox),
+    h("div",{class:"psec"}, h("h3",null,"気になる点があれば"), reportForm)
+  ].filter(Boolean));
 }
-const myApps = () => (state.mine && Array.isArray(state.mine.applications)) ? state.mine.applications : [];
 function profileSummary(p){
-  const langs = [p.jp && p.jp!=="なし" ? "日本語 "+p.jp : null, p.en && p.en!=="なし" ? "英語 "+p.en : null].filter(Boolean).join("・");
-  return h("dl",{class:"dl"},
-    h("dt",null,"名前"),h("dd",null,p.name),
-    h("dt",null,"大学"),h("dd",null,[p.university,p.major,p.year].filter(Boolean).join("・")),
-    h("dt",null,"連絡先"),h("dd",null,[p.email,p.phone].filter(Boolean).join(" / ")),
-    langs ? h("dt",null,"語学") : null, langs ? h("dd",null,langs) : null);
+  const langs=[p.jp&&p.jp!=="なし"?"日本語 "+p.jp:null, p.en&&p.en!=="なし"?"英語 "+p.en:null].filter(Boolean).join("・");
+  return h("dl",{class:"dl"}, h("dt",null,"名前"),h("dd",null,p.name), h("dt",null,"大学"),h("dd",null,[p.university,p.major,p.year].filter(Boolean).join("・")),
+    h("dt",null,"連絡先"),h("dd",null,[p.email,p.phone].filter(Boolean).join(" / ")), langs?h("dt",null,"語学"):null, langs?h("dd",null,langs):null);
 }
 function renderApply(j, box){
-  const done = myApps().find(a => a.jobId===j.id);
+  const done = myApps().find(a=>a.jobId===j.id);
   if (done){
-    box.replaceChildren(h("p",null, h("span",{class:"chip ok"}, done.status||"応募済み"), " ", dateText(done.createdAt)+" に応募しました。状況はマイページで確認できます。"));
-    return;
+    const go = h("button",{class:"btn ghost sm",type:"button"},"マイページでメッセージを見る");
+    go.addEventListener("click", ()=>{ closePanel(); show("me"); });
+    box.replaceChildren(h("p",null, h("span",{class:"chip ok"}, done.status||"応募済み"), " ", dateText(done.createdAt)+" に応募しました。"), h("div",null,go)); return;
   }
   const p = state.profile;
   if (!p){
     const go = h("button",{class:"btn",type:"button"},"プロフィールを登録する");
     go.addEventListener("click", ()=>{ closePanel(); show("me"); $("#m-name").focus(); });
-    box.replaceChildren(h("p",{class:"lead"},"応募にはプロフィールの登録が必要です。一度登録すれば、次からはボタン1つで応募できます。"), h("div",null,go));
-    return;
+    box.replaceChildren(h("p",{class:"lead"},"応募にはプロフィールの登録が必要です。一度登録すれば、次からはボタン1つで応募できます。"), h("div",null,go)); return;
   }
-  const msg = h("div",{class:"msg",hidden:true});
-  const note = h("textarea",{id:"a-msg",maxlength:"600",placeholder:"この求人に興味を持った理由、始められる時期など（任意）"});
-  const consent = h("input",{type:"checkbox",id:"a-consent"});
-  const btn = h("button",{class:"btn",type:"submit"},"この内容で応募する");
-  const edit = h("button",{class:"btn ghost sm",type:"button"},"プロフィールを編集");
-  edit.addEventListener("click", ()=>{ closePanel(); show("me"); });
-  const form = h("form",{class:"stack",novalidate:true},
-    h("p",{class:"lead"},"次のプロフィールが企業に送られます。"),
-    profileSummary(p), h("div",null,edit),
+  const msg=h("div",{class:"msg",hidden:true});
+  const note=h("textarea",{id:"a-msg",maxlength:"600",placeholder:"この求人に興味を持った理由、始められる時期など（任意）"});
+  const consent=h("input",{type:"checkbox",id:"a-consent"});
+  const btn=h("button",{class:"btn",type:"submit"},"この内容で応募する");
+  const form=h("form",{class:"stack",novalidate:true},
+    h("p",{class:"lead"},"次のプロフィールが企業に送られます。"), profileSummary(p),
     field("ひとこと",note),
     h("label",{class:"check"}, consent, h("span",null,"プロフィールと応募内容を運営と掲載企業に共有することに同意します", h("span",{class:"req"},"*"))),
     msg, h("div",null,btn));
-  form.addEventListener("submit", async e => {
-    e.preventDefault();
+  form.addEventListener("submit", async e=>{ e.preventDefault();
     if (!consent.checked) return say(msg,"共有への同意にチェックしてください。",false);
-    btn.disabled = true;
-    const ok = await saveMine("applications", { id:newId(), jobId:j.id, jobTitle:j.title, company:j.company,
-      profile: Object.assign({}, p), message: note.value.trim(), status:"応募済み", createdAt:new Date().toISOString() }, msg);
-    btn.disabled = false;
-    if (ok) box.replaceChildren(h("div",{class:"msg ok"},"応募しました。運営が確認し、企業と日程を調整してご連絡します。"));
+    btn.disabled=true;
+    const now=new Date().toISOString();
+    const thread = note.value.trim() ? [{from:"student", text:note.value.trim(), at:now}] : [];
+    const ok = await saveMine("applications", {id:newId(), jobId:j.id, jobTitle:j.title, company:j.company, profile:Object.assign({},p), message:note.value.trim(), status:"応募済み", thread, createdAt:now}, msg);
+    btn.disabled=false;
+    if (ok) box.replaceChildren(h("div",{class:"msg ok"},"応募しました。運営が確認し、マイページのメッセージでご連絡します。"));
   });
   box.replaceChildren(form);
 }
 
-// ---------- my page ----------
-const PF = { name:"#m-name", university:"#m-uni", major:"#m-major", year:"#m-year", grad:"#m-grad", email:"#m-email", phone:"#m-phone", jp:"#m-jp", en:"#m-en", avail:"#m-avail", pr:"#m-pr", url:"#m-url" };
-let profileFilled = false;
-function fillProfile(){
-  if (profileFilled || !state.profile) return;
-  for (const [k,sel] of Object.entries(PF)) if (state.profile[k] !== undefined) $(sel).value = state.profile[k];
-  profileFilled = true;
-  $("#me-submit").textContent = "プロフィールを更新";
-}
-$("#me-form").addEventListener("submit", async e => {
-  e.preventDefault();
-  const m = $("#me-msg");
-  const p = {}; for (const [k,sel] of Object.entries(PF)) p[k] = String($(sel).value).trim();
-  if (!p.name || !p.university || !p.email) return say(m,"名前・大学・メールは必須です。",false);
-  if (!state.db) return say(m,"この表示ではデータを保存できません。claude.ai 上で開いてください。",false);
-  if (!state.uid) return say(m,"保存にはサインインが必要です。",false);
-  $("#me-submit").disabled = true;
-  try {
-    p.updatedAt = new Date().toISOString();
-    await state.db.doc("data/users/"+state.uid+"/profile").set(p);
-    state.profile = p; profileFilled = true;
-    say(m,"保存しました。求人の画面からボタン1つで応募できます。",true);
-    $("#me-submit").textContent = "プロフィールを更新";
-  } catch(err){
-    say(m, err && err.code==="invalid_argument" ? "保存できませんでした。このページへの権限（共有メニューで Contributor 以上）が必要です。" : "保存できませんでした。少し待ってからもう一度お試しください。", false);
-  }
-  $("#me-submit").disabled = false;
-});
-function renderMyApps(){
-  const apps = [...myApps()].reverse();
-  $("#my-apps").replaceChildren(...apps.map(a => h("div",{class:"li"},
-    h("div",null, h("div",{class:"t"},a.jobTitle), h("div",{class:"s"}, a.company+" ・ "+dateText(a.createdAt)+" 応募")),
-    h("span",{class:"chip "+(a.status==="見送り"?"bad":a.status==="採用"?"ok":"info")}, a.status||"応募済み"))));
-  $("#my-apps-empty").hidden = apps.length>0;
-}
-
-function say(el, text, ok){ el.textContent=text; el.className="msg "+(ok?"ok":"err"); el.hidden=false; return false; }
-
-// ---------- my inbox doc ----------
-async function saveMine(key, item, msgEl){
-  if (!state.db) return say(msgEl,"この表示ではデータを保存できません。claude.ai 上で開いてください。",false);
-  if (!state.uid) return say(msgEl,"送信にはサインインが必要です。",false);
+// ---------- 自分のデータ ----------
+async function mutateMine(fn, msgEl){
+  if (!state.db) return msgEl ? say(msgEl,"この表示ではデータを保存できません。claude.ai 上で開いてください。",false) : false;
+  if (!state.uid) return msgEl ? say(msgEl,"送信にはサインインが必要です。",false) : false;
   const ref = state.db.doc("inbox/"+state.uid);
   try {
     const snap = await ref.get();
     const cur = snap.exists ? JSON.parse(JSON.stringify(snap.data())) : {};
-    cur[key] = Array.isArray(cur[key]) ? cur[key] : [];
-    cur[key].push(item);
-    cur.updatedAt = new Date().toISOString();
-    await ref.set(cur);
-    return true;
+    fn(cur); cur.updatedAt=new Date().toISOString();
+    await ref.set(cur); return true;
   } catch(err){
-    if (err && err.code==="invalid_argument") return say(msgEl,"送信できませんでした。このページへの編集権限（共有メニューで Contributor 以上）が必要です。",false);
-    if (err && err.code==="quota_exceeded") return say(msgEl,"保存容量の上限に達しました。運営に連絡してください。",false);
-    return say(msgEl,"送信できませんでした。少し待ってからもう一度お試しください。",false);
+    const t = err&&err.code==="invalid_argument" ? "送信できませんでした。このページへの権限（共有メニューで Contributor 以上）が必要です。"
+      : err&&err.code==="quota_exceeded" ? "保存容量の上限に達しました。運営に連絡してください。" : "送信できませんでした。少し待ってからもう一度お試しください。";
+    return msgEl ? say(msgEl,t,false) : (banner(t), false);
   }
 }
+const saveMine = (key, item, msgEl) => mutateMine(cur=>{ cur[key]=Array.isArray(cur[key])?cur[key]:[]; cur[key].push(item); }, msgEl);
 
-// ---------- post ----------
-$("#post-form").addEventListener("submit", async e => {
-  e.preventDefault();
+// ---------- マイページ ----------
+const PF = { name:"#m-name", university:"#m-uni", major:"#m-major", year:"#m-year", grad:"#m-grad", email:"#m-email", phone:"#m-phone", jp:"#m-jp", en:"#m-en", avail:"#m-avail", pr:"#m-pr", url:"#m-url" };
+let profileFilled=false;
+function fillProfile(){
+  if (profileFilled || !state.profile) return;
+  for (const [k,sel] of Object.entries(PF)) if (state.profile[k]!==undefined) $(sel).value=state.profile[k];
+  profileFilled=true; $("#me-submit").textContent="プロフィールを更新";
+}
+$("#me-form").addEventListener("submit", async e=>{ e.preventDefault();
+  const m=$("#me-msg"); const p={}; for (const [k,sel] of Object.entries(PF)) p[k]=String($(sel).value).trim();
+  if (!p.name||!p.university||!p.email) return say(m,"名前・大学・メールは必須です。",false);
+  if (!state.db) return say(m,"この表示ではデータを保存できません。claude.ai 上で開いてください。",false);
+  if (!state.uid) return say(m,"保存にはサインインが必要です。",false);
+  $("#me-submit").disabled=true;
+  try { p.updatedAt=new Date().toISOString(); await state.db.doc("data/users/"+state.uid+"/profile").set(p); state.profile=p; profileFilled=true;
+    say(m,"保存しました。求人の画面からボタン1つで応募できます。",true); $("#me-submit").textContent="プロフィールを更新"; }
+  catch(err){ say(m, err&&err.code==="invalid_argument" ? "保存できませんでした。このページへの権限（共有メニューで Contributor 以上）が必要です。" : "保存できませんでした。少し待ってからもう一度お試しください。", false); }
+  $("#me-submit").disabled=false;
+});
+function threadView(thread, meRole){
+  const t = h("div",{class:"thread"});
+  const items = Array.isArray(thread)?thread:[];
+  if (!items.length) t.append(h("p",{class:"s"},"まだメッセージはありません。"));
+  for (const m of items) t.append(h("div",{class:"bubble "+(m.from===meRole?"me":"them")}, m.from===meRole?null:h("b",null,(m.from==="ops"?"運営":"学生")+"　"), m.text, h("span",{class:"when"},timeText(m.at))));
+  return t;
+}
+const openThreads = new Set();
+function renderMyApps(){
+  const apps=[...myApps()].reverse();
+  $("#my-apps").replaceChildren(...apps.map(a=>{
+    const n=(a.thread||[]).length, opsN=(a.thread||[]).filter(m=>m.from==="ops").length;
+    const tBtn=h("button",{class:"btn ghost sm",type:"button","aria-expanded":String(openThreads.has(a.id))},"メッセージ（"+n+"）");
+    const body=h("div",{hidden:!openThreads.has(a.id),style:"display:flex;flex-direction:column;gap:8px"});
+    tBtn.addEventListener("click",()=>{ openThreads.has(a.id)?openThreads.delete(a.id):openThreads.add(a.id); renderMyApps(); });
+    if (openThreads.has(a.id)){
+      const ta=h("textarea",{"aria-label":"メッセージ",maxlength:"600",placeholder:"質問や面談の希望日などを送れます"});
+      const send=h("button",{class:"btn sm",type:"button"},"送信");
+      send.addEventListener("click", async ()=>{ const text=ta.value.trim(); if(!text) return; send.disabled=true;
+        await mutateMine(cur=>{ cur.applications=(cur.applications||[]).map(x=>x.id===a.id?Object.assign(x,{thread:[...(x.thread||[]),{from:"student",text,at:new Date().toISOString()}]}):x); });
+        send.disabled=false; });
+      body.append(threadView(a.thread,"student"), h("div",{class:"sendrow"}, ta, send));
+    }
+    const job=jobById(a.jobId);
+    return h("div",{class:"li"},
+      h("div",{class:"top"}, h("div",null, h("div",{class:"t"},a.jobTitle), h("div",{class:"s"}, a.company+" ・ "+dateText(a.createdAt)+" 応募")),
+        h("span",{class:"chip "+(a.status==="見送り"?"bad":a.status==="採用"?"ok":"info")}, a.status||"応募済み")),
+      h("div",{class:"acts"}, job?h("button",{class:"btn ghost sm",type:"button",onclick:()=>openJob(job.id)},"求人を見る"):h("span",{class:"s"},"掲載終了"), tBtn, opsN?h("span",{class:"chip ok"},"運営から "+opsN+" 件"):null),
+      body);
+  }));
+  $("#my-apps-empty").hidden=apps.length>0;
+}
+
+// ---------- 企業 ----------
+$("#post-form").addEventListener("submit", async e=>{ e.preventDefault();
   const m=$("#post-msg"), v=(id)=>$(id).value.trim();
   const min=Number($("#p-min").value), max=Number($("#p-max").value);
   if (!v("#p-company")||!v("#p-title")||!v("#p-desc")||!v("#p-contact")) return say(m,"必須項目をすべて入力してください。",false);
-  if (!(min>=500000) || !(max>=min)) return say(m,"手当は50万 VND 以上で、上限は下限以上にしてください。",false);
+  if (!(min>=500000)||!(max>=min)) return say(m,"手当は50万 VND 以上で、上限は下限以上にしてください。",false);
   if (!$("#p-pledge").checked) return say(m,"費用を取らない誓約にチェックしてください。",false);
-  $("#post-submit").disabled = true;
-  const ok = await saveMine("submissions", {
-    id:newId(), status:"pending", company:v("#p-company"), companyType:$("#p-ctype").value, title:v("#p-title"),
-    city:$("#p-city").value, category:$("#p-cat").value, allowanceMin:min, allowanceMax:max,
-    months:Number($("#p-months").value)||3, daysPerWeek:Number($("#p-days").value)||3,
-    description:v("#p-desc"), contact:v("#p-contact"), conversion:$("#p-conv").checked, certificate:$("#p-cert").checked,
-    noFeePledge:true, createdAt:new Date().toISOString()
-  }, m);
-  $("#post-submit").disabled = false;
-  if (ok){ say(m,"申請しました。運営の審査後に公開されます。",true); $("#post-form").reset(); $("#p-months").value=3; $("#p-days").value=3; }
+  $("#post-submit").disabled=true;
+  const tags=[...document.querySelectorAll("#p-tags input:checked")].map(x=>x.value);
+  const skills=v("#p-skills").split(/[、,，]/).map(x=>x.trim()).filter(Boolean).slice(0,6);
+  const ok = await saveMine("submissions", { id:newId(), status:"pending", company:v("#p-company"), companyType:$("#p-ctype").value, title:v("#p-title"),
+    city:$("#p-city").value, category:$("#p-cat").value, industry:$("#p-ind").value, allowanceMin:min, allowanceMax:max,
+    months:Number($("#p-months").value)||3, daysPerWeek:Number($("#p-days").value)||3, hoursPerDay:Number($("#p-hours").value)||4, description:v("#p-desc"), requirements:v("#p-req"), skills, hiring:$("#p-hot").checked, tags, contact:v("#p-contact"),
+    conversion:$("#p-conv").checked, certificate:$("#p-cert").checked, noFeePledge:true, createdAt:new Date().toISOString() }, m);
+  $("#post-submit").disabled=false;
+  if (ok){ say(m,"申請しました。運営の審査後に公開されます。",true); $("#post-form").reset(); $("#p-months").value=3; $("#p-days").value=3; $("#p-hours").value=4; }
 });
-const STATUS = { pending:["審査中","warn"], approved:["公開中","ok"], rejected:["見送り","bad"] };
 function renderMine(){
-  const subs = (state.mine && Array.isArray(state.mine.submissions)) ? [...state.mine.submissions].reverse() : [];
-  $("#my-subs").replaceChildren(...subs.map(s => { const st=STATUS[s.status]||STATUS.pending; return h("div",{class:"li"},
-    h("div",null, h("div",{class:"t"},s.title), h("div",{class:"s"}, s.company+" ・ "+payText(s)+" VND/月")),
-    h("span",{class:"chip "+st[1]}, st[0])); }));
-  $("#my-subs-empty").hidden = subs.length>0;
+  const subs=(state.mine&&Array.isArray(state.mine.submissions))?[...state.mine.submissions].reverse():[];
+  $("#my-subs").replaceChildren(...subs.map(s=>{ const st=STATUS[s.status]||STATUS.pending; return h("div",{class:"li"},
+    h("div",{class:"top"}, h("div",null, h("div",{class:"t"},s.title), h("div",{class:"s"}, s.company+" ・ "+payText(s)+" VND/月")), h("span",{class:"chip "+st[1]}, st[0]))); }));
+  $("#my-subs-empty").hidden=subs.length>0;
 }
 
-// ---------- admin ----------
+// ---------- 運営 ----------
 function allOf(key){
-  const out=[]; for (const d of state.inbox){ const arr = d.data[key]; if (Array.isArray(arr)) for (const it of arr) out.push({owner:d.id, item:it}); }
+  const out=[]; for (const d of state.inbox){ const arr=d.data[key]; if (Array.isArray(arr)) for (const it of arr) out.push({owner:d.id,item:it}); }
   return out.sort((a,b)=>String(b.item.createdAt).localeCompare(String(a.item.createdAt)));
 }
-async function setSubStatus(owner, subId, status){
-  const ref = state.db.doc("inbox/"+owner);
-  const snap = await ref.get(); if (!snap.exists) return;
-  const cur = JSON.parse(JSON.stringify(snap.data()));
-  cur.submissions = (cur.submissions||[]).map(s => s.id===subId ? Object.assign(s,{status, reviewedAt:new Date().toISOString()}) : s);
-  await ref.set(cur);
+async function editOwner(owner, fn){
+  const ref=state.db.doc("inbox/"+owner); const snap=await ref.get(); if(!snap.exists) return;
+  const cur=JSON.parse(JSON.stringify(snap.data())); fn(cur); await ref.set(cur);
 }
-async function setAppStatus(owner, appId, status, sel){
-  sel.disabled = true;
+async function approve(owner, s, btn){ btn.disabled=true;
   try {
-    const ref = state.db.doc("inbox/"+owner);
-    const snap = await ref.get(); if (!snap.exists) return;
-    const cur = JSON.parse(JSON.stringify(snap.data()));
-    cur.applications = (cur.applications||[]).map(a => a.id===appId ? Object.assign(a,{status, statusAt:new Date().toISOString()}) : a);
-    await ref.set(cur);
-  } catch(e){ banner("状況を更新できませんでした。"); }
-  sel.disabled = false;
-}
-async function approve(owner, s, btn){
-  btn.disabled = true;
-  try {
-    const job = {company:s.company, companyType:s.companyType, title:s.title, city:s.city, category:s.category,
-      allowanceMin:s.allowanceMin, allowanceMax:s.allowanceMax, months:s.months, daysPerWeek:s.daysPerWeek,
-      description:s.description, conversion:!!s.conversion, certificate:!!s.certificate, noFeePledge:true,
-      submittedBy:owner, createdAt:new Date().toISOString()};
-    await state.db.doc("jobs/"+s.id).set(job);
-    await setSubStatus(owner, s.id, "approved");
+    await state.db.doc("jobs/"+s.id).set({company:s.company, companyType:s.companyType, title:s.title, city:s.city, category:s.category, industry:s.industry||"その他",
+      allowanceMin:s.allowanceMin, allowanceMax:s.allowanceMax, months:s.months, daysPerWeek:s.daysPerWeek, hoursPerDay:s.hoursPerDay||null, description:s.description, requirements:s.requirements||"", skills:s.skills||[], hiring:!!s.hiring, tags:s.tags||[],
+      conversion:!!s.conversion, certificate:!!s.certificate, noFeePledge:true, submittedBy:owner, createdAt:new Date().toISOString()});
+    await editOwner(owner, cur=>{ cur.submissions=(cur.submissions||[]).map(x=>x.id===s.id?Object.assign(x,{status:"approved",reviewedAt:new Date().toISOString()}):x); });
   } catch(e){ btn.disabled=false; banner("公開できませんでした。運営の権限（共有メニューで Editor 以上）が必要です。"); }
 }
-async function reject(owner, s, btn){
-  btn.disabled = true;
-  try { await setSubStatus(owner, s.id, "rejected"); } catch(e){ btn.disabled=false; banner("更新できませんでした。"); }
+async function reject(owner, s, btn){ btn.disabled=true;
+  try { await editOwner(owner, cur=>{ cur.submissions=(cur.submissions||[]).map(x=>x.id===s.id?Object.assign(x,{status:"rejected",reviewedAt:new Date().toISOString()}):x); }); }
+  catch(e){ btn.disabled=false; banner("更新できませんでした。"); }
 }
-async function unpublish(id, btn){
-  btn.disabled = true;
-  try { await state.db.doc("jobs/"+id).delete(); } catch(e){ btn.disabled=false; banner("停止できませんでした。"); }
+async function setAppStatus(owner, appId, status, sel){ sel.disabled=true;
+  try { await editOwner(owner, cur=>{ cur.applications=(cur.applications||[]).map(a=>a.id===appId?Object.assign(a,{status,statusAt:new Date().toISOString()}):a); }); }
+  catch(e){ banner("状況を更新できませんでした。"); }
+  sel.disabled=false;
+}
+function openAdminThread(owner, appId){
+  const find=()=>{ const d=state.inbox.find(x=>x.id===owner); return d && (d.data.applications||[]).find(a=>a.id===appId); };
+  const a=find(); if(!a) return;
+  const p=a.profile||{};
+  const holder=h("div"); const draw=()=>{ const cur=find(); holder.replaceChildren(threadView(cur&&cur.thread,"ops")); };
+  draw(); state.redrawThread = draw;
+  const ta=h("textarea",{"aria-label":"返信",maxlength:"800",placeholder:"面談の日程候補、企業からの質問など"});
+  const send=h("button",{class:"btn sm",type:"button"},"運営として送信");
+  send.addEventListener("click", async ()=>{ const text=ta.value.trim(); if(!text) return; send.disabled=true;
+    try { await editOwner(owner, cur=>{ cur.applications=(cur.applications||[]).map(x=>x.id===appId?Object.assign(x,{thread:[...(x.thread||[]),{from:"ops",text,at:new Date().toISOString()}]}):x); }); ta.value=""; }
+    catch(e){ banner("送信できませんでした。"); }
+    send.disabled=false; });
+  openPanel(p.name+" さんとのメッセージ", [h("p",{class:"s"}, a.jobTitle+"（"+a.company+"）"), profileSummary(p), holder, h("div",{class:"sendrow"}, ta, send)]);
 }
 function table(head, rows){
   if (!rows.length) return h("p",{class:"lead"},"まだありません。");
@@ -641,67 +876,59 @@ function table(head, rows){
 }
 function renderAdmin(){
   if (!state.isAdmin) return;
-  const subs = allOf("submissions"), pending = subs.filter(x=>x.item.status==="pending");
-  const apps = allOf("applications"), reports = allOf("reports");
-  $("#stats").replaceChildren(
-    ...[["掲載中",state.jobs.length],["審査待ち",pending.length],["応募",apps.length],["通報",reports.length]].map(([l,n]) => h("div",{class:"stat"}, h("div",{class:"n"},n), h("div",{class:"l"},l))));
-  $("#adm-pending").replaceChildren(table(["求人","会社","手当（VND/月）","期間","連絡先","操作"], pending.map(({owner,item:s}) => {
+  const subs=allOf("submissions"), pending=subs.filter(x=>x.item.status==="pending"), apps=allOf("applications"), reports=allOf("reports");
+  $("#stats").replaceChildren(...[["掲載中",state.jobs.length],["審査待ち",pending.length],["応募",apps.length],["通報",reports.length]].map(([l,n])=>h("div",{class:"stat"},h("div",{class:"n"},n),h("div",{class:"l"},l))));
+  $("#adm-pending").replaceChildren(table(["求人","会社","手当（VND/月）","条件","連絡先","操作"], pending.map(({owner,item:s})=>{
     const a=h("button",{class:"btn sm",type:"button"},"公開する"), r=h("button",{class:"btn ghost sm",type:"button"},"見送る");
     a.addEventListener("click",()=>approve(owner,s,a)); r.addEventListener("click",()=>reject(owner,s,r));
-    return h("tr",null, h("td",null, h("b",null,s.title), h("div",{class:"s"}, s.city+" ・ "+s.category), h("div",{class:"desc",style:"font-size:12.5px;color:var(--muted);max-width:40ch"}, s.description)),
-      h("td",null, s.company, h("div",null,typeChip(s.companyType))), h("td",{class:"num"}, vnd(s.allowanceMin)+"〜"+vnd(s.allowanceMax)),
-      h("td",null, s.months+"か月・週"+s.daysPerWeek+"日"), h("td",null, s.contact), h("td",null, h("div",{class:"acts"},a,r)));
+    return h("tr",null, h("td",null,h("b",null,s.title),h("div",{class:"s"},s.city+" ・ "+s.category+" ・ "+(s.industry||"")),h("div",{class:"s",style:"max-width:40ch;white-space:pre-wrap"},s.description)),
+      h("td",null,s.company,h("div",null,typeChip(s.companyType))), h("td",{class:"num"},vnd(s.allowanceMin)+"〜"+vnd(s.allowanceMax)),
+      h("td",null,workText(s), s.hiring?h("div",null,h("span",{class:"chip bad"},"積極採用中")):null, h("div",{class:"s"},(s.tags||[]).join("、")), s.skills&&s.skills.length?h("div",{class:"s"},"スキル："+s.skills.join("、")):null), h("td",null,s.contact), h("td",null,h("div",{class:"acts"},a,r)));
   })));
-  $("#adm-apps").replaceChildren(table(["日付","求人","応募者","大学・学年","語学","連絡先","ひとこと・自己PR","状況"], apps.map(({owner,item:a}) => {
-    const p = a.profile || {name:a.name, university:a.university, year:a.year, email:a.contact};
-    const sel = h("select",{"aria-label":"応募の状況"}, APP_STATUS.map(s => h("option",{selected: (a.status||"応募済み")===s}, s)));
-    sel.addEventListener("change", () => setAppStatus(owner, a.id, sel.value, sel));
-    return h("tr",null, h("td",{class:"num"},dateText(a.createdAt)), h("td",null, a.jobTitle, h("div",{class:"s"},a.company)),
-      h("td",null, p.name), h("td",null, [p.university,p.major,p.year].filter(Boolean).join("・")),
-      h("td",null, [p.jp&&p.jp!=="なし"?"日 "+p.jp:null, p.en&&p.en!=="なし"?"英 "+p.en:null].filter(Boolean).join(" / ")||"—"),
-      h("td",null, [p.email,p.phone].filter(Boolean).join(" / ")),
-      h("td",null, a.message||"—", p.pr ? h("div",{class:"s",style:"max-width:36ch"}, p.pr) : null, p.url ? h("div",{class:"s"}, p.url) : null),
-      h("td",null, sel));
+  $("#adm-apps").replaceChildren(table(["日付","求人","応募者","大学・学年","語学","連絡先","状況","メッセージ"], apps.map(({owner,item:a})=>{
+    const p=a.profile||{name:a.name,university:a.university,year:a.year,email:a.contact};
+    const sel=h("select",{"aria-label":"応募の状況"}, APP_STATUS.map(s=>h("option",{selected:(a.status||"応募済み")===s},s)));
+    sel.addEventListener("change",()=>setAppStatus(owner,a.id,sel.value,sel));
+    const last=(a.thread||[]).slice(-1)[0];
+    const mb=h("button",{class:"btn "+(last&&last.from==="student"?"":"ghost ")+"sm",type:"button"},"開く（"+(a.thread||[]).length+"）");
+    mb.addEventListener("click",()=>openAdminThread(owner,a.id));
+    return h("tr",null, h("td",{class:"num"},dateText(a.createdAt)), h("td",null,a.jobTitle,h("div",{class:"s"},a.company)), h("td",null,p.name),
+      h("td",null,[p.university,p.major,p.year].filter(Boolean).join("・")),
+      h("td",null,[p.jp&&p.jp!=="なし"?"日 "+p.jp:null,p.en&&p.en!=="なし"?"英 "+p.en:null].filter(Boolean).join(" / ")||"—"),
+      h("td",null,[p.email,p.phone].filter(Boolean).join(" / ")), h("td",null,sel), h("td",null,mb, last&&last.from==="student"?h("div",{class:"s"},"学生から新着"):null));
   })));
-  $("#adm-reports").replaceChildren(table(["日付","求人","理由"], reports.map(({item:r}) =>
-    h("tr",null, h("td",{class:"num"},dateText(r.createdAt)), h("td",null, r.jobTitle, h("div",{class:"s"},r.company)), h("td",null, h("span",{class:"chip bad"},r.reason))))));
-  $("#adm-live").replaceChildren(table(["求人","会社","手当（VND/月）","操作"], [...state.jobs].sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))).map(j => {
-    const b=h("button",{class:"btn danger sm",type:"button"},"掲載を止める"); b.addEventListener("click",()=>unpublish(j.id,b));
-    return h("tr",null, h("td",null, j.title, j.sample?h("span",{class:"chip warn",style:"margin-left:6px"},"サンプル"):null), h("td",null,j.company), h("td",{class:"num"}, vnd(j.allowanceMin)+"〜"+vnd(j.allowanceMax)), h("td",null,b));
+  $("#adm-reports").replaceChildren(table(["日付","求人","理由"], reports.map(({item:r})=>h("tr",null,h("td",{class:"num"},dateText(r.createdAt)),h("td",null,r.jobTitle,h("div",{class:"s"},r.company)),h("td",null,h("span",{class:"chip bad"},r.reason))))));
+  $("#adm-live").replaceChildren(table(["求人","会社","手当（VND/月）","操作"], sortJobs(state.jobs).map(j=>{
+    const b=h("button",{class:"btn danger sm",type:"button"},"掲載を止める");
+    b.addEventListener("click", async ()=>{ b.disabled=true; try { await state.db.doc("jobs/"+j.id).delete(); } catch(e){ b.disabled=false; banner("停止できませんでした。"); } });
+    return h("tr",null,h("td",null,j.title,j.sample?h("span",{class:"chip warn",style:"margin-left:6px"},"サンプル"):null),h("td",null,j.company),h("td",{class:"num"},vnd(j.allowanceMin)+"〜"+vnd(j.allowanceMax)),h("td",null,b));
   })));
+  if (state.redrawThread && !$("#panel").hidden) state.redrawThread();
 }
 
-// ---------- boot ----------
-function startMode(){
-  let saved = null, view = null;
-  try { saved = localStorage.getItem("ib-mode"); view = localStorage.getItem("ib-view"); } catch(e){}
-  setMode(modeFromHash() || saved, view);
-}
-startMode();
-renderBrowse(); renderMine(); renderMyApps();
+// ---------- 起動 ----------
+function startMode(){ let saved=null, view=null; try { saved=localStorage.getItem("ib-mode"); view=localStorage.getItem("ib-view"); } catch(e){} setMode(modeFromHash()||saved, view); }
+startMode(); renderBrowse(); renderMine(); renderMyApps(); renderKeep();
 
-(async () => {
+(async ()=>{
   const db = await window.claude?.use?.("db") ?? null;
   const user = await window.claude?.use?.("user") ?? null;
   state.db = db;
-  if (!db){ banner("この表示ではデータを読み込めません。claude.ai 上でページを開いてください。"); $("#count").textContent=""; return; }
+  if (!db){ banner("この表示ではデータを読み込めません。claude.ai 上でページを開いてください。"); return; }
   state.uid = user ? await user.id() : null;
   state.isAdmin = user ? await user.canEdit() : false;
-  if (state.isAdmin){ $("#door-admin").hidden = false; if (!state.mode) startMode(); }
-
-  db.collection("jobs").onSnapshot(snap => {
-    state.jobs = snap.docs.map(d => Object.assign({id:d.id}, d.data()));
-    renderBrowse(); renderAdmin();
-    if (state.openJob && !state.jobs.find(j=>j.id===state.openJob)) closePanel();
-  }, () => banner("求人を読み込めませんでした。ページを開き直してください。"));
-
+  if (state.isAdmin){ $("#door-admin").hidden=false; if (!state.mode) startMode(); }
+  db.collection("jobs").onSnapshot(snap=>{
+    state.jobs = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
+    renderBrowse(); renderAdmin(); renderKeep(); renderMyApps();
+    if (state.openJob && !jobById(state.openJob)) closePanel();
+  }, ()=>banner("求人を読み込めませんでした。ページを開き直してください。"));
   if (state.uid){
-    db.doc("inbox/"+state.uid).onSnapshot(s => { state.mine = s.exists ? s.data() : null; renderMine(); renderMyApps(); renderBrowse(); }, ()=>{});
-    db.doc("data/users/"+state.uid+"/profile").onSnapshot(s => { state.profile = s.exists ? s.data() : null; fillProfile(); }, ()=>{});
+    db.doc("inbox/"+state.uid).onSnapshot(s=>{ state.mine=s.exists?s.data():null; renderMine(); renderMyApps(); renderBrowse(); }, ()=>{});
+    db.doc("data/users/"+state.uid+"/profile").onSnapshot(s=>{ state.profile=s.exists?s.data():null; fillProfile(); renderBrowse(); renderMbar(state.view); }, ()=>{});
+    db.doc("data/users/"+state.uid+"/keep").onSnapshot(s=>{ const d=s.exists?s.data():null; state.keep=d&&Array.isArray(d.ids)?d.ids:[]; renderKeep(); renderBrowse(); }, ()=>{});
   }
-  if (state.isAdmin) db.collection("inbox").onSnapshot(snap => {
-    state.inbox = snap.docs.map(d => ({id:d.id, data:d.data()})); renderAdmin();
-  }, ()=>{});
+  if (state.isAdmin) db.collection("inbox").onSnapshot(snap=>{ state.inbox=snap.docs.map(d=>({id:d.id,data:d.data()})); renderAdmin(); }, ()=>{});
 })();
 })();
 </script>
