@@ -834,7 +834,7 @@ async function runSuggestPosition() {
   setStatus('suggest', 'loading', 'プロフィールを取得中...');
   $('suggest-btn').disabled = true;
   $('suggest-result').style.display = 'none';
-  _usageTally = { calls: [], cost: 0, firmBreakdown: '' };
+  _usageTally = { calls: [], cost: 0, firmBreakdown: '', matchInfo: '', profileInfo: '', detailNote: '' };
 
   let profileData;
   try {
@@ -956,6 +956,12 @@ async function suggestPosition(apiKey, profileText) {
   // 検索に渡した職務経歴の長さも出す。短すぎる場合、ページからプロフィールを
   // 取り切れておらず、経歴の後半（前職・前々職）が検索に効いていない可能性がある
   console.log(`[Snow-we] 検索に使う職務経歴: ${profileText.length}文字`);
+  // コンソールを開かないと分からない状態だったので、画面の診断にも出す。
+  // 提案が0件だったとき、経歴を取り切れていないのかどうかがここで分かる
+  if (_usageTally) {
+    _usageTally.profileInfo = `検索に使った職務経歴: ${profileText.length.toLocaleString()}文字`
+      + (profileText.length < 500 ? '（短すぎます。ページから経歴を取り切れていない可能性があります）' : '');
+  }
   setStatus('suggest', 'loading', `${all.length}件から候補者に近い求人を検索中...`);
   let shortlist = [];
   let matchInfo = '';
@@ -1044,14 +1050,29 @@ ${profileText}
 
   // ── Step 2: 絞り込んだ分だけ要件付きで取り直し、詳細ランキング ──
   setStatus('suggest', 'loading', `Step2: ${shortlist.length}件を詳細分析中...`);
+  // 募集要件の取得に失敗しても提案自体は続けるが、黙って続けてはいけない。
+  // 要件が無いとAIはポジション名だけで判断することになり、プロンプトが
+  // 「募集要件を精読して合致するものだけ」と求めているため、結果が0件になる。
+  // 実機でそうなり、画面には「分析完了」とだけ出て原因が分からなかった
   let detailed = shortlist;
+  let detailNote = '';
   try {
     const detailRes = await chrome.runtime.sendMessage({
       type: 'getPositionDetails',
       ids: shortlist.map(p => p.id),
     });
-    if (detailRes?.positions?.length) detailed = detailRes.positions;
-  } catch (_) {}
+    if (detailRes?.positions?.length) {
+      detailed = detailRes.positions;
+      const withReq = detailed.filter(p => p.description).length;
+      if (withReq === 0) detailNote = `募集要件: ${detailed.length}件すべて空でした（ポジション名だけで判断しています）`;
+      else if (withReq < detailed.length) detailNote = `募集要件: ${detailed.length}件中 ${withReq}件のみ取得できました`;
+    } else {
+      detailNote = `募集要件: 取得できませんでした（${detailRes?.error || '0件'}）。ポジション名だけで判断しています`;
+    }
+  } catch (e) {
+    detailNote = `募集要件: 取得に失敗しました（${e.message}）。ポジション名だけで判断しています`;
+  }
+  if (detailNote && _usageTally) _usageTally.detailNote = detailNote;
 
   const detailList = detailed
     .map(p => p.description ? `${p.label}: ${p.description}` : p.label)
@@ -1141,6 +1162,25 @@ function renderSuggestion(result) {
   const container = $('suggest-cards');
   container.innerHTML = '';
 
+  // 0件のときに何も出さないと、「分析完了」とだけ表示されて画面が空になる。
+  // 実機でこの状態になり、動いていないのか合う求人が無いのか分からなかった
+  if (!(result.suggestions || []).length) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'padding:12px;background:#FEF3C7;border-radius:6px;'
+      + 'font-size:12px;color:#92400E;line-height:1.8;';
+    empty.innerHTML = `
+      <div style="font-weight:600;margin-bottom:4px;">合致するポジションが見つかりませんでした</div>
+      考えられる原因：
+      <br>・職務経歴が十分に読み取れていない（下の診断で文字数を確認してください）
+      <br>・募集要件を取得できず、ポジション名だけで判断している
+      <br>・本当に合うポジションが無い
+      <br><br>下の診断に「募集要件」の行が出ている場合は、そこが原因です。
+    `;
+    container.appendChild(empty);
+    renderSuggestDiagnostics(container);
+    return;
+  }
+
   (result.suggestions || []).forEach((s, i) => {
     const score = s.match_score || 0;
     const card = document.createElement('div');
@@ -1223,6 +1263,8 @@ function renderSuggestDiagnostics(container) {
     </div>
     <div>${perCall}</div>
     ${t.matchInfo ? `<div style="margin-top:4px;">${escapeHtml(t.matchInfo)}</div>` : ''}
+    ${t.profileInfo ? `<div style="margin-top:4px;">${escapeHtml(t.profileInfo)}</div>` : ''}
+    ${t.detailNote ? `<div style="margin-top:4px;color:#92400E;">${escapeHtml(t.detailNote)}</div>` : ''}
     ${t.firmBreakdown ? `<div style="margin-top:4px;">絞り込み: ${escapeHtml(t.firmBreakdown)}</div>` : ''}
   `;
   container.appendChild(el);
