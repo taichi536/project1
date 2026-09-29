@@ -1129,10 +1129,36 @@ window.addEventListener('snowwe:request', e => {
     const candidateId = `${platform}_room_${m[1]}`;
     console.log('[Snow-we] 送信リクエストを検知:', candidateId);
 
-    // 送信が成立した時点では、その候補者の詳細パネルが開いている
-    const panel = platform === 'rds' ? findRDSDetailPanel() : null;
-    const info = panel ? extractBasicInfo(panel) : {};
-    recordScoutSent(candidateId, info, '', '', _cachedCurrentPosition);
+    // 候補者の情報は、スカウトボタンを押した時点で取れているものを使う。
+    // 送信が成立した時点では送信用の画面に切り替わっていて、詳細パネルから
+    // 読み直せないことがある（実機で会社名が空のまま記録された）
+    let info = {};
+    let templateName = '';
+    let bodyText = '';
+    let fallbackPosition = _cachedCurrentPosition;
+    try {
+      const raw = sessionStorage.getItem('pendingScout');
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (p && Date.now() - p.ts < 30 * 60 * 1000) {
+          info = p.info || {};
+          templateName = p.templateName || '';
+          bodyText = p.bodyText || '';
+          fallbackPosition = p.fallbackPosition || fallbackPosition;
+        }
+      }
+    } catch (_) {}
+    sessionStorage.removeItem('pendingScout');
+
+    // それでも取れていなければ、その場の詳細パネルから読み直す
+    if (!info.company) {
+      const panel = platform === 'rds' ? findRDSDetailPanel() : null;
+      if (panel) info = extractBasicInfo(panel);
+    }
+    if (!info.company) {
+      console.warn('[Snow-we] 送信は検知しましたが候補者情報を取れませんでした:', candidateId);
+    }
+    recordScoutSent(candidateId, info, templateName, bodyText, fallbackPosition);
   } catch (err) {
     console.warn('[Snow-we] 送信リクエストの処理に失敗:', err && err.message);
   }
@@ -2401,7 +2427,9 @@ document.addEventListener('click', e => {
   // ただし切り替えるのは net-hook.js が動いていることを確認できた場合だけにする。
   // フックが動かない環境で一本化すると、記録が丸ごと止まってしまうため
   if (getPlatform() === 'rds' && _netHookAlive) {
-    sessionStorage.removeItem('pendingScout');
+    // pendingScout はここで消さない。スカウトボタンを押した時点で取れている
+    // 候補者情報（会社名・年齢・大学）とテンプレート名が入っており、送信検知側が
+    // これを使う。以前ここで消しており、会社名が空のまま記録されていた
     console.log('[Snow-we] RDS: 記録は送信リクエストの検知に任せます');
     return;
   }
