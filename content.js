@@ -1104,11 +1104,16 @@ async function patchScoutHistory(candidateId, patch) {
 // 文言を足しても次の変更でまた止まるので、送信リクエストそのものを見る。
 //
 // 検知した通信は net-hook.js（ページ側の世界）から CustomEvent で渡ってくる。
+// URLの数字は「自社のスカウトルーム」を指しており、候補者ごとには変わらない。
+// 実機で別々の候補者2人に送ったところ、どちらも同じ 1678665 になった。
+// これを候補者の識別子に使うと全員が1つに潰れ、重複判定で5分に1件しか
+// 記録されなくなる。あくまで「送信された」という合図としてのみ使う。
+//
+// 候補者の特定は、スカウトボタンを押した時点で作られる pendingScout に入って
+// いる会員IDベースの識別子を使う（rds_mid_...）。こちらは候補者ごとに固有。
 const SEND_REQUESTS = {
   // 実機で確認: POST .../scouting/scoutroom/1678665/scout → 200
-  // URLの数字がその候補者とのやり取りを指すので、候補者の識別子として使える。
-  // 表示テキストから作るハッシュと違い、画面が変わってもぶれない
-  rds: /\/scouting\/scoutroom\/(\d+)\/scout(?:\?|$)/,
+  rds: /\/scouting\/scoutroom\/\d+\/scout(?:\?|$)/,
 };
 
 // net-hook.js が生きているか。生きていなければボタン検知の従来経路に任せる。
@@ -1123,15 +1128,13 @@ window.addEventListener('snowwe:request', e => {
     const platform = getPlatform();
     const pattern = SEND_REQUESTS[platform];
     if (!pattern || !url) return;
-    const m = String(url).match(pattern);
-    if (!m) return;
+    if (!pattern.test(String(url))) return;
+    console.log('[Snow-we] 送信リクエストを検知');
 
-    const candidateId = `${platform}_room_${m[1]}`;
-    console.log('[Snow-we] 送信リクエストを検知:', candidateId);
-
-    // 候補者の情報は、スカウトボタンを押した時点で取れているものを使う。
+    // 候補者は、スカウトボタンを押した時点の pendingScout から取る。
     // 送信が成立した時点では送信用の画面に切り替わっていて、詳細パネルから
     // 読み直せないことがある（実機で会社名が空のまま記録された）
+    let candidateId = '';
     let info = {};
     let templateName = '';
     let bodyText = '';
@@ -1140,7 +1143,8 @@ window.addEventListener('snowwe:request', e => {
       const raw = sessionStorage.getItem('pendingScout');
       if (raw) {
         const p = JSON.parse(raw);
-        if (p && Date.now() - p.ts < 30 * 60 * 1000) {
+        if (p && p.id && Date.now() - p.ts < 30 * 60 * 1000) {
+          candidateId = p.id;
           info = p.info || {};
           templateName = p.templateName || '';
           bodyText = p.bodyText || '';
@@ -1150,13 +1154,27 @@ window.addEventListener('snowwe:request', e => {
     } catch (_) {}
     sessionStorage.removeItem('pendingScout');
 
-    // それでも取れていなければ、その場の詳細パネルから読み直す
-    if (!info.company) {
+    // 取れていなければ、その場の詳細パネルから読み直す
+    if (!candidateId) {
       const panel = platform === 'rds' ? findRDSDetailPanel() : null;
-      if (panel) info = extractBasicInfo(panel);
+      if (panel) {
+        candidateId = getCandidateId(panel) || '';
+        if (!info.company) info = extractBasicInfo(panel);
+      }
     }
-    if (!info.company) {
-      console.warn('[Snow-we] 送信は検知しましたが候補者情報を取れませんでした:', candidateId);
+
+    // 候補者を特定できないまま記録すると、全員が同じ行に潰れるより悪い
+    // （誰への送信か分からない記録が残る）。記録せず、その場で知らせる
+    if (!candidateId) {
+      console.warn('[Snow-we] 送信は検知しましたが候補者を特定できませんでした');
+      try {
+        showAutoStatus(
+          '⚠️ この送信は記録されませんでした（候補者を特定できていません）。'
+          + '管理者に、いまの画面と操作手順を伝えてください',
+          12000,
+        );
+      } catch (_) {}
+      return;
     }
     recordScoutSent(candidateId, info, templateName, bodyText, fallbackPosition);
   } catch (err) {
