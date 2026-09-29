@@ -1096,6 +1096,56 @@ async function patchScoutHistory(candidateId, patch) {
 }
 
 // 直近に記録した候補者IDと時刻。同一候補者が短時間に何度も記録されるのを防ぐ
+// ── 記録できなかった送信を、拡張機能自身が報告する ──────────────
+//
+// これまでは、記録が止まっても画面に何も出ず、誰かが気づいて言ってくるまで
+// 分からなかった。実データで、ある担当者のRDSの送信45%が記録されておらず、
+// 15日間放置されていた。警告を画面に出すようにしても、見るかどうかは人次第で、
+// 「気づいた人が報告する」設計のままでは同じことが起きる。
+//
+// 記録に至らなかった事実そのものを残す。誰も何もしなくても、翌日にはSQLで
+// 分かる。次に掲載側が画面を変えたときも、報告を待たずに気づける。
+//
+// 個人情報は入れない。原因の切り分けに要るものだけを残す。
+// 書き込み先はSupabaseで、拡張機能の接続が切れていても動く経路を使う
+// （background経由だと、切れているときに報告自体が届かない）。
+// 直近に押されたボタンの文言。認識できなかった送信ボタンが何だったかを
+// 失敗の報告に添えるために覚えておく。これが無いと「認識できなかった」ことしか
+// 分からず、何を認識対象に加えればよいかが分からない
+let _lastButtonText = '';
+let _lastButtonAt = 0;
+// 認識できた送信ボタンが最後に押された時刻。送信の通信を検知したのに直前に
+// 認識済みの送信ボタンが無ければ、ボタンの検知に失敗したことになる
+let _lastRecognizedSendAt = 0;
+// 同じパスを何度も送らないための記録
+const _reportedPaths = new Map();
+
+async function reportRecordFailure(reason, extra = {}) {
+  try {
+    let recruiter = _cachedRecruiterName || '';
+    try {
+      const r = await chrome.storage.local.get(['gasSettings', 'recruiterName']);
+      recruiter = (r.gasSettings && r.gasSettings.recruiter) || r.recruiterName || recruiter;
+    } catch (_) {}
+    let version = '';
+    try { version = chrome.runtime.getManifest().version; } catch (_) {}
+
+    console.warn('[Snow-we] 記録できませんでした:', reason, extra);
+    await supabaseInsert('scout_record_failures', {
+      recruiter_name: recruiter,
+      platform: getPlatform() || '',
+      reason,
+      button_text: (extra.buttonText || '').slice(0, 200),
+      // 通信のパスが分かっている場合はそちらを残す。媒体ごとの送信APIを
+      // 特定するための手がかりになる
+      page_path: (extra.path || (() => { try { return location.pathname; } catch (_) { return ''; } })()).slice(0, 300),
+      ext_version: version,
+    });
+  } catch (e) {
+    console.warn('[Snow-we] 記録失敗の報告に失敗:', e && e.message);
+  }
+}
+
 // ── 送信そのものを検知して記録する ──────────────────────────
 //
 // ボタンの表示文字列で検知していたため、掲載側が文言を変えたり、担当者によって
@@ -1127,9 +1177,39 @@ window.addEventListener('snowwe:request', e => {
     const { url } = e.detail || {};
     const platform = getPlatform();
     const pattern = SEND_REQUESTS[platform];
-    if (!pattern || !url) return;
-    if (!pattern.test(String(url))) return;
+    if (!url) return;
+
+    // 送信のURLがまだ分かっていない媒体で、それらしい通信を拾って記録する。
+    // これが無いと、媒体ごとに誰かが開発者ツールを開いて送信の通信を
+    // 探す作業が要る。スカウト系のボタンを押した直後の通信に限るので、
+    // 無関係な通信は入らない
+    if (!pattern || !pattern.test(String(url))) {
+      try {
+        const path = new URL(String(url), location.origin).pathname;
+        const looksLikeSend = /scout|message|offer|approach|mail|send/i.test(path);
+        const inScoutFlow = Date.now() - _lastButtonAt < 60 * 1000;
+        const alreadyReported = Date.now() - (_reportedPaths.get(path) || 0) < 30 * 60 * 1000;
+        if (looksLikeSend && inScoutFlow && !alreadyReported) {
+          _reportedPaths.set(path, Date.now());
+          reportRecordFailure('送信の可能性がある通信（未登録）', {
+            buttonText: _lastButtonText,
+            path,
+          });
+        }
+      } catch (_) {}
+      return;
+    }
+
     console.log('[Snow-we] 送信リクエストを検知');
+
+    // 送信の通信は来たのに、直前に認識できた送信ボタンが無い。
+    // ボタンの文言との照合に失敗している状態で、これが記録漏れの原因になる。
+    // 何のボタンが押されたのかを残しておけば、認識対象に加えられる
+    if (Date.now() - _lastRecognizedSendAt > 60 * 1000 && _lastButtonText) {
+      reportRecordFailure('送信ボタンを認識できていない（通信で検知）', {
+        buttonText: _lastButtonText,
+      });
+    }
 
     // 候補者は、スカウトボタンを押した時点の pendingScout から取る。
     // 送信が成立した時点では送信用の画面に切り替わっていて、詳細パネルから
@@ -1166,7 +1246,7 @@ window.addEventListener('snowwe:request', e => {
     // 候補者を特定できないまま記録すると、全員が同じ行に潰れるより悪い
     // （誰への送信か分からない記録が残る）。記録せず、その場で知らせる
     if (!candidateId) {
-      console.warn('[Snow-we] 送信は検知しましたが候補者を特定できませんでした');
+      reportRecordFailure('送信は検知できたが候補者を特定できない');
       try {
         showAutoStatus(
           '⚠️ この送信は記録されませんでした（候補者を特定できていません）。'
@@ -2020,6 +2100,14 @@ document.addEventListener('click', e => {
   // 文字をまとめて吸収できる
   const textCore = textCompact.replace(/[^぀-ヿ一-鿿]/g, '');
 
+  // 押されたボタンを覚えておく。送信の通信を検知したときに、直前に何が押されたかを
+  // 失敗の報告に添えるため。これが無いと「認識できなかった」ことしか残らず、
+  // 何を認識対象に加えればよいかが分からない
+  if (textCore) {
+    _lastButtonText = textCore.slice(0, 60);
+    _lastButtonAt = Date.now();
+  }
+
   // AMBI: 「送信」を押した後に「スカウトを送信しますか？」という確認ダイアログが
   // 出ることがある(実機で確認)。pendingScoutConfirmが無い場合は無関係な別のダイアログの
   // 可能性が高いので何もしない(はい/いいえは他の場面でも使われがちな一般的な文言のため)
@@ -2070,6 +2158,7 @@ document.addEventListener('click', e => {
       // 36%の送信が記録されていなかったのに、画面上は何の変化も無かった。
       // 送信に当たるボタンが認識できていない場合は、その場で知らせる
       if (/送信|スカウト/.test(textCore)) {
+        reportRecordFailure('送信に当たるボタンを認識できない', { buttonText: textCore });
         try {
           showAutoStatus(
             `⚠️ 「${textCore}」は記録対象として認識できていません。`
@@ -2083,6 +2172,7 @@ document.addEventListener('click', e => {
   }
 
   console.log('[Snow-we] スカウト系ボタン検知:', JSON.stringify(text));
+  if (isSendBtn) _lastRecognizedSendAt = Date.now();
 
   // 拡張機能との接続が切れていると、この先の記録処理は必ず失敗する。
   // 送信してから失敗に気づいても手遅れ（記録は復元できない）なので、
@@ -2497,7 +2587,7 @@ document.addEventListener('click', e => {
   // 実データで、ある担当者のRDSだけ25分間に19件連続で記録が消えており、
   // 前後の別媒体は正常だったため、気づく手がかりがまったく無かった
   if (!raw) {
-    console.warn('[Snow-we] 送信を検知しましたが候補者を特定できず、記録できませんでした:', getPlatform());
+    reportRecordFailure('送信ボタンは押されたが候補者を特定できない', { buttonText: textCore });
     try {
       showAutoStatus(
         '⚠️ この送信は記録されませんでした（候補者を特定できていません）。'
