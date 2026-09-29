@@ -9,3 +9,14 @@ package-lock.json
 
 # 拡張機能の署名鍵（絶対にコミットしない。紛失すると拡張機能IDが変わる）
 *.pem
+
+# macOSが作る表示設定
+.DS_Store
+
+# 株式アラート（別プロジェクト）
+modules/
+diary.db
+
+# 手元の分析スクリプト
+*.py
+__pycache__/
