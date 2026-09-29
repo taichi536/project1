@@ -1301,7 +1301,10 @@ function stashUnsentRecord(payload) {
     // 際限なく貯まらないよう上限を設ける（古いものから捨てる）
     while (list.length > 500) list.shift();
     localStorage.setItem(UNSENT_KEY, JSON.stringify(list));
-    console.warn('[Snow-we] 記録を送信できなかったため一時保存しました。ページ再読み込み時に再送します:', payload.candidateId);
+    // この関数は送信を試みる「前」に必ず呼ばれる（失敗しても記録が消えないように
+    // 先に控えを取る設計）。以前は失敗時の文言を出していたため、成功していても
+    // 毎回「送信できなかった」と表示され、切り分けの邪魔になっていた
+    console.log('[Snow-we] 記録の控えを取りました（送信できなければ次回の再読み込みで再送）:', payload.candidateId);
   } catch (e) {
     console.warn('[Snow-we] 一時保存に失敗:', e.message);
   }
