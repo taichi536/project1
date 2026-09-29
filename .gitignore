@@ -17,6 +17,7 @@ package-lock.json
 modules/
 diary.db
 
-# 手元の分析スクリプト
-*.py
+# 手元の分析スクリプト（リポジトリ直下に置いたもの）。
+# tools/ 配下は共有する道具なので対象外にする
+/*.py
 __pycache__/
