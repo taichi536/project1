@@ -1096,6 +1096,48 @@ async function patchScoutHistory(candidateId, patch) {
 }
 
 // 直近に記録した候補者IDと時刻。同一候補者が短時間に何度も記録されるのを防ぐ
+// ── 送信そのものを検知して記録する ──────────────────────────
+//
+// ボタンの表示文字列で検知していたため、掲載側が文言を変えたり、担当者によって
+// 通る画面が違ったりすると、その瞬間から記録が止まっていた。実データで、ある担当者の
+// RDSだけ送信の36〜52%が記録されておらず、25分間に19件連続で消えた時間帯もあった。
+// 文言を足しても次の変更でまた止まるので、送信リクエストそのものを見る。
+//
+// 検知した通信は net-hook.js（ページ側の世界）から CustomEvent で渡ってくる。
+const SEND_REQUESTS = {
+  // 実機で確認: POST .../scouting/scoutroom/1678665/scout → 200
+  // URLの数字がその候補者とのやり取りを指すので、候補者の識別子として使える。
+  // 表示テキストから作るハッシュと違い、画面が変わってもぶれない
+  rds: /\/scouting\/scoutroom\/(\d+)\/scout(?:\?|$)/,
+};
+
+// net-hook.js が生きているか。生きていなければボタン検知の従来経路に任せる。
+// 通信の検知に一本化したあとでフックが動かない環境があると、記録が丸ごと
+// 止まってしまうため、切り替えは「フックが動いていることを確認できた場合」に限る
+let _netHookAlive = false;
+
+window.addEventListener('snowwe:request', e => {
+  try {
+    _netHookAlive = true;
+    const { url } = e.detail || {};
+    const platform = getPlatform();
+    const pattern = SEND_REQUESTS[platform];
+    if (!pattern || !url) return;
+    const m = String(url).match(pattern);
+    if (!m) return;
+
+    const candidateId = `${platform}_room_${m[1]}`;
+    console.log('[Snow-we] 送信リクエストを検知:', candidateId);
+
+    // 送信が成立した時点では、その候補者の詳細パネルが開いている
+    const panel = platform === 'rds' ? findRDSDetailPanel() : null;
+    const info = panel ? extractBasicInfo(panel) : {};
+    recordScoutSent(candidateId, info, '', '', _cachedCurrentPosition);
+  } catch (err) {
+    console.warn('[Snow-we] 送信リクエストの処理に失敗:', err && err.message);
+  }
+});
+
 const _recentlyRecorded = new Map();
 const RECORD_DEDUPE_MS = 5 * 60 * 1000;
 
@@ -2351,6 +2393,16 @@ document.addEventListener('click', e => {
   }
 
   // ── 送信ボタン：スカウト記録 ──
+
+  // RDSは送信リクエストの検知に一本化した。二重に記録しないよう、ここでは何もしない。
+  // ただし切り替えるのは net-hook.js が動いていることを確認できた場合だけにする。
+  // フックが動かない環境で一本化すると、記録が丸ごと止まってしまうため
+  if (getPlatform() === 'rds' && _netHookAlive) {
+    sessionStorage.removeItem('pendingScout');
+    console.log('[Snow-we] RDS: 記録は送信リクエストの検知に任せます');
+    return;
+  }
+
   let raw = sessionStorage.getItem('pendingScout');
   console.log('[Snow-we] 送信クリック / pendingScout:', raw ? 'あり' : 'なし');
   sessionStorage.removeItem('pendingScout');
