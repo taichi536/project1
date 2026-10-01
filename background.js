@@ -357,6 +357,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'snowWeAnomalyCheck') checkAnomalies();
   if (alarm.name === 'snowWeGasQueueFlush') flushGasScoutQueue();
   if (alarm.name === 'snowWeSupabaseQueueFlush') flushSupabaseScoutQueue();
+  if (alarm.name === 'snowWeHeartbeat') sendHeartbeat('alarm');
 });
 
 // ── スカウト記録のバッチ送信キュー ──────────────────────────────────────
@@ -885,6 +886,94 @@ async function flushSupabaseScoutQueue() {
     await chrome.storage.local.set({ supabaseScoutQueue: merged });
   });
 }
+
+// ── 生存報告 ────────────────────────────────────────────────────────────
+// 自動記録のいちばんの盲点は「拡張が動いていない人がいても誰も気づけない」ことだった。
+// 実データで担当者ごとにバージョン1.27と1.36が混在していた。ある人の記録がゼロでも、
+// 送っていないのか、拡張が無効・古い・別プロファイル・別ブラウザなのかが区別できず、
+// 他のどの集計も信用できなくなる。
+//
+// ブラウザが動いている間だけ定期的に状態を報告する。報告が来ない＝その端末では
+// 拡張が動いていない、という読み方ができるようにするため、追記のみで履歴を残す
+// （1端末あたり1日6件程度）。最新の状態は install_id ごとの最新行を見る。
+async function getInstallId() {
+  const { snowWeInstallId } = await chrome.storage.local.get(['snowWeInstallId']);
+  if (snowWeInstallId) return snowWeInstallId;
+  // 同じ担当者が2台のPCやプロファイルで使っている場合を区別するための端末識別子。
+  // 個人を特定する情報は含めない（ランダム値）
+  const id = (self.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  await chrome.storage.local.set({ snowWeInstallId: id });
+  return id;
+}
+
+async function sendHeartbeat(trigger) {
+  try {
+    const store = await chrome.storage.local.get([
+      'gasSettings', 'recruiterName', 'scoutHistory', 'supabaseScoutQueue', 'gasScoutQueue',
+    ]);
+    const installId = await getInstallId();
+    const recruiter = (store.gasSettings && store.gasSettings.recruiter) || store.recruiterName || '';
+
+    // ローカルの記録から、その端末が実際に使われているかを数える。
+    // 未送信の滞留件数も一緒に出す（記録はしたが届いていない件が溜まっていても
+    // これまで誰も見ていなかった＝分類Eの盲点）
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    let lastScoutAt = 0;
+    let scouts1d = 0;
+    let scouts7d = 0;
+    for (const h of Object.values(store.scoutHistory || {})) {
+      const t = Number(h && h.date) || 0;
+      if (!t) continue;
+      if (t > lastScoutAt) lastScoutAt = t;
+      if (now - t < DAY) scouts1d++;
+      if (now - t < 7 * DAY) scouts7d++;
+    }
+
+    let version = '';
+    try { version = chrome.runtime.getManifest().version; } catch (_) {}
+
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/extension_heartbeats`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify({
+        install_id: installId,
+        recruiter_name: recruiter,
+        ext_version: version,
+        trigger_source: trigger,
+        browser: (navigator.userAgent || '').slice(0, 200),
+        last_scout_at: lastScoutAt ? new Date(lastScoutAt).toISOString() : null,
+        scouts_1d: scouts1d,
+        scouts_7d: scouts7d,
+        queued_supabase: (store.supabaseScoutQueue || []).length,
+        queued_gas: (store.gasScoutQueue || []).length,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    console.log(`[Snow-we] 生存報告を送信しました (${trigger}) 担当者:"${recruiter}" 版:${version}`);
+  } catch (e) {
+    // 報告が失敗しても本来の動作には影響させない。報告が届かないこと自体が
+    // 「その端末では動いていない」という同じ結論になる
+    console.warn('[Snow-we] 生存報告に失敗:', e && e.message);
+  }
+}
+
+// 4時間おき。ブラウザを開いた日は必ず1件以上届くため「その日動いていたか」が分かる。
+// ブラウザを閉じている間は届かないが、それは報告すべき状態ではないので問題にしない
+chrome.alarms.get('snowWeHeartbeat', (existing) => {
+  if (!existing) {
+    chrome.alarms.create('snowWeHeartbeat', { delayInMinutes: 2, periodInMinutes: 4 * 60 });
+  }
+});
+chrome.runtime.onStartup.addListener(() => sendHeartbeat('startup'));
+chrome.runtime.onInstalled.addListener(details => sendHeartbeat(details.reason || 'installed'));
 
 // scoutHistoryの1件だけを、書き込み直前に読み直してから安全に更新する
 // （content.js側の同名ヘルパーと同じ考え方。詳細はそちらのコメント参照）
