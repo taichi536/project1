@@ -2157,7 +2157,13 @@ document.addEventListener('click', e => {
       // コンソールに出すだけでは誰も気づけない。実データで、ある担当者のRDSだけ
       // 36%の送信が記録されていなかったのに、画面上は何の変化も無かった。
       // 送信に当たるボタンが認識できていない場合は、その場で知らせる
-      if (/送信|スカウト/.test(textCore)) {
+      // 「スカウト」を含むだけで拾うと、ボタンですらない表示まで失敗として
+      // 記録される。実データで「スカウト履歴あり」「スカウトルーム一覧」
+      // 「このスカウトルームで探す」が大量に入り、本物の失敗が埋もれた。
+      // 送信を表す語を含み、かつ一覧・検索・履歴の語を含まないものに限る
+      const looksLikeSend = /送信|送る/.test(textCore)
+        && !/履歴|一覧|探す|検索|条件|設定|テンプレート/.test(textCore);
+      if (looksLikeSend) {
         reportRecordFailure('送信に当たるボタンを認識できない', { buttonText: textCore });
         try {
           showAutoStatus(
