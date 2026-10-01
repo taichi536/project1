@@ -801,6 +801,58 @@ async function recordSupabaseFailure() {
   console.warn(`[Snow-we] Supabaseサーキットブレーカー作動: 連続失敗${consecutiveFailures}回、次回再送まで約${Math.round(waitMs / 1000)}秒待機`);
 }
 
+const SUPABASE_PERMANENT_MAX_ATTEMPTS = 3;
+const SUPABASE_DEAD_LETTER_MAX = 200;
+
+// 送り直しても結果が変わらない失敗か。ステータスが無い（通信自体の失敗・タイムアウト）は
+// 一時的なものとして扱う
+function isPermanentSupabaseError(reason) {
+  const status = reason && reason.status;
+  if (!status) return false;
+  if (status === 408 || status === 429) return false;
+  return status >= 400 && status < 500;
+}
+
+async function moveToSupabaseDeadLetter(items) {
+  try {
+    const { supabaseDeadLetter } = await chrome.storage.local.get(['supabaseDeadLetter']);
+    const list = (supabaseDeadLetter || []).concat(items.map(it => ({ ...it, _deadAt: Date.now() })));
+    await chrome.storage.local.set({ supabaseDeadLetter: list.slice(-SUPABASE_DEAD_LETTER_MAX) });
+  } catch (_) {}
+
+  let recruiter = '';
+  let version = '';
+  try {
+    const r = await chrome.storage.local.get(['gasSettings', 'recruiterName']);
+    recruiter = (r.gasSettings && r.gasSettings.recruiter) || r.recruiterName || '';
+  } catch (_) {}
+  try { version = chrome.runtime.getManifest().version; } catch (_) {}
+
+  for (const it of items) {
+    try {
+      // content.js の reportRecordFailure と同じテーブル・同じ列。
+      // button_text にエラー内容、page_path に候補者IDを入れる
+      await fetch(`${SUPABASE_URL}/rest/v1/scout_record_failures`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal',
+        },
+        body: JSON.stringify({
+          recruiter_name: recruiter,
+          platform: (it.data && it.data.platform) || '',
+          reason: 'Supabaseへの保存を諦めた',
+          button_text: it._lastError || '',
+          page_path: String(it.candidateId || '').slice(0, 300),
+          ext_version: version,
+        }),
+      });
+    } catch (_) {}
+  }
+}
+
 async function flushSupabaseScoutQueue() {
   return withSupabaseQueueLock(async () => {
     // バックオフ期間中は今回のフラッシュをスキップ（キューの中身はそのまま残る）
@@ -836,7 +888,14 @@ async function flushSupabaseScoutQueue() {
           body: JSON.stringify(item.data),
           signal: controller.signal,
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+        // 409 は同じ行が既に入っている＝前回の送信は届いていた（応答だけ失われた）。
+        // 失敗として再送し続けると、最後に諦めて「届いていない」と誤って報告してしまう
+        if (res.status === 409) return;
+        if (!res.ok) {
+          const err = new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+          err.status = res.status;
+          throw err;
+        }
       } finally {
         clearTimeout(timer);
       }
@@ -863,13 +922,25 @@ async function flushSupabaseScoutQueue() {
     let keep = [];
     if (failed.length > 0) {
       failed.forEach(f => console.warn('[Snow-we] Supabase scouts保存失敗:', f.item.candidateId, f.reason?.message || f.reason));
-      const retried = failed.map(f => ({ ...f.item, _attempts: (f.item._attempts || 0) + 1 }));
-      giveUp = retried.filter(it => it._attempts >= 8); // 8回失敗し続けたら諦めて人の確認に回す
-      keep = retried.filter(it => it._attempts < 8);
+      // 以前は理由を問わず8回失敗したら捨てていた。再送は1分おきなので、通信障害や
+      // Supabase側の不調が8分続くだけで記録が消え、どこにも残らなかった（分類E）。
+      // 通信の失敗・5xx・408・429 は待てば通る見込みがあるので諦めない。
+      // 諦めるのは、何度送っても同じ結果になる 4xx（項目の不備・権限）だけにする
+      const retried = failed.map(f => ({
+        ...f.item,
+        _attempts: (f.item._attempts || 0) + 1,
+        _lastError: String(f.reason?.message || f.reason || '').slice(0, 200),
+        _permanent: isPermanentSupabaseError(f.reason),
+      }));
+      giveUp = retried.filter(it => it._permanent && it._attempts >= SUPABASE_PERMANENT_MAX_ATTEMPTS);
+      keep = retried.filter(it => !giveUp.includes(it));
       for (const it of giveUp) {
-        if (it.candidateId) await patchScoutHistoryEntry(it.candidateId, { supabaseSent: false, supabaseRetryCount: 8 });
-        console.warn('[Snow-we] Supabase scouts保存を諦めました(8回失敗):', it.candidateId);
+        if (it.candidateId) await patchScoutHistoryEntry(it.candidateId, { supabaseSent: false, supabaseRetryCount: it._attempts, supabaseGaveUp: true });
+        console.warn('[Snow-we] Supabase scouts保存を諦めました:', it.candidateId, it._lastError);
       }
+      // 諦めた件は捨てずに端末に残し、何が起きたかを自己申告する。
+      // 記録の中身はあとから手で入れ直せるように保存しておく
+      if (giveUp.length > 0) await moveToSupabaseDeadLetter(giveUp);
     } else if (succeeded.length > 0) {
       console.log(`[Snow-we] Supabase scouts保存成功: ${succeeded.length}件`);
     }
@@ -1046,7 +1117,7 @@ async function checkAnomalies() {
 
     // ③ Supabaseに一度も届かなかったケース（ダッシュボードに表示されない記録）
     const supabaseUndelivered = Object.values(scoutHistory || {})
-      .filter(h => h.supabaseSent === false && h.date && h.date < tenMinAgo && (h.supabaseRetryCount || 0) >= 8)
+      .filter(h => h.supabaseSent === false && h.date && h.date < tenMinAgo && (h.supabaseGaveUp || (h.supabaseRetryCount || 0) >= 8))
       .map(h => ({ ts: h.date, recruiter: '', company: h.company || '', missing: 'Supabase未送信(自動リトライ失敗)', sheet: '' }));
 
     const anomalies = [...serverAnomalies, ...undelivered, ...supabaseUndelivered].sort((a, b) => b.ts - a.ts);
