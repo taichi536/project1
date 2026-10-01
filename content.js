@@ -1146,6 +1146,26 @@ async function reportRecordFailure(reason, extra = {}) {
   }
 }
 
+// doda-Xの会社名に候補者の氏名が連結されて記録される件を、実データで把握するための報告。
+// innerTextは隣り合うインライン要素の間に改行も空白も入れないため、氏名と会社名が
+// 1行に連結される（「佐々木 貴紀株式会社SHIFT」「栗原 裕也日本メドトロニック株式会社」）。
+// 姓名の切れ目が文字列からは決められないので、推測で切らずに残している。
+// どの画面でどう出ているかが分かれば、その画面のDOMから会社名だけを読む修正ができる
+const DODAX_NAME_IN_COMPANY = /^[一-龯々]{1,5}[ 　][^\s　]{1,20}(?:株式会社|合同会社|有限会社|ホールディングス|銀行|証券|保険|グループ)/;
+let _reportedNameInCompanyAt = 0;
+function reportDodaxNameInCompany(company) {
+  try {
+    if (getPlatform() !== 'dodax' || !company) return;
+    if (!DODAX_NAME_IN_COMPANY.test(company)) return;
+    // 同じ原因で連続して報告しても分かることは増えないため、30分に1回までにする
+    if (Date.now() - _reportedNameInCompanyAt < 30 * 60 * 1000) return;
+    _reportedNameInCompanyAt = Date.now();
+    // 会社名そのものは scouts.company_name にも同じ形で入るため、ここで残しても
+    // 新たに出す情報は増えない。直すための手がかりとして値を残す
+    reportRecordFailure('会社名に候補者の氏名が連結されている', { buttonText: company.slice(0, 60) });
+  } catch (_) {}
+}
+
 // ── 送信そのものを検知して記録する ──────────────────────────
 //
 // ボタンの表示文字列で検知していたため、掲載側が文言を変えたり、担当者によって
@@ -1350,6 +1370,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
     return;
   }
   _recentlyRecorded.set(candidateId, now);
+  reportDodaxNameInCompany(info.company || '');
   const positionName = templateName || fallbackPosition || '';
   const industry = gicsAutoClassify(info.company || '');
 
@@ -1992,6 +2013,22 @@ function extractBasicInfo(cardEl) {
         company = pLines.find(l => !isEduLine(l) && companyRe2.test(l))?.split(/[／/]/)[0].trim() || '';
       }
     }
+    // doda-Xでは会員番号と会社名が区切り文字なしで1行に連結される。innerTextは
+    // 隣り合うインライン要素の間に改行も空白も入れないため、実データで
+    // 「00881769ソフトバンク株式会社」「00924245富士通株式会社」のように
+    // 会員番号付きで記録されていた。シート側の会社名と一致せず突き合わせが
+    // できないため、先頭の会員番号を落とす。
+    // 6桁以上の数字が非数字の直前にある場合だけに限る（「7-Eleven」のように
+    // 数字で始まる社名を壊さないため）
+    const memberNo = company.match(/^\d{6,}(?=\D)/);
+    if (memberNo) company = company.slice(memberNo[0].length).trim();
+    // 同じ理由で「氏名＋会社名」も連結される（「佐々木 貴紀株式会社SHIFT」
+    // 「栗原 裕也日本メドトロニック株式会社」）。こちらは姓名の区切りが
+    // 社名側に無いため、どこまでが名前なのかを文字列からは決められない。
+    // 推測で切ると「栗原 裕也日本」まで落として「メドトロニック株式会社」に
+    // してしまう（実際にそうなる分割規則を検討して破棄した）。
+    // 誤った社名を作るより、連結されたまま残して報告し、画面の構造を
+    // 確認してから直す（reportDodaxNameInCompany）
   } else if (getPlatform() === 'bizreach') {
     // Bizreachのカードは 年齢/新着タグ → 都道府県 → 年収 → 経過時間 → 送信通数(N通) →
     // 会社名 → 部署名 → 学歴… という固定順序で並ぶ(実機で確認)。以前は company = lines[0]
