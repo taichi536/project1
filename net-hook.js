@@ -33,6 +33,11 @@
   'use strict';
   if (window.__snowweNetHook) return;
   window.__snowweNetHook = true;
+  // content.js（隔離された世界）から「フックが動いている」ことを見えるようにする。
+  // window の変数は世界をまたいで見えないが、DOM は共有されている。
+  // 以前は最初の通信を受けて初めて動いていると判断していたため、ページを開いて
+  // 最初の通信が送信そのものだった場合に、ボタン経路と通信経路の両方が動いていた
+  try { document.documentElement.setAttribute('data-snowwe-net-hook', '1'); } catch (_) {}
 
   const EVENT = 'snowwe:request';
 

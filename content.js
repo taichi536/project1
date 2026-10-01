@@ -1195,6 +1195,90 @@ const BULK_SEND_REQUESTS = {
   dodax: /\/iapi\/scout\/bulkSendScout(?:\?|$)/,
 };
 
+// 「送信」ボタンで送られるが、スカウトではない通信。
+// doda X は日程調整などメッセージへの返信も「送信」ボタンで、スカウト開始ボタンを
+// 経由しないため、送信時に詳細パネルから候補者を組み立て直す経路に入り、
+// スカウトとして記録されていた（逆方向の突き合わせで過剰記録11件の原因）
+const NOT_SEND_REQUESTS = {
+  dodax: /\/iapi\/message\/saveByCorporate(?:\?|$)/,
+};
+let _lastNotSendRequestAt = 0;
+
+function isNetHookAlive() {
+  if (_netHookAlive) return true;
+  try { return document.documentElement.getAttribute('data-snowwe-net-hook') === '1'; } catch (_) { return false; }
+}
+
+function findDetailPanelForPlatform(platform) {
+  return platform === 'ambi' ? findAMBIDetailPanel() :
+    platform === 'rds' ? findRDSDetailPanel() :
+    platform === 'dodax' ? (findDodaxProfilePane() || findDodaxDetailPanel()) :
+    platform === 'bizreach' ? findBizreachDetailPanel() :
+    platform === 'green' ? findGreenDetailPanel() :
+    null;
+}
+
+/**
+ * 送信フォームに出ているテンプレート名と本文を、その場で同期的に読む。
+ * 送信が成立すると画面が切り替わって読めなくなるため、送信ボタンを押した瞬間に取る。
+ * bizreach・doda X は本文を一度も読んでおらず、scout_message が100%空だった
+ */
+function readSendFormSnapshot(platform) {
+  const snap = { templateRaw: '', bodyText: '' };
+  try {
+    if (platform === 'bizreach') {
+      const el = document.querySelector('[data-templates-dropdown] .bui-select-box-label');
+      snap.templateRaw = el ? (el.textContent || '').trim() : '';
+    } else if (platform === 'dodax') {
+      const el = document.querySelector('.vs__selected');
+      snap.templateRaw = el ? (el.getAttribute('title') || el.textContent || '').trim() : '';
+    }
+    // 本文欄は画面によって位置が違うので、表示されている textarea のうち最も長い値を本文とみなす
+    // 見えている欄が無ければ（判定を誤った場合も含めて）全体から選ぶ
+    let best = '';
+    let bestVisible = '';
+    for (const ta of document.querySelectorAll('textarea')) {
+      const v = ta.value || '';
+      if (!v || v === 'スカウト本文を入力') continue;
+      if (v.length > best.length) best = v;
+      if (ta.getClientRects().length > 0 && v.length > bestVisible.length) bestVisible = v;
+    }
+    snap.bodyText = (bestVisible || best).substring(0, 2000);
+  } catch (_) {}
+  return snap;
+}
+
+/** 送信の通信内容から本文らしい値（最も長い文字列）を取り出す */
+function extractMessageFromBody(body) {
+  let best = '';
+  const walk = v => {
+    if (typeof v === 'string') { if (v.length > best.length) best = v; return; }
+    if (v && typeof v === 'object') Object.values(v).forEach(walk);
+  };
+  try { walk(JSON.parse(String(body || ''))); } catch (_) {
+    try { walk(Object.fromEntries(new URLSearchParams(String(body || '')))); } catch (_) {}
+  }
+  // 件名・IDなど短い値は本文ではない
+  return best.length >= 50 ? best.substring(0, 2000) : '';
+}
+
+/** テンプレート名をポジション一覧と照合する。合わなければテンプレート名そのものを返す */
+async function resolveTemplateName(tmplVal) {
+  if (!tmplVal) return '';
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+    const sorted = [...(res?.positions || [])].sort((a, b) => b.length - a.length);
+    const normStr = x => stripFirmPrefix(x).replace(/[-–—－]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/　/g, ' ').trim();
+    const stripSuffix = x => x.replace(/\s*[-–—－]\s*[A-Za-z]{2,}[\s）)]*$/, '').replace(/\s*[-–—－]\s*[゠-ヿ一-鿿]{2,}[\s）)]*$/, '').trim();
+    const n = normStr(tmplVal);
+    const exact = sorted.filter(x => x && n === normStr(x));
+    const stripped = exact.length === 0 ? sorted.filter(x => { const t = stripSuffix(x); return t.length >= 8 && n === normStr(t); }) : [];
+    const hits = exact.length > 0 ? exact : stripped;
+    if (hits.length === 1) return hits[0];
+  } catch (_) {}
+  return tmplVal;
+}
+
 /**
  * 一括送信の内容から候補者の識別子を取り出す。
  *
@@ -1240,6 +1324,12 @@ window.addEventListener('snowwe:request', e => {
     const platform = getPlatform();
     const pattern = SEND_REQUESTS[platform];
     if (!url) return;
+
+    const notSend = NOT_SEND_REQUESTS[platform];
+    if (notSend && notSend.test(String(url))) {
+      _lastNotSendRequestAt = Date.now();
+      return;
+    }
 
     // ── 一括送信 ──
     // 1回の通信で複数人に送るため、画面の操作だけでは対象が分からない。
@@ -1305,6 +1395,7 @@ window.addEventListener('snowwe:request', e => {
     let candidateId = '';
     let info = {};
     let templateName = '';
+    let templateRaw = '';
     let bodyText = '';
     let fallbackPosition = _cachedCurrentPosition;
     try {
@@ -1315,6 +1406,7 @@ window.addEventListener('snowwe:request', e => {
           candidateId = p.id;
           info = p.info || {};
           templateName = p.templateName || '';
+          templateRaw = p.templateRaw || '';
           bodyText = p.bodyText || '';
           fallbackPosition = p.fallbackPosition || fallbackPosition;
         }
@@ -1322,14 +1414,19 @@ window.addEventListener('snowwe:request', e => {
     } catch (_) {}
     sessionStorage.removeItem('pendingScout');
 
-    // 取れていなければ、その場の詳細パネルから読み直す
+    // 取れていなければ、その場の詳細パネルから読み直す。
+    // 以前は RDS しか見ておらず、bizreach は開始ボタンを取り逃すと
+    // 「候補者を特定できない」で記録されなかった
     if (!candidateId) {
-      const panel = platform === 'rds' ? findRDSDetailPanel() : null;
+      const panel = findDetailPanelForPlatform(platform);
       if (panel) {
         candidateId = getCandidateId(panel) || '';
         if (!info.company) info = extractBasicInfo(panel);
       }
     }
+    // 本文は送った内容そのものが通信に入っているので、そちらを優先する
+    const sentBody = extractMessageFromBody(e.detail && e.detail.body);
+    if (sentBody) bodyText = sentBody;
 
     // 候補者を特定できないまま記録すると、全員が同じ行に潰れるより悪い
     // （誰への送信か分からない記録が残る）。記録せず、その場で知らせる
@@ -1344,7 +1441,10 @@ window.addEventListener('snowwe:request', e => {
       } catch (_) {}
       return;
     }
-    recordScoutSent(candidateId, info, templateName, bodyText, fallbackPosition);
+    (async () => {
+      if (!templateName && templateRaw) templateName = await resolveTemplateName(templateRaw);
+      recordScoutSent(candidateId, info, templateName, bodyText, fallbackPosition);
+    })();
   } catch (err) {
     console.warn('[Snow-we] 送信リクエストの処理に失敗:', err && err.message);
   }
@@ -1699,6 +1799,29 @@ function getCandidateId(cardEl) {
     const dodaxUrl = findProfileUrl(cardEl);
     const urlNum = dodaxUrl && dodaxUrl.match(/\/member_search\/detail\/(\d+)/);
     if (urlNum) return `dodax_${urlNum[1].padStart(8, '0')}`;
+    // 番号が単独行でなく「会員番号：00890205」のようにラベルと同じ行にある画面や、
+    // 氏名・会社名と連結されている画面がある（会社名への会員番号混入と同じ原因）。
+    // 以前はここで汎用の処理に落ち、6〜10桁の別の数字やハッシュになっていた（13/303件）
+    const labeled = text.match(/(?:会員番号|会員ID|候補者番号|求職者番号|No\.?)\s*[：:]?\s*(\d{8})(?!\d)/);
+    if (labeled) return `dodax_${labeled[1]}`;
+    const dataNum = (() => {
+      try {
+        for (const el of [cardEl, ...cardEl.querySelectorAll('[data-member-id],[data-candidate-id],[data-id]')]) {
+          const v = el.getAttribute && (el.getAttribute('data-member-id') || el.getAttribute('data-candidate-id') || el.getAttribute('data-id'));
+          if (v && /^\d{5,8}$/.test(v)) return v.padStart(8, '0');
+        }
+      } catch (_) {}
+      return '';
+    })();
+    if (dataNum) return `dodax_${dataNum}`;
+    // ハッシュに落ちる前に、どんな形だったかを残す（値は残さない）
+    try {
+      if (Date.now() - (window.__snowweDodaxIdReportedAt || 0) < 30 * 60 * 1000) throw 0;
+      window.__snowweDodaxIdReportedAt = Date.now();
+      reportRecordFailure('doda Xの候補者番号を取れない', {
+        buttonText: (text.match(/\d{5,10}/g) || []).map(x => `${x.length}桁`).join(',').slice(0, 100),
+      });
+    } catch (_) {}
   }
 
   // RDSは候補者ごとの固定URLを持たないため、URLをIDに使うと事故る。実データでは
@@ -2651,15 +2774,34 @@ document.addEventListener('click', e => {
   // RDSは送信リクエストの検知に一本化した。二重に記録しないよう、ここでは何もしない。
   // ただし切り替えるのは net-hook.js が動いていることを確認できた場合だけにする。
   // フックが動かない環境で一本化すると、記録が丸ごと止まってしまうため
-  if (getPlatform() === 'rds' && _netHookAlive) {
+  //
+  // bizreach も通信で検知するようにした（v1.36.0）が、ここは RDS しか止めていなかった。
+  // そのため bizreach は1回の送信でボタン経路が先に記録して pendingScout を消し、
+  // 通信経路は候補者を特定できず「この送信は記録されませんでした」と誤って警告し、
+  // 失敗としても報告していた。送信が失敗してもボタン経路は記録してしまう問題もある
+  if (SEND_REQUESTS[getPlatform()] && isNetHookAlive()) {
     // pendingScout はここで消さない。スカウトボタンを押した時点で取れている
     // 候補者情報（会社名・年齢・大学）とテンプレート名が入っており、送信検知側が
-    // これを使う。以前ここで消しており、会社名が空のまま記録されていた
-    console.log('[Snow-we] RDS: 記録は送信リクエストの検知に任せます');
+    // これを使う。以前ここで消しており、会社名が空のまま記録されていた。
+    // 送信が成立すると画面が切り替わるので、テンプレート名と本文はいま読んで渡す
+    try {
+      const pr = sessionStorage.getItem('pendingScout');
+      if (pr) {
+        const p = JSON.parse(pr);
+        const snap = readSendFormSnapshot(getPlatform());
+        if (!p.templateRaw && snap.templateRaw) p.templateRaw = snap.templateRaw;
+        if (!p.bodyText && snap.bodyText) p.bodyText = snap.bodyText;
+        sessionStorage.setItem('pendingScout', JSON.stringify(p));
+      }
+    } catch (_) {}
+    console.log(`[Snow-we] ${getPlatform()}: 記録は送信リクエストの検知に任せます`);
     return;
   }
 
+  const sendClickedAt = Date.now();
+  const formSnap = readSendFormSnapshot(getPlatform());
   let raw = sessionStorage.getItem('pendingScout');
+  const hadPending = !!raw;
   console.log('[Snow-we] 送信クリック / pendingScout:', raw ? 'あり' : 'なし');
   sessionStorage.removeItem('pendingScout');
 
@@ -2669,15 +2811,9 @@ document.addEventListener('click', e => {
   // はずなので、その場で候補者情報を組み立て直す（記録が完全に消えるより優先する）
   if (!raw) {
     const platform = getPlatform();
-    const detailPanel =
-      platform === 'ambi' ? findAMBIDetailPanel() :
-      platform === 'rds' ? findRDSDetailPanel() :
-      platform === 'dodax' ? (findDodaxProfilePane() || findDodaxDetailPanel()) :
-      // Bizreachもこのフォールバックの対象外だったため、開始クリックを取り逃すと
-      // 記録がまるごと消えていた（実データで未登録率85%を確認）
-      platform === 'bizreach' ? findBizreachDetailPanel() :
-      platform === 'green' ? findGreenDetailPanel() :
-      null;
+    // Bizreachもこのフォールバックの対象外だったため、開始クリックを取り逃すと
+    // 記録がまるごと消えていた（実データで未登録率85%を確認）
+    const detailPanel = findDetailPanelForPlatform(platform);
     if (detailPanel) {
       const id = getCandidateId(detailPanel);
       if (id) {
@@ -2704,14 +2840,21 @@ document.addEventListener('click', e => {
   // 実データで、ある担当者のRDSだけ25分間に19件連続で記録が消えており、
   // 前後の別媒体は正常だったため、気づく手がかりがまったく無かった
   if (!raw) {
-    reportRecordFailure('送信ボタンは押されたが候補者を特定できない', { buttonText: textCore });
-    try {
-      showAutoStatus(
-        '⚠️ この送信は記録されませんでした（候補者を特定できていません）。'
-        + '管理者に、いまの画面と操作手順を伝えてください',
-        12000,
-      );
-    } catch (_) {}
+    (async () => {
+      // 返信（スカウトではない送信）なら記録されなくて正しいので、警告も報告もしない
+      if (NOT_SEND_REQUESTS[getPlatform()]) {
+        for (let i = 0; i < 10 && _lastNotSendRequestAt < sendClickedAt; i++) await sleep(250);
+        if (_lastNotSendRequestAt >= sendClickedAt) return;
+      }
+      reportRecordFailure('送信ボタンは押されたが候補者を特定できない', { buttonText: textCore });
+      try {
+        showAutoStatus(
+          '⚠️ この送信は記録されませんでした（候補者を特定できていません）。'
+          + '管理者に、いまの画面と操作手順を伝えてください',
+          12000,
+        );
+      } catch (_) {}
+    })();
   }
 
   if (raw) {
@@ -2852,6 +2995,18 @@ document.addEventListener('click', e => {
           // 変更してしまうことがあり、その場合Aに本来の位置ではなくBの位置が記録される
           // バグになっていた（スカウト時点で捕まえた値こそが、この候補者にとって正しい値）
           const latestPosition = pending.fallbackPosition || '';
+          if (!pending.bodyText && formSnap.bodyText) pending.bodyText = formSnap.bodyText;
+
+          // doda X の返信対策。スカウト開始ボタンを経ていない送信は、メッセージへの
+          // 返信の可能性がある。返信の通信（NOT_SEND_REQUESTS）が来たら記録しない。
+          // 開始ボタンを経た送信（hadPending）は本物のスカウトなので待たない
+          if (!hadPending && NOT_SEND_REQUESTS[getPlatform()]) {
+            for (let i = 0; i < 10 && _lastNotSendRequestAt < sendClickedAt; i++) await sleep(250);
+            if (_lastNotSendRequestAt >= sendClickedAt) {
+              console.log('[Snow-we] メッセージの返信だったため記録しません:', pending.id);
+              return;
+            }
+          }
 
           // AMBI: 「送信」を押した直後に「スカウトを送信しますか？」という確認
           // ダイアログが出ることがある(実機で確認)。以前はここで即座に記録していた
