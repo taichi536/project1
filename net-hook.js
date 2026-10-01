@@ -36,12 +36,35 @@
 
   const EVENT = 'snowwe:request';
 
-  function notify(method, url, status) {
+  // 送信内容は、一括送信で「誰に送ったか」を知るために要る。1回の通信で複数人に
+  // 送るため、画面の操作だけでは人数も対象も分からない。
+  // 中身をそのまま外に出すことはせず、content.js 側で候補者の識別子だけを取り出す
+  const MAX_BODY = 20000;
+
+  function bodyText(body) {
+    try {
+      if (typeof body === 'string') return body.slice(0, MAX_BODY);
+      if (body instanceof URLSearchParams) return body.toString().slice(0, MAX_BODY);
+      if (body instanceof FormData) {
+        const o = {};
+        body.forEach((v, k) => { o[k] = typeof v === 'string' ? v : '(file)'; });
+        return JSON.stringify(o).slice(0, MAX_BODY);
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  function notify(method, url, status, body) {
     try {
       if (!method || String(method).toUpperCase() !== 'POST') return;
       if (!(status >= 200 && status < 300)) return;
       window.dispatchEvent(new CustomEvent(EVENT, {
-        detail: { method: String(method).toUpperCase(), url: String(url || ''), status },
+        detail: {
+          method: String(method).toUpperCase(),
+          url: String(url || ''),
+          status,
+          body: bodyText(body),
+        },
       }));
     } catch (_) {}
   }
@@ -58,10 +81,10 @@
       } catch (_) {}
       return open.apply(this, arguments);
     };
-    XMLHttpRequest.prototype.send = function () {
+    XMLHttpRequest.prototype.send = function (body) {
       try {
         this.addEventListener('load', () => {
-          notify(this.__snowweMethod, this.__snowweUrl, this.status);
+          notify(this.__snowweMethod, this.__snowweUrl, this.status, body);
         });
       } catch (_) {}
       return send.apply(this, arguments);
@@ -78,7 +101,8 @@
         const url = (typeof input === 'string') ? input : (input && input.url) || '';
         const p = origFetch.apply(this, arguments);
         try {
-          p.then(res => { try { notify(method, url, res.status); } catch (_) {} }, () => {});
+          const b = (init && init.body) || (input && input.body) || '';
+          p.then(res => { try { notify(method, url, res.status, b); } catch (_) {} }, () => {});
         } catch (_) {}
         return p;
       };

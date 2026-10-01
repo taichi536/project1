@@ -1164,7 +1164,49 @@ async function reportRecordFailure(reason, extra = {}) {
 const SEND_REQUESTS = {
   // 実機で確認: POST .../scouting/scoutroom/1678665/scout → 200
   rds: /\/scouting\/scoutroom\/\d+\/scout(?:\?|$)/,
+  // 失敗ログから判明: スカウトを送信 → POST /v1/api/send-scout
+  bizreach: /\/v1\/api\/send-scout(?:\?|$)/,
 };
+
+// 1回の通信で複数人に送る経路。doda X の一括スカウト送信が該当する。
+// 「1送信＝1記録」を前提にした経路では扱えず、実データでゆうきさんの doda X で
+// 連続した取りこぼしになっていた（9/30 13:41〜13:53 の4件など）。
+const BULK_SEND_REQUESTS = {
+  dodax: /\/iapi\/scout\/bulkSendScout(?:\?|$)/,
+};
+
+/**
+ * 一括送信の内容から候補者の識別子を取り出す。
+ *
+ * doda X の候補者番号は8桁の数字（getCandidateId も同じ形を使っている）。
+ * 送信内容のどこに入っているかは実機を見ていないので、構造を決め打ちせず、
+ * 8桁の数字をすべて拾って重複を除く。
+ *
+ * テンプレート番号などの別の8桁が混ざる可能性はあるが、記録が残らないよりは
+ * 多めに拾うほうがよい（余分な記録は後から消せるが、消えた記録は戻らない）。
+ * 取り出せなかった場合は、中身の「形」だけを報告して次に直せるようにする。
+ */
+function extractBulkCandidateIds(body) {
+  const ids = new Set();
+  try {
+    for (const m of String(body || '').matchAll(/\b(\d{8})\b/g)) ids.add(m[1]);
+  } catch (_) {}
+  return [...ids];
+}
+
+/** 送信内容の「形」だけを残す。値は入れない（個人情報が含まれるため） */
+function describeBodyShape(body) {
+  try {
+    const parsed = JSON.parse(String(body || ''));
+    if (parsed && typeof parsed === 'object') {
+      return Object.entries(parsed)
+        .map(([k, v]) => `${k}:${Array.isArray(v) ? `配列(${v.length})` : typeof v}`)
+        .join(',')
+        .slice(0, 280);
+    }
+  } catch (_) {}
+  return `長さ${String(body || '').length}`;
+}
 
 // net-hook.js が生きているか。生きていなければボタン検知の従来経路に任せる。
 // 通信の検知に一本化したあとでフックが動かない環境があると、記録が丸ごと
@@ -1178,6 +1220,32 @@ window.addEventListener('snowwe:request', e => {
     const platform = getPlatform();
     const pattern = SEND_REQUESTS[platform];
     if (!url) return;
+
+    // ── 一括送信 ──
+    // 1回の通信で複数人に送るため、画面の操作だけでは対象が分からない。
+    // 送信内容から候補者の識別子を取り出して、人数分を記録する
+    const bulkPattern = BULK_SEND_REQUESTS[platform];
+    if (bulkPattern && bulkPattern.test(String(url))) {
+      const ids = extractBulkCandidateIds(e.detail && e.detail.body);
+      console.log(`[Snow-we] 一括送信を検知: ${ids.length}件`);
+      if (ids.length === 0) {
+        // 取り出せなかった。中身の形だけを残して、次に直せるようにする
+        reportRecordFailure('一括送信の内容から候補者を取り出せない', {
+          buttonText: _lastButtonText,
+          path: describeBodyShape(e.detail && e.detail.body),
+        });
+        try {
+          showAutoStatus('⚠️ 一括送信を検知しましたが、対象を特定できませんでした', 12000);
+        } catch (_) {}
+        return;
+      }
+      // 一括送信では候補者ごとの詳細が画面に出ていないため、年齢・会社名・大学は
+      // 残せない。送った事実・相手・ポジションだけでも残すほうがよい
+      for (const id of ids) {
+        recordScoutSent(`${platform}_${id}`, {}, '', '', _cachedCurrentPosition);
+      }
+      return;
+    }
 
     // 送信のURLがまだ分かっていない媒体で、それらしい通信を拾って記録する。
     // これが無いと、媒体ごとに誰かが開発者ツールを開いて送信の通信を
