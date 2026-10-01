@@ -1785,15 +1785,21 @@ function isNotCompanyName(s) {
 function isMessageLine(line) {
   const l = (line || '').trim();
   if (!l) return true;
+  // 全角で書かれていると半角前提の判定をすり抜ける。実データで
+  // 「株式会社Ｓｎｏｗ‐ｗｅ．Ｉｎｃ」が自社名の判定に引っかからず、
+  // 候補者の会社名として記録されていた。比較用に半角へ揃えておく
+  const flat = (() => {
+    try { return l.normalize('NFKC'); } catch (_) { return l; }
+  })();
   // スカウトメール本文・挨拶文（自社の署名がこの経路で混入する）
-  if (/と申します|拝見し|ご経歴|ご連絡|お世話になり|よろしくお願い|いたします|ください|ませんか/.test(l)) return true;
+  if (/と申します|拝見し|ご経歴|ご連絡|お世話になり|よろしくお願い|いたします|ください|ませんか/.test(flat)) return true;
   // 句点を含む値は文章であって会社名ではない。上の語のどれにも当たらない
   // 言い回しが実データで会社名として記録されていた
   // （「セイコーエプソン株式会社の杉山達彦です。」）
-  if (l.includes('。')) return true;
+  if (flat.includes('。')) return true;
   // 自社名。候補者の勤務先としてはありえず、混入経路はスカウト文面の署名しかない
   // （実データで「株式会社Snow-we.Inc」が候補者の会社名として記録されていた）
-  if (/snow-?we/i.test(l)) return true;
+  if (/snow[\-‐–—]?we/i.test(flat)) return true;
   // 候補者カードの定型行（会社名ではありえない）
   if (/^(男性|女性|非公開|現職|前職)$/.test(l)) return true;
   if (/^転職回数|^最終ログイン|^職務経歴書|以内のスカウト|^スカウト送信済/.test(l)) return true;
