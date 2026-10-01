@@ -55,8 +55,19 @@ def post_json(url, payload, timeout=340):
 
 
 def get_json(url, timeout=90):
-    with urllib.request.urlopen(urllib.request.Request(url, headers=H), timeout=timeout) as resp:
-        return json.loads(resp.read().decode('utf-8'))
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=H), timeout=timeout) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        # 401はキーの問題。例外をそのまま出すと何が足りないのか分からず、
+        # 実際にターミナルを開き直しただけで原因の切り分けに時間を使った
+        if e.code in (401, 403):
+            print('❌ Supabaseに拒否されました（HTTP %d）。' % e.code)
+            print('   SUPABASE_KEY が設定されていないか、service_roleキーではありません。')
+            print(f"   いまのキーの先頭: {SUPABASE_KEY[:14] or '(未設定)'}")
+            print("   設定例: export SUPABASE_KEY='sb_secret_...'")
+            sys.exit(1)
+        raise
 
 
 def norm_univ(s):
