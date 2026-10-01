@@ -211,6 +211,40 @@ chrome.storage.local.get(['gasSettings', 'recruiterName']).then(r => {
   }
 }).catch(() => {});
 
+// 拡張機能が GitHub の main より古いときに知らせる（判定は background.js の checkVersions）。
+// 実データで、ほとんどの人が何週間も前の版のままで、直した内容が誰にも届いていなかった。
+// 閉じられるが、その日のうちは出さないだけで、更新するまで毎日出す
+function showOutdatedBanner(vs) {
+  const today = new Date().toISOString().slice(0, 10);
+  chrome.storage.local.get(['outdatedDismissedOn']).then(r => {
+    if (r.outdatedDismissedOn === today) return;
+    const isWin = /Windows/i.test(navigator.userAgent || '');
+    showBigWarningOverlay({
+      id: 'snowwe-outdated-overlay',
+      title: `⚠️ 拡張機能が古いままです（${vs.current} → ${vs.latest}）`,
+      message: '古いままだと、スカウトの記録が漏れたり誤ったりする不具合が直っていません。'
+        + `デスクトップの snow-we フォルダにある「${isWin ? 'update.bat' : 'update.command'}」を`
+        + 'ダブルクリックしてください。更新後は数分以内に自動で切り替わります'
+        + '（すぐに切り替えたい場合は chrome://extensions で🔄を押し、このページを再読み込み）。',
+      actionLabel: '今日はもう出さない',
+      onAction: () => {
+        chrome.storage.local.set({ outdatedDismissedOn: today }).catch(() => {});
+        document.getElementById('snowwe-outdated-overlay')?.remove();
+      },
+    });
+  }).catch(() => {});
+}
+
+chrome.storage.local.get(['versionStatus']).then(({ versionStatus: vs }) => {
+  try {
+    if (!vs || !vs.latest) return;
+    const current = chrome.runtime.getManifest().version;
+    // 判定後に更新された場合は current が変わっているので、いまの版で比べ直す
+    const older = String(vs.latest).localeCompare(current, undefined, { numeric: true }) > 0;
+    if (older) setTimeout(() => showOutdatedBanner({ current, latest: vs.latest }), 3000);
+  } catch (_) {}
+}).catch(() => {});
+
 // Supabase設定
 const SUPABASE_URL = 'https://ovwnyivqnqqiagutjxoo.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_tEQ4TOve0uCydsGiEm1cDA_D1LQ49wN';

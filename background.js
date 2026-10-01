@@ -1036,6 +1036,66 @@ async function sendHeartbeat(trigger) {
   }
 }
 
+// ── バージョンの確認 ──────────────────────────────────────────────────
+// 2026-10-01 の実データで、直近7日の記録に v1.35 以降が1件も無かった。いちばん多いのは
+// 1.27.0（RDS 355件・bizreach 298件）。更新は各自が update.bat を実行して
+// chrome://extensions で再読み込みする手作業で、古いままでも誰も気づかない。
+// どれだけ直しても届かないので、記録漏れの最大の原因になっていた（分類G）。
+//
+// ① 手元のファイルが新しくなっていたら（update.bat は実行したが再読み込みしていない）、
+//    自分で再読み込みする。開発者モードで読み込んだ拡張は、再読み込みでディスクから読み直す
+// ② GitHub の main と比べて古ければ、媒体の画面に警告を出す（content.js が表示する）
+const LATEST_MANIFEST_URL = 'https://raw.githubusercontent.com/taichi536/project1/main/manifest.json';
+
+function compareVersions(a, b) {
+  const pa = String(a || '').split('.').map(n => parseInt(n, 10) || 0);
+  const pb = String(b || '').split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+async function checkVersions() {
+  let current = '';
+  try { current = chrome.runtime.getManifest().version; } catch (_) { return; }
+
+  // ①
+  try {
+    const disk = await (await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' })).json();
+    if (disk && compareVersions(disk.version, current) > 0) {
+      // 送信の最中に再読み込みすると、開いているタブの記録処理が切り離される。
+      // 直近2分にスカウトの記録が無いときだけ行う（記録は退避の仕組みで失われないが、念のため）
+      const { scoutHistory } = await chrome.storage.local.get(['scoutHistory']);
+      const last = Math.max(0, ...Object.values(scoutHistory || {}).map(h => Number(h && h.date) || 0));
+      if (Date.now() - last > 2 * 60 * 1000) {
+        console.log(`[Snow-we] 手元のファイルが新しくなっているため再読み込みします: ${current} → ${disk.version}`);
+        await chrome.storage.local.set({ selfReloadedAt: Date.now(), selfReloadedFrom: current });
+        chrome.runtime.reload();
+        return;
+      }
+    }
+  } catch (_) {}
+
+  // ②
+  try {
+    const res = await fetch(LATEST_MANIFEST_URL, { cache: 'no-store' });
+    if (!res.ok) return;
+    const latest = (await res.json()).version;
+    await chrome.storage.local.set({
+      versionStatus: { current, latest, outdated: compareVersions(latest, current) > 0, checkedAt: Date.now() },
+    });
+  } catch (_) {}
+}
+
+chrome.alarms.get('snowWeVersionCheck', (existing) => {
+  if (!existing) chrome.alarms.create('snowWeVersionCheck', { delayInMinutes: 1, periodInMinutes: 30 });
+});
+chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'snowWeVersionCheck') checkVersions(); });
+chrome.runtime.onStartup.addListener(() => checkVersions());
+chrome.runtime.onInstalled.addListener(() => checkVersions());
+
 // 4時間おき。ブラウザを開いた日は必ず1件以上届くため「その日動いていたか」が分かる。
 // ブラウザを閉じている間は届かないが、それは報告すべき状態ではないので問題にしない
 chrome.alarms.get('snowWeHeartbeat', (existing) => {
