@@ -28,6 +28,29 @@ rem GitHubアカウントを持っていないので答えようがなく、「U
 rem 出たまま何が悪いのか分からない状態になる。その場で失敗させて原因を出す
 set GIT_TERMINAL_PROMPT=0
 
+rem git の処理が途中で止まると .git\index.lock が残り、それ以降の更新が何度やっても
+rem 同じエラーで止まり続ける（「Unable to create ... index.lock: File exists」）。
+rem 実際にメンバーの端末で発生した。フォルダが OneDrive の中にあると、同期が
+rem ファイルを掴むため残りやすい。
+rem git が動いていないことを確かめてから片付ける。動いている最中に消すと
+rem そちらの処理を壊すため、その場合は消さずに止める
+if exist ".git\index.lock" (
+  tasklist /fi "imagename eq git.exe" 2>nul | findstr /i "git.exe" > nul
+  if errorlevel 1 (
+    del /f /q ".git\index.lock" > nul 2>&1
+    echo 前回の更新が途中で止まった跡を片付けました。
+    echo.
+  ) else (
+    echo ❌ 別の更新がまだ動いています。
+    echo.
+    echo 開いている「アップデート」の黒い画面を全部閉じて、
+    echo 1分ほど待ってから、もう一度このファイルを実行してください。
+    echo.
+    pause
+    exit /b 1
+  )
+)
+
 rem git pull の成否を必ず見る。以前は失敗しても「更新完了」と表示していたため、
 rem ネットワークが切れていても、ローカルに変更が残って pull が止まっていても、
 rem 画面上は成功したように見えていた
@@ -43,8 +66,11 @@ if errorlevel 1 (
   echo   ・このフォルダの中のファイルを直接編集してしまった
   echo   ・フォルダを移動・コピーした
   echo.
+  echo 「index.lock」と出ている場合は、もう一度このファイルを実行してください。
+  echo それでも同じなら管理者に連絡してください
+  echo （このフォルダが OneDrive の中にあると起きやすい問題です）。
+  echo.
   echo 「Authentication failed」と出ている場合は、管理者に連絡してください。
-  echo 取得用のトークンが期限切れになっている可能性があります。
   echo.
   echo ※ このまま Chrome を再読み込みしても、バージョンは変わりません。
   echo.

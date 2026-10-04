@@ -25,6 +25,26 @@ echo ""
 # その場で失敗させて原因を出す
 export GIT_TERMINAL_PROMPT=0
 
+# git の処理が途中で止まると .git/index.lock が残り、それ以降の更新が何度やっても
+# 同じエラーで止まり続ける（「Unable to create ... index.lock: File exists」）。
+# 実際にメンバーの端末（Windows・OneDrive配下）で発生した。
+# git が動いていないことを確かめてから片付ける。動いている最中に消すと
+# そちらの処理を壊すため、その場合は消さずに止める
+if [ -f .git/index.lock ]; then
+  if pgrep -x git > /dev/null 2>&1; then
+    echo "❌ 別の更新がまだ動いています。"
+    echo ""
+    echo "開いている「アップデート」のウィンドウを全部閉じて、"
+    echo "1分ほど待ってから、もう一度このファイルを実行してください。"
+    echo ""
+    read -r -p "Enterキーを押すと閉じます..." || true
+    exit 1
+  fi
+  rm -f .git/index.lock
+  echo "前回の更新が途中で止まった跡を片付けました。"
+  echo ""
+fi
+
 # git pull の成否を必ず見る。以前は失敗しても「更新完了」と表示していたため、
 # ネットワークが切れていても、ローカルに変更が残って pull が止まっていても、
 # 画面上は成功したように見えていた
@@ -39,8 +59,10 @@ if ! git pull; then
   echo "  ・このフォルダの中のファイルを直接編集してしまった"
   echo "  ・フォルダを移動・コピーした"
   echo ""
+  echo "「index.lock」と出ている場合は、もう一度このファイルを実行してください。"
+  echo "それでも同じなら管理者に連絡してください。"
+  echo ""
   echo "「Authentication failed」と出ている場合は、管理者に連絡してください。"
-  echo "取得用のトークンが期限切れになっている可能性があります。"
   echo ""
   echo "※ このまま Chrome を再読み込みしても、バージョンは変わりません。"
   echo ""

@@ -44,15 +44,16 @@ if not defined ORIGIN (
   pause
   exit /b 1
 )
+rem このリポジトリは公開に戻したため、トークンなしが正常な状態になった。
+rem 以前はここで「トークンなし」を失敗の原因として表示していたが、いまは
+rem 逆に、古いトークン入りの設定が残っている方が失効していて危ない
 echo %ORIGIN% | findstr /c:"@github.com" > nul
 if errorlevel 1 (
-  echo     取得先: github.com ^(トークンなし^)
-  echo     ❌ これが原因です。取得先にトークンが入っていません。
-  echo        管理者から受け取った新しい update.bat が、このフォルダに
-  echo        上書きできていない可能性があります。
-  echo        ファイル名が「update (1).bat」などになっていないか確認してください。
+  echo     取得先: github.com ^(トークンなし・正常^)
 ) else (
   echo     取得先: github.com ^(トークンあり^)
+  echo     ❌ 古い設定が残っています。このトークンは失効しています。
+  echo        update.bat を実行すると自動で入れ直されるので、まず試してください。
 )
 echo.
 
@@ -62,6 +63,12 @@ echo.
 
 echo [6] 手元で書き換わっているファイル（何も出なければ正常）
 git status --short
+rem git の処理が途中で止まると残る。残っている間、更新は何度やっても
+rem 同じエラーで止まり続ける（実際にメンバーの端末で発生した）
+if exist ".git\index.lock" (
+  echo     ❌ 前回の更新が途中で止まった跡 ^(index.lock^) が残っています。
+  echo        これが原因です。update.bat をもう一度実行すれば自動で片付きます。
+)
 echo.
 
 echo [7] 最新の情報を取得中...
