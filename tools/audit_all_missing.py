@@ -32,7 +32,12 @@ MEDIA_LABEL_TO_KEY = {
     'RDS': 'rds', 'ビズリーチ': 'bizreach', 'dodaX': 'dodax', 'doda X': 'dodax',
     'アンビ': 'ambi', 'AMBI': 'ambi', 'Green': 'green', 'グリーン': 'green', 'マイナビ': 'mynavi',
 }
-KANJI_VARIANTS = {'鐵': '鉄', '廣': '広', '龍': '竜', '澤': '沢', '齋': '斎', '邊': '辺', '會': '会'}
+KANJI_VARIANTS = {
+    '鐵': '鉄', '廣': '広', '龍': '竜', '澤': '沢', '齋': '斎', '邊': '辺', '會': '会',
+    # 大学名で実際に表記が割れるもの。「慶應義塾大学」と「慶応義塾大学」が
+    # 別大学として扱われ、同じ人を結び付けられなくなっていた
+    '應': '応', '學': '学', '國': '国', '藝': '芸', '豐': '豊', '壽': '寿',
+}
 
 args = [a for a in sys.argv[1:] if not a.startswith('-')]
 if len(args) >= 2:
@@ -172,12 +177,19 @@ for key in sorted(set(gas_by_key) | set(supa_by_key), key=lambda k: (k[1] == '',
         gc = norm(g.get('company'))
         hit = None
         how = ''
-        # 大学名か会社名が一致すれば、同じ人だと言える
+        # 大学名か会社名が一致すれば、同じ人だと言える。
+        # 大学名は前方一致を使わない。norm_univ が「大学」「大学院」を落とすため、
+        # 前方一致にすると別の大学どうしが一致してしまう（実際に確認した）：
+        #   東京大学(→東京) と 東京工業大学(→東京工業)
+        #   日本大学(→日本) と 日本女子大学(→日本女子)
+        #   関西大学(→関西) と 関西学院大学(→関西学院)
+        # 「東京大学」と「東京大学大学院」はどちらも「東京」に揃うので、
+        # 前方一致が無くても一致する。完全一致で足りる
         for s in unused:
             if abs((s['_t'] - g['_t']).total_seconds()) > 300:
                 continue
             su = norm_univ(s.get('university'))
-            if gu and su and (gu == su or gu.startswith(su) or su.startswith(gu)):
+            if gu and su and gu == su:
                 hit, how = s, '大学一致'
                 break
         if not hit:
@@ -185,7 +197,13 @@ for key in sorted(set(gas_by_key) | set(supa_by_key), key=lambda k: (k[1] == '',
                 if abs((s['_t'] - g['_t']).total_seconds()) > 300:
                     continue
                 sc = norm(s.get('company_name'))
-                if gc and sc and (gc == sc or gc.startswith(sc) or sc.startswith(gc)):
+                if not (gc and sc):
+                    continue
+                # 会社名は支店・事業部が付く形があるため前方一致を残すが、
+                # 短い前方一致は別会社どうしを結び付ける（「三菱」で三菱商事と
+                # 三菱電機が一致してしまう）。短い方が4文字以上のときだけ認める
+                if gc == sc or (min(len(gc), len(sc)) >= 4
+                                and (gc.startswith(sc) or sc.startswith(gc))):
                     hit, how = s, '会社一致'
                     break
         # どちらも一致しない場合は、時刻が近いというだけで結び付ける。

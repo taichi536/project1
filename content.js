@@ -2893,6 +2893,25 @@ document.addEventListener('click', e => {
 
   if (raw) {
     (async () => {
+      // 返信は、スカウトではないので記録してはいけない。
+      // doda-Xの「メッセージ返信」画面は送信ボタンが「送信する」で、スカウト送信と
+      // 同じ文言になる。さらに、この画面でも候補者を復元できてしまうため（メッセージ
+      // 一覧の行から会社名や会員番号が読めてしまう）、返信を送るたびにスカウトが
+      // 1件記録されていた。実データで確認したもの：
+      //   「程 謙富士通株式会社」「田中 瞳AGC株式会社」「00924245富士通株式会社」
+      // これらは候補者カードではなくメッセージ一覧の行で、「氏名｜会社名」の
+      // 区切りがinnerTextで消えて連結されている。会社名の崩れもここが出所だった。
+      //
+      // 画面の作りで見分けると媒体の変更で壊れるので、実際に飛んだ通信で判断する。
+      // 返信の通信（NOT_SEND_REQUESTS）が来たら記録しない。
+      // 下の「候補者を特定できない」場合の警告抑制と同じ待ち方にそろえている
+      if (NOT_SEND_REQUESTS[getPlatform()]) {
+        for (let i = 0; i < 10 && _lastNotSendRequestAt < sendClickedAt; i++) await sleep(250);
+        if (_lastNotSendRequestAt >= sendClickedAt) {
+          console.log('[Snow-we] 返信の送信だったため記録しません');
+          return;
+        }
+      }
       try {
         const pending = JSON.parse(raw);
         if (pending && pending.id && Date.now() - pending.ts < 30 * 60 * 1000) {
