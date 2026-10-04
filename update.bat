@@ -51,22 +51,31 @@ if exist ".git\index.lock" (
   )
 )
 
+rem Python を動かすと __pycache__ フォルダが残る。gitの管理対象外なので更新では
+rem 消されないが、gitが削除しようとしているフォルダの中に残っていると
+rem 「Deletion of directory failed. Should I try again? (y/n)」で更新が止まる。
+rem 実際にメンバーの端末で、別プロジェクトの modules フォルダがこれで消せず
+rem 止まった。消しても必要になれば作り直されるだけのものなので、先に片付ける
+for /d /r %%d in (__pycache__) do @if exist "%%d" rd /s /q "%%d" 2>nul
+
 rem git pull の成否を必ず見る。以前は失敗しても「更新完了」と表示していたため、
 rem ネットワークが切れていても、ローカルに変更が残って pull が止まっていても、
 rem 画面上は成功したように見えていた
 git pull
 if not errorlevel 1 goto :updated
 
-rem ここに来た＝pullが失敗した。index.lock が残っているなら、それが原因なので
-rem 一度だけ片付けてやり直す。OneDrive配下だと、上の片付けの直後に同期が
-rem ファイルを作り直して、ここで失敗することがある。
-rem このlockは、たった今失敗したgit自身が残したもの（別のgitが動いている場合は
-rem 冒頭のチェックで既に止めている）なので、消して安全
-if not exist ".git\index.lock" goto :failed
+rem ここに来た＝pullが失敗した。更新を妨げるものを片付けて一度だけやり直す。
+rem メンバーはこのフォルダの中身を編集しない前提なので、手元の書き換えは
+rem 元に戻してよい（「ファイルを直接編集してしまった」は実際に起きた原因のひとつ）。
+rem index.lock は、たった今失敗したgit自身が残したもの（別のgitが動いている
+rem 場合は冒頭のチェックで既に止めている）なので、消して安全
 echo.
-echo 途中で止まった跡を片付けて、もう一度試します...
+echo 更新を妨げているものを片付けて、もう一度試します...
+echo （このフォルダの中で書き換わったファイルは元に戻します）
 echo.
-del /f /q ".git\index.lock" > nul 2>&1
+if exist ".git\index.lock" del /f /q ".git\index.lock" > nul 2>&1
+for /d /r %%d in (__pycache__) do @if exist "%%d" rd /s /q "%%d" 2>nul
+git checkout -- . > nul 2>&1
 git pull
 if not errorlevel 1 goto :updated
 

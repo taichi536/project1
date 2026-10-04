@@ -48,17 +48,31 @@ fi
 # git pull の成否を必ず見る。以前は失敗しても「更新完了」と表示していたため、
 # ネットワークが切れていても、ローカルに変更が残って pull が止まっていても、
 # 画面上は成功したように見えていた
+# Python を動かすと __pycache__ フォルダが残る。gitの管理対象外なので更新では
+# 消されないが、gitが削除しようとしているフォルダの中に残っていると
+# 「Deletion of directory failed」で更新が止まる。実際にメンバーの端末で、
+# 別プロジェクトの modules フォルダがこれで消せず止まった。
+# 消しても必要になれば作り直されるだけのものなので、先に片付ける
+clean_pycache() {
+  find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+}
+clean_pycache
+
 pull_ok=0
 if git pull; then
   pull_ok=1
-elif [ -f .git/index.lock ]; then
-  # 失敗して index.lock が残っているなら、それが原因なので一度だけ片付けて
-  # やり直す。このlockは、たった今失敗したgit自身が残したもの（別のgitが
-  # 動いている場合は冒頭のチェックで既に止めている）なので、消して安全
+else
+  # 更新を妨げるものを片付けて一度だけやり直す。メンバーはこのフォルダの
+  # 中身を編集しない前提なので、手元の書き換えは元に戻してよい。
+  # index.lock は、たった今失敗したgit自身が残したもの（別のgitが動いている
+  # 場合は冒頭のチェックで既に止めている）なので、消して安全
   echo ""
-  echo "途中で止まった跡を片付けて、もう一度試します..."
+  echo "更新を妨げているものを片付けて、もう一度試します..."
+  echo "（このフォルダの中で書き換わったファイルは元に戻します）"
   echo ""
   rm -f .git/index.lock
+  clean_pycache
+  git checkout -- . > /dev/null 2>&1 || true
   if git pull; then
     pull_ok=1
   fi
