@@ -48,7 +48,23 @@ fi
 # git pull の成否を必ず見る。以前は失敗しても「更新完了」と表示していたため、
 # ネットワークが切れていても、ローカルに変更が残って pull が止まっていても、
 # 画面上は成功したように見えていた
-if ! git pull; then
+pull_ok=0
+if git pull; then
+  pull_ok=1
+elif [ -f .git/index.lock ]; then
+  # 失敗して index.lock が残っているなら、それが原因なので一度だけ片付けて
+  # やり直す。このlockは、たった今失敗したgit自身が残したもの（別のgitが
+  # 動いている場合は冒頭のチェックで既に止めている）なので、消して安全
+  echo ""
+  echo "途中で止まった跡を片付けて、もう一度試します..."
+  echo ""
+  rm -f .git/index.lock
+  if git pull; then
+    pull_ok=1
+  fi
+fi
+
+if [ "$pull_ok" -ne 1 ]; then
   echo ""
   echo "❌ 更新に失敗しました。"
   echo ""
@@ -59,8 +75,8 @@ if ! git pull; then
   echo "  ・このフォルダの中のファイルを直接編集してしまった"
   echo "  ・フォルダを移動・コピーした"
   echo ""
-  echo "「index.lock」と出ている場合は、もう一度このファイルを実行してください。"
-  echo "それでも同じなら管理者に連絡してください。"
+  echo "「index.lock」と出ている場合は、クラウド同期（OneDrive・iCloud など）が"
+  echo "邪魔をしています。同期を一時停止して、もう一度このファイルを実行してください。"
   echo ""
   echo "「Authentication failed」と出ている場合は、管理者に連絡してください。"
   echo ""

@@ -17,6 +17,14 @@ echo.
 
 echo [1] このフォルダの場所
 echo     %CD%
+rem OneDrive配下だと、同期が .git の中のファイルを掴むため、更新が途中で
+rem 止まった跡(index.lock)が残りやすい。実際にメンバーの端末で起きた。
+rem フォルダの移動は拡張機能IDが変わって設定と記録が消えるため、ここでは勧めない
+echo %CD% | findstr /i "OneDrive" > nul
+if not errorlevel 1 (
+  echo     ⚠ このフォルダは OneDrive の中にあります。更新が途中で止まる
+  echo        原因になります。この表示を管理者に伝えてください。
+)
 echo.
 
 echo [2] いまのバージョン
