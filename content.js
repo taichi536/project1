@@ -1235,6 +1235,18 @@ const BULK_SEND_REQUESTS = {
 // スカウトとして記録されていた（逆方向の突き合わせで過剰記録11件の原因）
 const NOT_SEND_REQUESTS = {
   dodax: /\/iapi\/message\/saveByCorporate(?:\?|$)/,
+  // ビズリーチの返信。スカウト送信（/v1/api/send-scout）とは別の通信
+  bizreach: /\/v1\/api\/send-message(?:\?|$)/,
+};
+
+// 送信ではないと分かっている通信。報告しない。
+// 実データで、ビズリーチの「送信の可能性がある通信（未登録）」30件はすべてこれだった：
+//   /v1/api/scouts/validate（送信前の検証）  /v1/api/action-logs/send-scouts（操作ログ）
+//   /v1/api/messages/validate  /v1/api/send-message（返信）
+//   /v1/api/message-templates(/validate)（テンプレート保存）
+// 本物の送信（/v1/api/send-scout）は登録済み。誤検知を放置すると本物が埋もれる
+const IGNORED_REQUESTS = {
+  bizreach: /\/v1\/api\/(?:scouts\/validate|action-logs\/|messages\/validate|send-message|message-templates)/,
 };
 let _lastNotSendRequestAt = 0;
 
@@ -1334,16 +1346,66 @@ function extractBulkCandidateIds(body) {
 
 /** 送信内容の「形」だけを残す。値は入れない（個人情報が含まれるため） */
 function describeBodyShape(body) {
+  // 値そのものは残さない。キー名と形だけを見て、次に直せるようにする
+  const shape = (v, depth) => {
+    if (Array.isArray(v)) return `配列(${v.length})`;
+    if (v && typeof v === 'object') {
+      if (depth <= 0) return 'オブジェクト';
+      return `{${Object.entries(v).map(([k, x]) => `${k}:${shape(x, depth - 1)}`).join(',')}}`;
+    }
+    // 文字列の中にさらにJSONが入っている形があった（doda Xの一括送信の
+    // scoutSendRequest）。中を見ないと候補者がどう入っているか分からない
+    if (typeof v === 'string') {
+      try {
+        const inner = JSON.parse(v);
+        if (inner && typeof inner === 'object') return `string→${shape(inner, depth - 1)}`;
+      } catch (_) {}
+      return 'string';
+    }
+    return typeof v;
+  };
+  const text = String(body || '');
   try {
-    const parsed = JSON.parse(String(body || ''));
-    if (parsed && typeof parsed === 'object') {
-      return Object.entries(parsed)
-        .map(([k, v]) => `${k}:${Array.isArray(v) ? `配列(${v.length})` : typeof v}`)
-        .join(',')
-        .slice(0, 280);
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object') return shape(parsed, 3).slice(0, 280);
+  } catch (_) {}
+  return `長さ${text.length}`;
+}
+
+// 本文に出てくる数字の並びを、桁数ごとに数える。値は残さない。
+// 候補者の識別子が何桁なのかが分かれば、取り出し方を決められる
+function describeDigitRuns(body) {
+  const byLen = {};
+  try {
+    for (const m of String(body || '').matchAll(/\d+/g)) {
+      byLen[m[0].length] = (byLen[m[0].length] || 0) + 1;
     }
   } catch (_) {}
-  return `長さ${String(body || '').length}`;
+  return Object.entries(byLen)
+    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .map(([len, n]) => `${len}桁×${n}`)
+    .join(' ') || '数字なし';
+}
+
+// ── 一括送信で「誰に送ったか」を画面から控える ──
+// 通信の中身には候補者の識別子が入っていなかった（実データで確認。本文は
+// scoutSendRequest と resendSetting の2つの文字列だけで、8桁の会員番号は
+// どこにも現れない）。桁数を広げて数字を拾うと、関係のない値を候補者として
+// 記録してしまう。選択された候補者は画面に出ているので、押した時点で控える
+let _pendingBulkIds = [];
+let _pendingBulkAt = 0;
+
+function captureSelectedCandidateIds() {
+  const ids = [];
+  try {
+    for (const card of findCandidateCardsByPlatform()) {
+      const box = card.querySelector('input[type="checkbox"]');
+      if (!box || !box.checked) continue;
+      const id = getCandidateId(card);
+      if (id && !ids.includes(id)) ids.push(id);
+    }
+  } catch (_) {}
+  return ids;
 }
 
 // net-hook.js が生きているか。生きていなければボタン検知の従来経路に任せる。
@@ -1370,13 +1432,25 @@ window.addEventListener('snowwe:request', e => {
     // 送信内容から候補者の識別子を取り出して、人数分を記録する
     const bulkPattern = BULK_SEND_REQUESTS[platform];
     if (bulkPattern && bulkPattern.test(String(url))) {
+      // 画面で控えた選択を最優先に使う。識別子がそのまま取れているので確実
+      if (_pendingBulkIds.length && Date.now() - _pendingBulkAt < 10 * 60 * 1000) {
+        const picked = _pendingBulkIds.slice();
+        _pendingBulkIds = [];
+        console.log(`[Snow-we] 一括送信を検知: 画面で選択されていた${picked.length}件を記録します`);
+        for (const id of picked) {
+          recordScoutSent(id, {}, '', '', _cachedCurrentPosition);
+        }
+        return;
+      }
       const ids = extractBulkCandidateIds(e.detail && e.detail.body);
       console.log(`[Snow-we] 一括送信を検知: ${ids.length}件`);
       if (ids.length === 0) {
-        // 取り出せなかった。中身の形だけを残して、次に直せるようにする
+        // 取り出せなかった。中身の形だけを残して、次に直せるようにする。
+        // 値は残さず、キー名と数字の桁数だけにする
         reportRecordFailure('一括送信の内容から候補者を取り出せない', {
           buttonText: _lastButtonText,
-          path: describeBodyShape(e.detail && e.detail.body),
+          path: `${describeBodyShape(e.detail && e.detail.body)} / `
+            + `${describeDigitRuns(e.detail && e.detail.body)}`,
         });
         try {
           showAutoStatus('⚠️ 一括送信を検知しましたが、対象を特定できませんでした', 12000);
@@ -1398,6 +1472,8 @@ window.addEventListener('snowwe:request', e => {
     if (!pattern || !pattern.test(String(url))) {
       try {
         const path = new URL(String(url), location.origin).pathname;
+        const ignored = IGNORED_REQUESTS[platform];
+        if (ignored && ignored.test(path)) return;
         const looksLikeSend = /scout|message|offer|approach|mail|send/i.test(path);
         const inScoutFlow = Date.now() - _lastButtonAt < 60 * 1000;
         const alreadyReported = Date.now() - (_reportedPaths.get(path) || 0) < 30 * 60 * 1000;
@@ -2374,6 +2450,18 @@ document.addEventListener('click', e => {
   if (textCore) {
     _lastButtonText = textCore.slice(0, 60);
     _lastButtonAt = Date.now();
+  }
+
+  // doda Xの一括送信は、通信の中身に候補者の識別子が入っていない。
+  // 選択された候補者は画面に出ているので、一括送信に関わるボタンを押した時点で控える。
+  // 一覧から送信画面へ進むと一覧が消えることがあるため、0件のときは前の控えを残す
+  if (getPlatform() === 'dodax' && /一括|送信/.test(textCore)) {
+    const picked = captureSelectedCandidateIds();
+    if (picked.length > 0) {
+      _pendingBulkIds = picked;
+      _pendingBulkAt = Date.now();
+      console.log(`[Snow-we] 一括送信の対象として${picked.length}件を控えました`);
+    }
   }
 
   // AMBI: 「送信」を押した後に「スカウトを送信しますか？」という確認ダイアログが
