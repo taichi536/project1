@@ -633,16 +633,35 @@ async function getPositionsApiToken() {
   return (positionsApiToken || '').trim();
 }
 
+// scout側のAPIに「拡張機能からの呼び出しである」と伝えるための印。
+//
+// もともとは Origin ヘッダ（chrome-extension://…）で判定していたが、拡張機能の
+// サービスワーカーから出す素のGETには Origin が付かない。実機で確認したところ、
+// /api/positions も /api/knowledge も401になっており、ポジション取得は
+// Supabaseへのフォールバックで動いていた。失敗しても次の手段で成功するため、
+// 誰も気づけなかった。
+//
+// 防御の強さは変わらない（Originもこのヘッダも、偽装の手間は同じ）。実際の
+// 歯止めは呼び出し回数の制限のほうで、こちらは変えていない。違うのは、
+// この印は拡張機能が自分で付けるので、確実に届くという点だけ
+const SNOWWE_CLIENT_HEADER = { 'X-Snowwe-Client': 'extension' };
+
+async function scoutApiHeaders(extra = {}) {
+  const token = await getPositionsApiToken();
+  return {
+    ...SNOWWE_CLIENT_HEADER,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extra,
+  };
+}
+
 // 社内ナレッジ（scout側のFAQ）。相談タブが参照する。
 // ポジションと同じ認証・同じ経路で取る。Supabaseの公開鍵で直接読むと、
 // 拡張機能のリポジトリが公開されている以上、誰でも読める状態になる
 const KNOWLEDGE_API_URL = 'https://143-198-195-132.nip.io/api/knowledge';
 
 async function fetchKnowledgeApi() {
-  const token = await getPositionsApiToken();
-  const res = await fetch(KNOWLEDGE_API_URL, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  const res = await fetch(KNOWLEDGE_API_URL, { headers: await scoutApiHeaders() });
   if (!res.ok) {
     throw new Error(res.status === 401
       ? 'ナレッジAPIの認証に失敗しました。update を実行して拡張機能を最新にしてください。'
@@ -653,10 +672,7 @@ async function fetchKnowledgeApi() {
 }
 
 async function fetchPositionsApi(query) {
-  const token = await getPositionsApiToken();
-  const res = await fetch(`${POSITIONS_API_URL}?${query}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  const res = await fetch(`${POSITIONS_API_URL}?${query}`, { headers: await scoutApiHeaders() });
   if (!res.ok) {
     throw new Error(res.status === 401
       ? 'ポジションAPIの認証に失敗しました。拡張機能が古い可能性があります。update を実行して最新にしてください。'
@@ -711,9 +727,8 @@ async function fetchPositionsCompact(forceRefresh) {
 // 拡張機能側で作り直すと二重管理になり、テンプレートを直したときに片方だけ古いまま
 // 残ってしまうため、文面の組み立てはサーバーに任せる
 async function fetchScoutTemplate(id) {
-  const token = await getPositionsApiToken();
   const res = await fetch(`${POSITIONS_API_URL}/scout-template?id=${encodeURIComponent(id)}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers: await scoutApiHeaders(),
   });
   if (!res.ok) throw new Error(`スカウト文面の取得に失敗しました (${res.status})`);
   return res.json();
@@ -733,13 +748,9 @@ async function fetchScoutTemplate(id) {
 // ベクトル化には別ベンダーのAPIキーが要るが、それをここに置くわけにはいかない
 // （このリポジトリに載る）ので、計算はサーバー側で完結させ、結果だけ受け取る。
 async function fetchPositionMatches(profileText, limit) {
-  const token = await getPositionsApiToken();
   const res = await fetch(`${POSITIONS_API_URL}/match`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: await scoutApiHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ profileText, limit }),
   });
   const data = await res.json().catch(() => ({}));
