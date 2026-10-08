@@ -633,6 +633,25 @@ async function getPositionsApiToken() {
   return (positionsApiToken || '').trim();
 }
 
+// 社内ナレッジ（scout側のFAQ）。相談タブが参照する。
+// ポジションと同じ認証・同じ経路で取る。Supabaseの公開鍵で直接読むと、
+// 拡張機能のリポジトリが公開されている以上、誰でも読める状態になる
+const KNOWLEDGE_API_URL = 'https://143-198-195-132.nip.io/api/knowledge';
+
+async function fetchKnowledgeApi() {
+  const token = await getPositionsApiToken();
+  const res = await fetch(KNOWLEDGE_API_URL, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    throw new Error(res.status === 401
+      ? 'ナレッジAPIの認証に失敗しました。update を実行して拡張機能を最新にしてください。'
+      : `ナレッジ取得失敗: ${res.status}`);
+  }
+  const data = await res.json();
+  return data.items || [];
+}
+
 async function fetchPositionsApi(query) {
   const token = await getPositionsApiToken();
   const res = await fetch(`${POSITIONS_API_URL}?${query}`, {
@@ -1505,6 +1524,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
   // ポジション一覧（表示名の配列）を返す。
   // 候補者管理システムのAPI → Supabase → ハードコード の順にフォールバックする
+  if (msg.type === 'getKnowledge') {
+    (async () => {
+      try {
+        sendResponse({ items: await fetchKnowledgeApi() });
+      } catch (e) {
+        sendResponse({ error: e.message });
+      }
+    })();
+    return true;
+  }
+
   if (msg.type === 'getPositionList') {
     (async () => {
       try {

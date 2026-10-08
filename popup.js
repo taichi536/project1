@@ -2595,10 +2595,11 @@ function setStatus(tab, type, message) {
 // タブ6: 社内ナレッジへの相談（チャット）
 // ============================================================
 //
-// ナレッジはスプレッドシートの「ナレッジ」シートに置き、GAS経由で読む。
-// このリポジトリは公開されているためSupabaseの公開鍵も公開されており、
-// そこに社内の情報を置くと誰でも読めてしまう。GASのURLと合言葉は各メンバーの
-// 拡張機能の設定の中にしかないので、ポジション情報と同じ経路になる。
+// ナレッジは scout 側のFAQ（/faq の画面で編集できるもの）を読む。
+// ポジションマスタと同じAPI・同じ絞り込みで取る。このリポジトリは公開されて
+// いるためSupabaseの公開鍵も公開されており、そこに社内の情報を置いて直接読む
+// 形にすると誰でも読める。新しい置き場を作らないのは、同じことを2か所に書くと
+// 必ず片方が古くなるため。
 //
 // ベクトル検索は使わない。ナレッジ全部をそのままプロンプトに入れる。
 // 検索を挟むと「ナレッジには書いてあるのに答えられない」が起き、原因の
@@ -2644,28 +2645,18 @@ async function loadKnowledge(force = false) {
   const c = cached.knowledgeCache;
   if (!force && c && Date.now() - (c.fetchedAt || 0) < KNOWLEDGE_TTL_MS) return c;
 
-  const r = await chrome.storage.local.get(['gasSettings']).catch(() => ({}));
-  const gas = r.gasSettings || {};
-  const url = gas.positionUrl || gas.url || gas.dbUrl;
-  if (!url) {
+  let resp;
+  try {
+    resp = await chrome.runtime.sendMessage({ type: 'getKnowledge' });
+  } catch (e) {
     if (c) return c;
-    throw new Error('GASのURLが設定されていません（設定タブ）');
+    throw new Error(`ナレッジを取得できませんでした（${e.message}）`);
   }
-
-  const res = await fetch(url, {
-    method: 'POST',
-    body: JSON.stringify({ secret: gas.secret || 'snowwe2024', action: 'getKnowledge' }),
-  });
-  if (!res.ok) {
+  if (!resp || resp.error) {
     if (c) return c;
-    throw new Error(`ナレッジを取得できませんでした (HTTP ${res.status})`);
+    throw new Error(resp?.error || 'ナレッジを取得できませんでした');
   }
-  const data = await res.json();
-  if (!data.ok) {
-    if (c) return c;
-    throw new Error(data.error || 'ナレッジを取得できませんでした');
-  }
-  const fresh = { items: data.items || [], fetchedAt: Date.now() };
+  const fresh = { items: resp.items || [], fetchedAt: Date.now() };
   await chrome.storage.local.set({ knowledgeCache: fresh }).catch(() => {});
   return fresh;
 }
@@ -2678,13 +2669,8 @@ function buildKnowledgeBlock(items, positions) {
     lines.push('');
   }
   if (items && items.length) {
-    lines.push('# 社内ナレッジ');
-    const byCat = {};
-    for (const it of items) (byCat[it.category || 'その他'] ||= []).push(it);
-    for (const [cat, rows] of Object.entries(byCat)) {
-      lines.push(`## ${cat}`);
-      for (const it of rows) lines.push(`### ${it.title}\n${it.body}`);
-    }
+    lines.push('# 社内ナレッジ（scoutのFAQ）');
+    for (const it of items) lines.push(`## ${it.title}\n${it.body}`);
   }
   return lines.join('\n');
 }
