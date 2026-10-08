@@ -2580,7 +2580,7 @@ function showHistoryMsg(msg, color) {
 // ユーティリティ
 // ============================================================
 function setStatus(tab, type, message) {
-  const idMap = { generate: 'status', suggest: 'suggest-status', screening: 'screening-status' };
+  const idMap = { generate: 'status', suggest: 'suggest-status', screening: 'screening-status', chat: 'chat-status' };
   const el = $(idMap[tab] || 'status');
   if (!el) return;
   el.className = `status ${type}`;
@@ -2590,3 +2590,205 @@ function setStatus(tab, type, message) {
     el.textContent = message;
   }
 }
+
+// ============================================================
+// タブ6: 社内ナレッジへの相談（チャット）
+// ============================================================
+//
+// ナレッジはスプレッドシートの「ナレッジ」シートに置き、GAS経由で読む。
+// このリポジトリは公開されているためSupabaseの公開鍵も公開されており、
+// そこに社内の情報を置くと誰でも読めてしまう。GASのURLと合言葉は各メンバーの
+// 拡張機能の設定の中にしかないので、ポジション情報と同じ経路になる。
+//
+// ベクトル検索は使わない。ナレッジ全部をそのままプロンプトに入れる。
+// 検索を挟むと「ナレッジには書いてあるのに答えられない」が起き、原因の
+// 切り分けが要るようになる。量が増えて入りきらなくなってから考える。
+// 繰り返し送る部分はプロンプトキャッシュで安くする。
+
+const CHAT_MODEL = 'claude-opus-4-8';
+// 1時間はキャッシュを使う。スプレッドシートを直した直後に反映したい場合は
+// 「ナレッジを取り直す」で取り直せる
+const KNOWLEDGE_TTL_MS = 60 * 60 * 1000;
+// 会話が長くなるとナレッジごと毎回送ることになるため、直近の往復だけ残す
+const CHAT_MAX_TURNS = 12;
+
+let _chatMessages = [];
+
+function chatAppend(role, text) {
+  const log = $('chat-log');
+  if (!log) return null;
+  // 最初の説明文は、1通目が入った時点で消す
+  if (_chatMessages.length <= 1 && log.firstElementChild && !log.dataset.started) {
+    log.innerHTML = '';
+    log.dataset.started = '1';
+  }
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'margin-bottom:10px;';
+  const who = document.createElement('div');
+  who.style.cssText = `font-size:10px; margin-bottom:2px; color:${role === 'user' ? '#6366F1' : '#16A34A'};`;
+  who.textContent = role === 'user' ? 'あなた' : 'アシスタント';
+  const body = document.createElement('div');
+  body.style.cssText = 'white-space:pre-wrap; word-break:break-word;';
+  body.textContent = text;
+  wrap.appendChild(who);
+  wrap.appendChild(body);
+  log.appendChild(wrap);
+  log.scrollTop = log.scrollHeight;
+  return body;
+}
+
+// ナレッジを取得する。失敗しても、前に取れていたものがあればそれを使う
+// （取得できないからといって相談できなくなるより良い）
+async function loadKnowledge(force = false) {
+  const cached = await chrome.storage.local.get(['knowledgeCache']).catch(() => ({}));
+  const c = cached.knowledgeCache;
+  if (!force && c && Date.now() - (c.fetchedAt || 0) < KNOWLEDGE_TTL_MS) return c;
+
+  const r = await chrome.storage.local.get(['gasSettings']).catch(() => ({}));
+  const gas = r.gasSettings || {};
+  const url = gas.positionUrl || gas.url || gas.dbUrl;
+  if (!url) {
+    if (c) return c;
+    throw new Error('GASのURLが設定されていません（設定タブ）');
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    body: JSON.stringify({ secret: gas.secret || 'snowwe2024', action: 'getKnowledge' }),
+  });
+  if (!res.ok) {
+    if (c) return c;
+    throw new Error(`ナレッジを取得できませんでした (HTTP ${res.status})`);
+  }
+  const data = await res.json();
+  if (!data.ok) {
+    if (c) return c;
+    throw new Error(data.error || 'ナレッジを取得できませんでした');
+  }
+  const fresh = { items: data.items || [], fetchedAt: Date.now() };
+  await chrome.storage.local.set({ knowledgeCache: fresh }).catch(() => {});
+  return fresh;
+}
+
+function buildKnowledgeBlock(items, positions) {
+  const lines = [];
+  if (positions && positions.length) {
+    lines.push('# 募集中のポジション一覧');
+    lines.push(positions.join('\n'));
+    lines.push('');
+  }
+  if (items && items.length) {
+    lines.push('# 社内ナレッジ');
+    const byCat = {};
+    for (const it of items) (byCat[it.category || 'その他'] ||= []).push(it);
+    for (const [cat, rows] of Object.entries(byCat)) {
+      lines.push(`## ${cat}`);
+      for (const it of rows) lines.push(`### ${it.title}\n${it.body}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+async function runChat() {
+  const apiKey = sanitizeApiKey($('api-key').value);
+  if (!apiKey) {
+    setStatus('chat', 'error', 'APIキーを入力して保存してください');
+    return;
+  }
+  const input = $('chat-input');
+  const question = (input.value || '').trim();
+  if (!question) return;
+
+  $('chat-send-btn').disabled = true;
+  input.value = '';
+  _chatMessages.push({ role: 'user', content: question });
+  chatAppend('user', question);
+  setStatus('chat', 'loading', '考えています...');
+
+  try {
+    const knowledge = await loadKnowledge();
+    let positions = [];
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: 'getPositionList' });
+      positions = resp?.positions || [];
+    } catch (_) {}
+
+    const block = buildKnowledgeBlock(knowledge.items, positions);
+    const system = [
+      {
+        type: 'text',
+        text: 'あなたはハイクラスコンサル転職エージェントの社内アシスタントです。'
+          + '下の社内ナレッジとポジション一覧だけを根拠に、日本語で簡潔に答えてください。\n\n'
+          + '守ること:\n'
+          + '- ナレッジに書かれていないことは「ナレッジに書かれていません」と答える。推測で補わない\n'
+          + '- 答えの根拠になった見出しを最後に「参照: 〜」として示す\n'
+          + '- 聞かれたことに答える。前置きや一般論は書かない\n\n'
+          + block,
+        // ナレッジは毎回同じ内容を送ることになるため、キャッシュして費用を抑える
+        cache_control: { type: 'ephemeral' },
+      },
+    ];
+
+    const data = await claudeFetch(apiKey, {
+      model: CHAT_MODEL,
+      max_tokens: 1500,
+      system,
+      messages: _chatMessages.slice(-CHAT_MAX_TURNS),
+    });
+    const answer = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim()
+      || '（応答が空でした）';
+    _chatMessages.push({ role: 'assistant', content: answer });
+    chatAppend('assistant', answer);
+
+    const n = (knowledge.items || []).length;
+    setStatus('chat', 'success', `回答しました（ナレッジ${n}件 / ポジション${positions.length}件を参照）`);
+  } catch (e) {
+    // 送って失敗した質問を履歴に残すと、次の送信で文脈が壊れる
+    _chatMessages.pop();
+    setStatus('chat', 'error', `エラー: ${e.message}`);
+  } finally {
+    $('chat-send-btn').disabled = false;
+  }
+}
+
+if ($('chat-send-btn')) {
+  $('chat-send-btn').addEventListener('click', () => runChat());
+  $('chat-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runChat(); }
+  });
+  $('chat-reset-btn').addEventListener('click', () => {
+    _chatMessages = [];
+    const log = $('chat-log');
+    log.innerHTML = '<div style="color:#888780;">会話をリセットしました。</div>';
+    delete log.dataset.started;
+    setStatus('chat', '', '');
+  });
+  $('chat-reload-knowledge-btn').addEventListener('click', async () => {
+    setStatus('chat', 'loading', 'ナレッジを取り直しています...');
+    try {
+      const k = await loadKnowledge(true);
+      setStatus('chat', 'success', `ナレッジを取り直しました（${(k.items || []).length}件）`);
+      renderKnowledgeStatus(k);
+    } catch (e) {
+      setStatus('chat', 'error', `エラー: ${e.message}`);
+    }
+  });
+}
+
+function renderKnowledgeStatus(k) {
+  const el = $('chat-knowledge-status');
+  if (!el || !k) return;
+  const when = k.fetchedAt ? new Date(k.fetchedAt).toLocaleString('ja-JP') : '';
+  el.textContent = `ナレッジ ${(k.items || []).length}件（取得: ${when}）`;
+}
+
+// 相談タブを開いたときに、ナレッジの状態を出しておく。
+// 「何件読めているか」が見えないと、シートを直したのに反映されていないことに気づけない
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  if (btn.dataset.tab !== 'chat') return;
+  btn.addEventListener('click', async () => {
+    try { renderKnowledgeStatus(await loadKnowledge()); } catch (e) {
+      setStatus('chat', 'error', `ナレッジを読めていません: ${e.message}`);
+    }
+  });
+});

@@ -507,6 +507,7 @@
   <button class="tab-btn" data-tab="screening">🔍 一次選定</button>
   <button class="tab-btn" data-tab="approval">✅ 承認待ち</button>
   <button class="tab-btn" data-tab="history">📋 履歴</button>
+  <button class="tab-btn" data-tab="chat">💬 相談</button>
   <button class="tab-btn" data-tab="settings">⚙️ 設定</button>
 </div>
 
@@ -652,6 +653,35 @@
 </div>
 
 <!-- タブ5: 設定 -->
+<!-- タブ6: 社内ナレッジへの相談 -->
+<div class="tab-content" id="tab-chat">
+  <div id="chat-knowledge-status" style="font-size:10px; color:#888780; margin-bottom:6px;"></div>
+
+  <div id="chat-log" style="border:1px solid #E5E3DD; border-radius:8px; padding:10px;
+       height:360px; overflow-y:auto; background:#FCFCFA; font-size:12px; line-height:1.7;">
+    <div style="color:#888780;">
+      社内ナレッジ（スプレッドシートの「ナレッジ」シート）とポジション情報をもとに答えます。<br>
+      例：「このファームの選考は何次まで？」「未経験可のポジションは？」<br>
+      <span style="color:#B45309;">候補者の氏名や経歴は入力しないでください。</span>
+    </div>
+  </div>
+
+  <div style="display:flex; gap:6px; margin-top:8px;">
+    <textarea id="chat-input" rows="2" placeholder="質問を入力（Enterで送信 / Shift+Enterで改行）"
+      style="flex:1; padding:8px; border:1px solid #E5E3DD; border-radius:8px;
+             font-size:12px; font-family:inherit; resize:vertical;"></textarea>
+    <button id="chat-send-btn" style="white-space:nowrap;">送信</button>
+  </div>
+
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+    <button id="chat-reset-btn" style="font-size:10px; padding:4px 8px; background:#F5F4F0;
+            color:#5A5852; border:1px solid #E5E3DD;">会話をリセット</button>
+    <button id="chat-reload-knowledge-btn" style="font-size:10px; padding:4px 8px; background:#F5F4F0;
+            color:#5A5852; border:1px solid #E5E3DD;">ナレッジを取り直す</button>
+  </div>
+  <div id="chat-status" style="font-size:11px; margin-top:6px;"></div>
+</div>
+
 <div class="tab-content" id="tab-settings">
 
   <div class="setting-group">

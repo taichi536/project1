@@ -278,6 +278,9 @@ const POSITION_LIST = [
 // 価格は100万トークンあたりのドル。モデルを足したらここにも必ず足すこと。
 // 載っていないモデルは費用が集計されず、上限にも当たらないまま使い続けられる
 const CLAUDE_PRICING = {
+  // 相談タブ（社内ナレッジへの質問）で使う。ナレッジを毎回まるごと送るため
+  // プロンプトキャッシュを効かせている
+  'claude-opus-4-8': { input: 5.00, output: 25.00 },
   'claude-sonnet-5': { input: 3.00, output: 15.00 },
   'claude-sonnet-4-6': { input: 3.00, output: 15.00 },
   'claude-haiku-4-5-20251001': { input: 1.00, output: 5.00 },
