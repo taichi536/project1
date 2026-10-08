@@ -2614,6 +2614,11 @@ const KNOWLEDGE_TTL_MS = 60 * 60 * 1000;
 const CHAT_MAX_TURNS = 12;
 
 let _chatMessages = [];
+// 画面に開いている候補者。読み込んだときだけ会話に添える。
+// 自動で毎回読まないのは、相談タブは候補者を開いていないときにも使うため
+// （基準や操作の質問）。そこで勝手に別人のプロフィールが混ざると、答えが
+// 静かにずれる。読み込んだことを画面に出して、消せるようにしておく
+let _chatCandidate = null;
 
 function chatAppend(role, text) {
   const log = $('chat-log');
@@ -2713,12 +2718,30 @@ async function runChat() {
           + '- 考えている途中の検討や、書いた内容の訂正を出力に含めない。迷った場合は最終的な答えだけを書く\n'
           + '- 数値の基準は、ナレッジに書かれた範囲をそのまま使う。言い換えたり計算し直したりしない\n'
           + '- 答えの根拠になった見出しを最後に「参照: 〜」として示す\n'
+          + '- 候補者について聞かれたとき、「いま画面に開いている候補者」が渡されていなければ、推測せず「画面の候補者を読み込む」を押すよう伝える\n'
           + '- 聞かれたことに答える。前置きや一般論は書かない\n\n'
           + block,
         // ナレッジは毎回同じ内容を送ることになるため、キャッシュして費用を抑える
         cache_control: { type: 'ephemeral' },
       },
     ];
+
+    // 候補者は人ごとに変わるので、キャッシュする塊とは分けて添える
+    if (_chatCandidate) {
+      system.push({
+        type: 'text',
+        text: '# いま画面に開いている候補者\n'
+          + '以下はこの候補者のプロフィールです。候補者について聞かれたら、これを根拠に答えてください。\n\n'
+          + _chatCandidate.profileText.slice(0, 6000)
+          + (_chatCandidate.matches && _chatCandidate.matches.length
+            ? '\n\n## この候補者と内容が近い募集中のポジション（意味の近さで検索した順）\n'
+              + _chatCandidate.matches.map((m, i) =>
+                  `${i + 1}. ${m.firm}｜${m.title}`
+                  + (m.profileSummary ? `\n   ${m.profileSummary}` : ''))
+                .join('\n')
+            : ''),
+      });
+    }
 
     const data = await claudeFetch(apiKey, {
       model: CHAT_MODEL,
@@ -2754,11 +2777,14 @@ if ($('chat-send-btn')) {
   });
   $('chat-reset-btn').addEventListener('click', () => {
     _chatMessages = [];
+    _chatCandidate = null;
+    renderChatCandidate();
     const log = $('chat-log');
     log.innerHTML = '<div style="color:#888780;">会話をリセットしました。</div>';
     delete log.dataset.started;
     setStatus('chat', '', '');
   });
+  $('chat-load-candidate-btn').addEventListener('click', () => loadChatCandidate());
   $('chat-reload-knowledge-btn').addEventListener('click', async () => {
     setStatus('chat', 'loading', 'ナレッジを取り直しています...');
     try {
@@ -2769,6 +2795,67 @@ if ($('chat-send-btn')) {
       setStatus('chat', 'error', `エラー: ${e.message}`);
     }
   });
+}
+
+
+// 画面に開いている候補者を読み込んで、会話に添えられるようにする。
+// プロフィールの取得は文生成タブと同じ経路（取り切れていない場合は弾く）。
+// あわせて、その候補者に内容が近いポジションをベクトル検索で引いておく。
+// ポジションは735件あり、名前の一覧だけでは「この人に合うのは」に答えられない
+async function loadChatCandidate() {
+  setStatus('chat', 'loading', '画面の候補者を読み込んでいます...');
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const profileData = await getProfileSafe(tab);
+    if (!profileData || !profileData.success) {
+      throw new Error(profileData && profileData.needsCandidateSelection
+        ? '候補者カードをクリックして、プロフィールを表示してから押してください'
+        : 'プロフィールを取得できませんでした');
+    }
+    const profileText = profileData.profileText || '';
+    const check = isLikelyProfileText(profileText);
+    if (!check.ok) throw new Error(`プロフィールを正しく取得できていません（${check.reason}）`);
+
+    let matches = [];
+    try {
+      const res = await chrome.runtime.sendMessage({
+        type: 'matchPositions', profileText, limit: 12,
+      });
+      if (res?.ok && res.positions?.length) matches = res.positions;
+      else if (res?.error) console.warn('[Snow-we] 相談タブ: 求人の検索に失敗:', res.error);
+    } catch (e) {
+      console.warn('[Snow-we] 相談タブ: 求人の検索に失敗:', e.message);
+    }
+
+    _chatCandidate = { profileText, matches, at: Date.now() };
+    renderChatCandidate();
+    setStatus('chat', 'success',
+      `候補者を読み込みました（${profileText.length}文字`
+      + (matches.length ? ` / 近いポジション${matches.length}件` : '、ポジション検索は失敗')
+      + '）');
+  } catch (e) {
+    setStatus('chat', 'error', e.message);
+  }
+}
+
+function renderChatCandidate() {
+  const el = $('chat-candidate-status');
+  if (!el) return;
+  if (!_chatCandidate) { el.textContent = ''; return; }
+  el.innerHTML = '';
+  const span = document.createElement('span');
+  span.textContent = `👤 候補者を参照中（${_chatCandidate.profileText.length}文字`
+    + (_chatCandidate.matches.length ? ` / 近いポジション${_chatCandidate.matches.length}件` : '')
+    + '）';
+  const clear = document.createElement('button');
+  clear.textContent = '外す';
+  clear.style.cssText = 'margin-left:8px; font-size:10px; padding:2px 6px; background:#F5F4F0;'
+    + 'color:#5A5852; border:1px solid #E5E3DD;';
+  // 別の候補者を見ているのに前の人が残っていると、答えが静かにずれる。
+  // いつでも外せるようにしておく
+  clear.addEventListener('click', () => { _chatCandidate = null; renderChatCandidate(); });
+  el.appendChild(span);
+  el.appendChild(clear);
 }
 
 function renderKnowledgeStatus(k) {

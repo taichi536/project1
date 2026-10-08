@@ -655,13 +655,14 @@
 <!-- タブ5: 設定 -->
 <!-- タブ6: 社内ナレッジへの相談 -->
 <div class="tab-content" id="tab-chat">
-  <div id="chat-knowledge-status" style="font-size:10px; color:#888780; margin-bottom:6px;"></div>
+  <div id="chat-knowledge-status" style="font-size:10px; color:#888780; margin-bottom:4px;"></div>
+  <div id="chat-candidate-status" style="font-size:10px; color:#4338CA; margin-bottom:6px;"></div>
 
   <div id="chat-log" style="border:1px solid #E5E3DD; border-radius:8px; padding:10px;
        height:360px; overflow-y:auto; background:#FCFCFA; font-size:12px; line-height:1.7;">
     <div style="color:#888780;">
       社内ナレッジ（scoutのFAQ）とポジション情報をもとに答えます。<br>
-      例：「このファームの選考は何次まで？」「未経験可のポジションは？」<br>
+      例：「このファームの選考は何次まで？」「未経験可のポジションは？」<br>候補者について聞くときは、下の「画面の候補者を読み込む」を先に押してください。<br>
       <span style="color:#B45309;">候補者の氏名や経歴は入力しないでください。</span>
     </div>
   </div>
@@ -674,8 +675,11 @@
   </div>
 
   <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
-    <button id="chat-reset-btn" style="font-size:10px; padding:4px 8px; background:#F5F4F0;
-            color:#5A5852; border:1px solid #E5E3DD;">会話をリセット</button>
+    <div style="display:flex; gap:6px;">
+      <button id="chat-load-candidate-btn" style="font-size:10px; padding:4px 8px;">👤 画面の候補者を読み込む</button>
+      <button id="chat-reset-btn" style="font-size:10px; padding:4px 8px; background:#F5F4F0;
+              color:#5A5852; border:1px solid #E5E3DD;">会話をリセット</button>
+    </div>
     <button id="chat-reload-knowledge-btn" style="font-size:10px; padding:4px 8px; background:#F5F4F0;
             color:#5A5852; border:1px solid #E5E3DD;">ナレッジを取り直す</button>
   </div>
