@@ -2745,6 +2745,11 @@ async function runChat() {
 if ($('chat-send-btn')) {
   $('chat-send-btn').addEventListener('click', () => runChat());
   $('chat-input').addEventListener('keydown', e => {
+    // 日本語入力では、変換を確定するEnterもこのイベントに来る。確定のつもりで
+    // 押したEnterで送信され、書きかけの文がそのまま飛ぶ。実機で「未経験かの
+    // ポジションは」が送られ、続けて「？」まで入れた分が2通目として飛んだ。
+    // 変換中(isComposing)は送信しない。keyCode 229 は古い環境向けの保険
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runChat(); }
   });
   $('chat-reset-btn').addEventListener('click', () => {
