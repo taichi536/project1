@@ -2027,6 +2027,16 @@ async function readCandidateWhenStable(card) {
 function isNotCompanyName(s) {
   const v = (s || '').trim();
   if (!v) return true;
+  // 画面の箇条書き・見出し・テンプレート名が会社名として記録されていた実例への対処。
+  // 実データで確認したもの：
+  //   「・ERP・グループ共通システムの導入・刷新」（募集要項の箇条書き）
+  //   「2026」（年）「すべて展開」（画面のボタン）「DTC)保険コンサル」（テンプレート名）
+  // 会社名キーワードの判定より先に落とす（箇条書きの中に「株式会社」が
+  // 入っていても、それは会社名ではなく文章の一部のため）
+  if (/^[・※■◆●▼]/.test(v)) return true;
+  if (/^\d{1,4}$/.test(v)) return true;
+  if (/^[A-Z]{2,4}[)）]/.test(v)) return true;
+  if (/^(すべて展開|もっと見る|続きを読む|詳細|一覧)$/.test(v)) return true;
   if (/(株式会社|有限会社|合同会社|㈱|法人|Inc|Co\.|Corp|Ltd|LLC|銀行|省|庁)/i.test(v)) return false;
   if (/(大学|大学院|学部|学科|高等専門学校|専門学校|高校)/.test(v)) return true;
   if (/(部長|課長|係長|次長|室長|本部長|グループ長|リーダー|マネージャー|代理|担当)\s*$/.test(v)) return true;
@@ -2245,6 +2255,17 @@ function extractBasicInfo(cardEl) {
         const pLines = (p.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
         company = pLines.find(l => !isEduLine(l) && companyRe2.test(l))?.split(/[／/]/)[0].trim() || '';
       }
+    }
+    // doda-Xでは「氏名｜会社名」「会員番号｜会社名」の形で1行に入る。
+    // 以前は区切りがinnerTextに出ず連結されていたが（程 謙富士通株式会社）、
+    // 媒体側の作りが変わって区切り文字が見えるようになった（程 謙|富士通株式会社）。
+    // 区切りが見えているなら、後ろ側が会社名だと確実に言える。実データで確認:
+    //   程 謙|富士通株式会社 / 00930054|三菱ＵＦＪ信託銀行株式会社 / |三菱ＵＦＪ信託銀行株式会社
+    // これが原因で、ある担当者のdoda X 36件中35件が、シートと突き合わせできない
+    // 状態になっていた（送信自体は記録できていた）
+    if (/[|｜]/.test(company)) {
+      const parts = company.split(/[|｜]/).map(x => x.trim()).filter(Boolean);
+      if (parts.length) company = parts[parts.length - 1];
     }
     // doda-Xでは会員番号と会社名が区切り文字なしで1行に連結される。innerTextは
     // 隣り合うインライン要素の間に改行も空白も入れないため、実データで
