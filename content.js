@@ -1234,7 +1234,11 @@ const BULK_SEND_REQUESTS = {
 // 経由しないため、送信時に詳細パネルから候補者を組み立て直す経路に入り、
 // スカウトとして記録されていた（逆方向の突き合わせで過剰記録11件の原因）
 const NOT_SEND_REQUESTS = {
-  dodax: /\/iapi\/message\/saveByCorporate(?:\?|$)/,
+  // doda Xの返信。/iapi/message/saveByCorporate だけを見ていたが、媒体側が
+  // /bff/message/send に移行しており、返信を記録しない仕組みが効かなくなって
+  // いた（10/09に返信が1件スカウトとして記録されたのを実データで確認）。
+  // 失敗ログに「送信の可能性がある通信（未登録）」として残っていたパスから判明
+  dodax: /\/(?:iapi\/message\/saveByCorporate|bff\/message\/send)(?:\?|$)/,
   // ビズリーチの返信。スカウト送信（/v1/api/send-scout）とは別の通信
   bizreach: /\/v1\/api\/send-message(?:\?|$)/,
 };
@@ -1247,6 +1251,18 @@ const NOT_SEND_REQUESTS = {
 // 本物の送信（/v1/api/send-scout）は登録済み。誤検知を放置すると本物が埋もれる
 const IGNORED_REQUESTS = {
   bizreach: /\/v1\/api\/(?:scouts\/validate|action-logs\/|messages\/validate|send-message|message-templates)/,
+  // 実データで報告されていたもの。いずれも送信ではない：
+  //   検索(scoutsearch)／AIによる理由生成／テンプレートの上限確認／送信済み一覧
+  dodax: /\/(?:iapi\/scoutsearch\/|iapi\/scout\/(?:generateScoutReason|sent|prohibitionCharacterCheck|lump_sent_list)|iapi\/template\/|bff\/message\/search)/,
+  // 求人の登録・テンプレートの確定・スカウトルームの検索。
+  // 本物の送信は /scouting/scoutroom/{id}/scout で、そちらは登録済み
+  rds: /\/api\/client\/(?:transaction\/(?:joboffers|scouting\/employee\/scout-template)|headhunter\/transaction\/scouting\/scoutroom(?:\?|$))/,
+  // Greenの送信は /green_compass/apis/v1/agent/scouts だが、あえて登録しない。
+  // Greenは候補者ごとの開始ボタンが無く、送信時に詳細モーダルから候補者を
+  // 組み立てる経路で記録している。通信検知に移すとこの経路を通らなくなり、
+  // 候補者を特定できなくなる。実データでGreenは44/44・12/12と完全に
+  // 記録できているため、報告だけ止めて仕組みは変えない
+  green: /\/green_compass\/apis\/v1\/agent\/(?:scouts|scout_templates)/,
 };
 let _lastNotSendRequestAt = 0;
 
