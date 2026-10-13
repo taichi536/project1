@@ -85,6 +85,13 @@ def norm(s):
     return s.strip()
 
 
+def norm_age(v):
+    """年齢を比べるための正規化。シートは「35」「35歳」等の文字列、
+    自動記録側は数値で入っている"""
+    m = re.search(r'\d{1,3}', str(v or ''))
+    return m.group(0) if m else ''
+
+
 def norm_univ(s):
     s = unicodedata.normalize('NFKC', str(s or '')).lower()
     for a, b in KANJI_VARIANTS.items():
@@ -206,6 +213,21 @@ for key in sorted(set(gas_by_key) | set(supa_by_key), key=lambda k: (k[1] == '',
                                 and (gc.startswith(sc) or sc.startswith(gc))):
                     hit, how = s, '会社一致'
                     break
+        # 大学も会社も取れていない（または崩れている）行が「時刻のみ」に落ちていた。
+        # シートには年齢とポジションがあり、自動記録側にも両方ある。2つとも
+        # 一致すれば、5分の窓の中では同じ人と見てよい（年齢だけ・ポジションだけ
+        # では、同じ条件の候補者に連続送信したときに別人を結び付けうる）
+        if not hit:
+            ga, gp = norm_age(g.get('age')), norm(g.get('position'))
+            if ga and gp:
+                for s in unused:
+                    if abs((s['_t'] - g['_t']).total_seconds()) > 300:
+                        continue
+                    sa, sp = norm_age(s.get('candidate_age')), norm(s.get('position_name'))
+                    if sa and sp and ga == sa and gp == sp:
+                        hit, how = s, '年齢とポジション一致'
+                        break
+
         # どちらも一致しない場合は、時刻が近いというだけで結び付ける。
         # 別人を結び付けている可能性があるため、一致とは別に数える。
         # 以前はこれを区別せず「一致」に含めていたので、本人確認ができているのか
