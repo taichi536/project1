@@ -294,12 +294,30 @@ if extra:
         by_who[k] = by_who.get(k, 0) + 1
     for (who, media), n in sorted(by_who.items(), key=lambda kv: -kv[1]):
         print(f'  {who} / {media}: {n}件')
+    # 「シートに無い」と「突き合わせに失敗した」は別物。シートに行があっても、
+    # 会社名や大学が合わなければ同じ1件が「漏れ」と「逆方向」の両方に出る。
+    # 区別せずに「手入力漏れ」と読むと、こちらの抽出不良を相手のせいにしてしまう
+    # （実際にその誤読をした）。近い時刻に未照合のシート行があるかを併せて出す
+    all_miss = [g for rows in details.values() for g in rows]
     print('\n  内訳（先頭20件）:')
     for s in sorted(extra, key=lambda x: x['_t'])[:20]:
-        print(f"    {s['_t'].strftime('%m/%d %H:%M')} {s.get('recruiter_name') or '(空欄)'} "
-              f"/ {s.get('platform') or '(なし)'} / {s.get('company_name') or '(会社名なし)'}")
-    print('\n  手入力の書き漏れであれば問題ありませんが、送っていない記録が')
-    print('  含まれていれば、件数が水増しされています。')
+        who = s.get('recruiter_name') or ''
+        near = [g for g in all_miss
+                if (g.get('recruiter') or '') == who
+                and abs((g['_t'] - s['_t']).total_seconds()) <= 600]
+        if near:
+            g = min(near, key=lambda x: abs((x['_t'] - s['_t']).total_seconds()))
+            note = (f"  ← 同じ担当者の未照合のシート行が{int(abs((g['_t'] - s['_t']).total_seconds()))}秒差にあり"
+                    f"（{g.get('company') or '会社名なし'}）。突き合わせ失敗の可能性")
+        else:
+            note = '  ← 近い時刻に未照合のシート行なし。シートへの未記入の可能性'
+        print(f"    {s['_t'].strftime('%m/%d %H:%M')} {who or '(空欄)'} "
+              f"/ {s.get('platform') or '(なし)'} / {s.get('company_name') or '(会社名なし)'}{note}")
+    print('\n  「突き合わせ失敗の可能性」は、こちらの抽出が崩れていて同じ1件を')
+    print('  結び付けられていないもの。会社名の取得を直す対象。')
+    print('  「シートへの未記入の可能性」は、送信はしたがシートに書かれていないもの。')
+    print('  ただし送信が確実と言えるのは通信を検知している媒体(rds/bizreach)だけで、')
+    print('  doda X・Greenはボタン検知のため、送信の成立までは確認できない。')
 
 print('\n=== 漏れが連続している時間帯（拡張機能の接続切れの疑い）===')
 found_block = False
