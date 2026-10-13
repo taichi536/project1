@@ -7040,15 +7040,33 @@ function findBizreachDetailPanel() {
     }
   }
 
-  // 方法2: キーワード＋位置ヒューリスティック（位置条件を緩和）
+  // 方法2: キーワード＋位置ヒューリスティック。
+  //
+  // 以前は「年収」「資格」「職歴」のような緩い語が2つ当たれば候補にし、
+  // いちばん文字数が多いものを返していた。スカウト作成のモーダル（求人票や
+  // テンプレート本文を含む）はこの条件にそのまま当てはまり、しかも文字数が
+  // 大きいので最有力として選ばれる。その結果、候補者の勤務先ではなく求人票の
+  // 箇条書きが会社名として記録されていた（実データ：
+  // 「・ERP・グループ共通システムの導入・刷新」）。
+  //
+  // 候補者の履歴書にしか出ない見出しを必須にし、作成モーダルは除外する。
+  // 送信時はモーダルが開いていて、その後ろに履歴書がある状態なので、
+  // モーダルを外すことは正しい
   const viewportWidth = window.innerWidth;
   const keywords = ['在籍企業名', '学歴', '経験職種', '希望年収', '経験業種', '職務経歴', '資格', '年収', '在籍', '職歴'];
+  // 候補者の履歴書にしか出ない見出し。どれか1つは必ず含まれていること
+  const resumeOnly = ['在籍企業名', '経験職種', '経験業種', '職務経歴'];
+  // スカウト作成・テンプレート選択の画面に出る語。含むものは履歴書ではない
+  const composeMarkers = ['スカウトを送信', 'テンプレートを選択', 'テンプレート一覧', '件名'];
   const candidates = [];
   document.querySelectorAll('div, section, article, main').forEach(el => {
     const rect = el.getBoundingClientRect();
     const t = (el.innerText || '').trim();
     // 位置条件を 0.4 → 0.25 に緩和（レイアウト差異を吸収）
     if (rect.left > viewportWidth * 0.25 && rect.width > 250 && t.length > 150 && t.length < 25000) {
+      if (!resumeOnly.some(kw => t.includes(kw))) return;
+      if (composeMarkers.some(kw => t.includes(kw))) return;
+      try { if (el.closest('[role="dialog"], [class*="modal"], [class*="dialog"]')) return; } catch (_) {}
       const matchCount = keywords.filter(kw => t.includes(kw)).length;
       if (matchCount >= 2) candidates.push({ el, score: t.length + matchCount * 500 });
     }
