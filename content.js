@@ -2713,6 +2713,62 @@ function extractBasicInfo(cardEl) {
   };
 }
 
+/**
+ * ボタンの表示文字列を読む。媒体によって読める場所が違うため順に試す。
+ * ・Greenの送信は紙飛行機アイコンだけで、aria-labelにしか文字が無い
+ * ・LinkedInの送信は <span aria-hidden="true">送信</span> で、innerTextにも
+ *   aria-labelにも出ず、textContentでしか読めない
+ */
+function readButtonLabel(btn) {
+  let text = (btn.innerText || '').trim();
+  if (!text) text = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '').trim();
+  if (!text) text = (btn.textContent || '').trim();
+  // AMBIの送信ボタンは「送 信」のように字間が空くため、空白を除いて比較する。
+  // さらに、アイコンのテキスト化・ゼロ幅文字などを吸収するため日本語以外を落とす
+  const textCompact = text.replace(/[\s　]/g, '');
+  const textCore = textCompact.replace(/[^぀-ヿ一-鿿]/g, '');
+  return { text, textCompact, textCore };
+}
+
+/**
+ * そのボタンを押したら記録処理のどこに入るかを判定する。
+ * 記録する側（クリック処理）と診断とで別々に書いていたため、診断が「○」と出した
+ * ボタンが実際には対象外、ということが起きていた。同じ関数を両方から使う
+ */
+function classifyScoutButton(btn, text, textCore) {
+  const platform = getPlatform();
+  // Greenには候補者ごとの開始ボタンが無く、画面上部ナビの「スカウト」タブが
+  // 誤ってヒットしていた（実機のログで確認）
+  const isGreen = platform === 'green';
+  // LinkedIn Recruiterには「スカウト」という語が無く、一覧の封筒アイコンか、
+  // パイプラインの行の「メッセージ」から作成画面が開く（実機で確認）
+  const isLinkedinStart = platform === 'linkedin' && (() => {
+    try {
+      if (btn.closest('[data-test-component="message-icon-btn"], [data-live-test-component="message-icon-btn"]')) return true;
+    } catch (_) {}
+    if (textCore === 'メッセージ') return true;
+    return /さんにメッセージを送信/.test(text);
+  })();
+  const isStart = !isGreen && (textCore === 'スカウト' || textCore === '再スカウト'
+    || text.includes('スカウトを送る') || text.includes('スカウトする')
+    || text.includes('スカウトを作成') || isLinkedinStart);
+  // LinkedInの作成画面の送信ボタンは、読み上げ用の「このメッセージを送信」と表示上の
+  // 「送信」が両方テキストに出るため「このメッセージを送信送信」になり、完全一致では
+  // 拾えなかった（実機で確認。実際に送った1件が記録されなかった）
+  const isLinkedinSend = platform === 'linkedin' && !isLinkedinStart
+    && /メッセージを送信/.test(textCore);
+  // Bizreachのモーダル内の最終送信は「スカウトを送信」で、単独の「送信」と一致しない
+  const isSend = textCore === '送信' || textCore === '送信する'
+    || textCore === 'スカウトを送信' || isLinkedinSend;
+  return {
+    isStart,
+    isSend,
+    isConfirm: textCore === '確認',
+    isTemplateConfirm: textCore === '確定',
+    isLinkedinStart,
+  };
+}
+
 // スカウトボタンのクリックを検知して履歴に記録
 document.addEventListener('click', e => {
   // 最新インスタンスのみ処理（古いVMインスタンスはスキップ）
@@ -2741,28 +2797,8 @@ document.addEventListener('click', e => {
 
   const btn = e.target.closest('button, a');
   if (!btn) return;
-  // Greenの送信ボタンはアイコン（紙飛行機）のみで表示テキストを一切持たず、
-  // aria-label="送信" だけが手掛かりになる（実機で確認）。このため従来の
-  // innerTextベースの判定では記録処理が一度も発火していなかった。
-  // 表示テキストが空のときに限りaria-label/titleで補う（他媒体の判定は変えない）
-  let text = (btn.innerText || '').trim();
-  if (!text) {
-    text = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '').trim();
-  }
-  // LinkedInの送信ボタンは <span aria-hidden="true">送信</span> を持つ。
-  // aria-hidden のため innerText に出てこず、aria-label も title も無いので、
-  // 上の2つでは文字を一切取れない（実機で確認。「送信」で検索して0件だった）。
-  // textContent なら読める。他媒体の判定は変えない
-  if (!text) text = (btn.textContent || '').trim();
-  // AMBIの送信ボタンは実際のDOMが「送 信」のように文字間にスペースを挟んで表示される
-  // （字間デザイン）ため、素の完全一致だとずっと素通りしていた。空白（半角・全角）を
-  // 除去した文字列で判定することで、こうした字間デザインの差異を吸収する
-  const textCompact = text.replace(/[\s　]/g, '');
-  // それでも「スカウト」ボタンだけ検知漏れが実機で再現したため、より頑丈にする：
-  // 日本語の文字（ひらがな・カタカナ・漢字）以外を全て除去してから比較する。
-  // アイコンのテキスト化・ゼロ幅文字・特殊な空白など、目に見えない形で紛れ込む
-  // 文字をまとめて吸収できる
-  const textCore = textCompact.replace(/[^぀-ヿ一-鿿]/g, '');
+  // 表示文字列の読み取りは記録側と診断側で同じものを使う（readButtonLabel）
+  const { text, textCore } = readButtonLabel(btn);
 
   // 押されたボタンを覚えておく。送信の通信を検知したときに、直前に何が押されたかを
   // 失敗の報告に添えるため。これが無いと「認識できなかった」ことしか残らず、
@@ -2808,49 +2844,14 @@ document.addEventListener('click', e => {
     }
   }
 
-  // AMBIは既にスカウト済みの候補者だとボタン表示が「スカウト」ではなく「再スカウト」に
-  // 変わる(実機で確認)。以前はこの文言が一切マッチせず、再スカウト操作は検知そのものが
-  // 起きていなかった(pendingScoutが作られないため、送信しても記録処理に進めなかった)
-  // Greenには候補者ごとの「スカウト」開始ボタンが存在せず、画面上部ナビの
-  // 「スカウト」タブがこの判定に誤ってヒットしていた（実機のログで確認）。
-  // 無関係な候補者でpendingScoutが作られる原因になるため対象外にする。
-  // Greenは候補者をクリックするとモーダルが開き、その中の送信アイコンで完結するので、
-  // 送信時のフォールバック（詳細モーダルから候補者情報を復元する処理）で記録できる
-  const isGreen = getPlatform() === 'green';
-  // LinkedIn Recruiterには「スカウト」という語が無く、一覧の封筒アイコンの
-  // 「〇〇さんにメッセージを送信」で作成画面が開く（実機で確認）。
-  // ここで候補者を控えておかないと、作成画面には /talent/profile/ のリンクが
-  // 無く識別子を取れない
-  // 実機のHTMLで確認した属性で判定する。文言は候補者名が入るうえ、媒体側の
-  // 表記変更でも壊れる。属性のほうが安定する
-  //   <button ... data-test-component="message-icon-btn"
-  //               data-live-test-component="message-icon-btn"
-  //               class="... profile-item-actions__item">
-  const isLinkedinStart = getPlatform() === 'linkedin' && (() => {
-    try {
-      if (btn.closest('[data-test-component="message-icon-btn"], [data-live-test-component="message-icon-btn"]')) return true;
-    } catch (_) {}
-    // パイプライン画面(/talent/hire/.../manage/all)では、行ごとの「メッセージ」
-    // ボタンから作成画面を開く。封筒アイコンだけを見ていると、この経路の送信を
-    // 丸ごと取りこぼす（実機の運用を確認: 封筒から送るか、パイプラインに追加して
-    // そこから送るかの2通り）
-    if (textCore === 'メッセージ') return true;
-    return /さんにメッセージを送信/.test(text);
-  })();
-  const isScoutBtn           = !isGreen && (textCore === 'スカウト' || textCore === '再スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする') || text.includes('スカウトを作成') || isLinkedinStart);
-  const isConfirmBtn         = textCore === '確認';
-  // Bizreach: モーダル内の最終送信ボタンは「スカウトを送信」という文言で、
-  // 単独の「送信」「送信する」とは一致しない（実機で確認）。このボタンは
-  // 「スカウトを作成」で開いたモーダルの最終送信であり、以前は未認識ボタン扱いで
-  // recordScoutSentまで到達せず、Bizreachだけ自動記録が一切行われていなかった
-  // LinkedInの作成画面の送信ボタンは、読み上げ用の「このメッセージを送信」と表示上の
-  // 「送信」が両方テキストに出るため「このメッセージを送信送信」になり、完全一致では
-  // 拾えなかった（実機で確認。実際に送った1件が記録されず、画面には未認識の警告が出た）。
-  // 一覧の封筒と、パイプラインの「メッセージ」は作成画面を開くボタンなので除く
-  const isLinkedinSend = getPlatform() === 'linkedin' && !isLinkedinStart
-    && /メッセージを送信/.test(textCore);
-  const isSendBtn            = textCore === '送信' || textCore === '送信する' || textCore === 'スカウトを送信' || isLinkedinSend;
-  const isTemplateConfirmBtn = textCore === '確定';
+  // どのボタンが何に当たるかの判定は、診断と同じ関数を使う（classifyScoutButton）。
+  // 以前は記録側と診断側に同じ判定を2つ書いており、診断が「認識対象」と出した
+  // ボタンが実際には対象外、ということが起きていた
+  const kind = classifyScoutButton(btn, text, textCore);
+  const isScoutBtn           = kind.isStart;
+  const isConfirmBtn         = kind.isConfirm;
+  const isSendBtn            = kind.isSend;
+  const isTemplateConfirmBtn = kind.isTemplateConfirm;
   if (!isScoutBtn && !isConfirmBtn && !isSendBtn && !isTemplateConfirmBtn) {
     // スカウト関連らしきボタンなのに上の固定パターンに一致しないものを検知する診断ログ
     // （記録漏れの原因調査用。ここではpendingScoutの状態には一切手を触れない）
@@ -3361,11 +3362,6 @@ document.addEventListener('click', e => {
         if (_lastNotSendRequestAt >= sendClickedAt) return;
       }
       reportRecordFailure('送信ボタンは押されたが候補者を特定できない', { buttonText: textCore });
-      // LinkedInは対応作業中で、まだ候補者を特定できないのが分かっている。
-      // 送信のたびに警告を出しても直す手がかりにはならず、画面が煩わしくなるだけ。
-      // 報告は残すので、送信の通信とボタンの文言はこれで集まる。
-      // ★対応を入れたらこの除外も消すこと（消し忘れると本物の失敗が見えなくなる）
-      if (getPlatform() === 'linkedin') return;
       try {
         showAutoStatus(
           '⚠️ この送信は記録されませんでした（候補者を特定できていません）。'
@@ -7961,30 +7957,89 @@ function diagnoseCurrentPage() {
   // 組み立てる設計。控えが無いのが正常なので、不具合と誤解されないようにする
   out.pendingExpected = platform !== 'green';
 
-  // 画面にある、送信・スカウトに関わるボタンの文言。認識対象かどうかも併せて出す。
-  // ここに出ているのに「対象外」なら、そのボタンから送った分は記録されない
+  // 画面にある、送信・スカウトに関わるボタンの文言。何に当たるかも併せて出す。
+  // 判定は記録側とまったく同じ関数（classifyScoutButton）を使う。以前はここに
+  // 同じ判定をもう一度書いており、診断が「認識対象」と出したボタンが実際には
+  // 対象外、ということが起きていた
+  let hasSendBtn = false;
+  let hasStartBtn = false;
   try {
     const seen = [];
     for (const b of document.querySelectorAll('button, a, [role="button"]')) {
-      let t = (b.innerText || '').trim();
-      if (!t) t = (b.getAttribute('aria-label') || b.getAttribute('title') || '').trim();
-      if (!t) t = (b.textContent || '').trim();
-      if (!t || t.length > 30) continue;
+      const { text: t, textCore: core } = readButtonLabel(b);
+      if (!t || t.length > 40) continue;
       if (!/スカウト|送信|送る|メッセージ|確定|確認/.test(t)) continue;
-      const core = t.replace(/[\s　]/g, '').replace(/[^぀-ヿ一-鿿]/g, '');
-      // Greenは画面上部のナビの「スカウト」タブが誤ってヒットするため対象外にしてある。
-      // 実際の判定と同じ扱いにしないと、診断が嘘をつく
-      const known = core === '送信' || core === '送信する' || core === 'スカウトを送信'
-        || (platform !== 'green' && (core === 'スカウト' || core === '再スカウト'))
-        || core === '確認' || core === '確定'
-        || /スカウトを送る|スカウトする|スカウトを作成/.test(t)
-        || (platform === 'linkedin' && (core === 'メッセージ' || /さんにメッセージを送信/.test(t)));
-      const line = `${known ? '○' : '×'} ${t.slice(0, 24)}`;
+      const k = classifyScoutButton(b, t, core);
+      if (k.isSend) hasSendBtn = true;
+      if (k.isStart) hasStartBtn = true;
+      const role = k.isSend ? '送信' : k.isStart ? 'スカウト開始'
+        : k.isConfirm ? '確認' : k.isTemplateConfirm ? '確定' : '';
+      const line = `${role ? '○' : '×'} ${t.slice(0, 24)}${role ? `（${role}）` : ''}`;
       if (!seen.includes(line)) seen.push(line);
-      if (seen.length >= 12) break;
+      if (seen.length >= 14) break;
     }
     out.buttons = seen;
   } catch (_) {}
+
+  // ── ここから「送ったら記録されるか」の事前判定 ──
+  // これまでの診断は「画面から何が読めるか」しか見ていなかった。記録が成立するには
+  // その先に「送信を検知できるか」「候補者を特定できるか」が必要で、そこから先は
+  // 実際に送ってみるまで分からなかった。実データでLinkedInでは、送信1件につき
+  // 失敗が1つずつ見つかる進め方になり、そのたびに未記録のスカウトが出た。
+  // 記録側とまったく同じ手順を、送信せずにここで走らせる
+  try {
+    const canDetect = (SEND_REQUESTS[platform] && isNetHookAlive()) || hasSendBtn;
+    out.detectBy = (SEND_REQUESTS[platform] && isNetHookAlive()) ? '送信の通信（確実）'
+      : hasSendBtn ? '送信ボタンの文言' : '';
+
+    // 候補者の特定。記録側と同じ順序：控え → 送信時に詳細パネルから復元
+    let id = '';
+    let idSource = '';
+    let info = null;
+    try {
+      const raw = sessionStorage.getItem('pendingScout');
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (p && p.id && Date.now() - p.ts < 30 * 60 * 1000) {
+          id = p.id;
+          idSource = 'スカウト開始を押した時点の控え';
+          info = p.info || {};
+        }
+      }
+    } catch (_) {}
+    if (!id) {
+      const panel = findDetailPanelForPlatform(platform);
+      if (panel) {
+        id = getCandidateId(panel) || '';
+        if (id) {
+          idSource = '送信時に画面から復元（詳細パネル）';
+          info = extractBasicInfo(panel);
+        }
+      }
+    }
+    out.willRecordId = id || '';
+    out.willRecordIdSource = idSource;
+    if (info) {
+      out.willRecordCompany = info.company || '';
+      out.willRecordUniv = info.univ || '';
+      out.willRecordAge = info.age || '';
+    }
+
+    if (!canDetect) {
+      out.verdict = 'ng';
+      out.verdictReason = 'この画面の送信を検知できません（送信ボタンを認識できず、送信APIも未登録）';
+    } else if (!id) {
+      out.verdict = 'ng';
+      out.verdictReason = '候補者を特定できません'
+        + (hasStartBtn ? '（先にスカウト開始のボタンを押してください）' : '');
+    } else {
+      out.verdict = 'ok';
+      out.verdictReason = `${out.detectBy}で検知し、${idSource}から候補者を特定します`;
+    }
+  } catch (e) {
+    out.verdict = 'ng';
+    out.verdictReason = '判定できませんでした: ' + e.message;
+  }
 
   return out;
 }

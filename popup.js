@@ -2941,7 +2941,27 @@ async function runDiagnose() {
       '  押しても候補者を特定できていません。押した直後にもう一度診断してください。',
       '',
     ]);
+    // 一番上に結論を出す。「読めるか」ではなく「送ったら記録されるか」が知りたいこと
+    const verdict = r.verdict === 'ok' ? [
+      '━━━━━━━━━━━━━━━━━━━━━━━━',
+      '✅ この画面で送れば記録されます',
+      `   ${r.verdictReason}`,
+      ...(r.willRecordId ? [
+        `   記録される候補者 ${r.willRecordId}`,
+        `   会社名 ${r.willRecordCompany || '(取れません)'} / 大学 ${r.willRecordUniv || '(取れません)'}`
+        + ` / 年齢 ${r.willRecordAge || '(取れません)'}`,
+      ] : []),
+      '━━━━━━━━━━━━━━━━━━━━━━━━',
+      '',
+    ] : r.verdict === 'ng' ? [
+      '━━━━━━━━━━━━━━━━━━━━━━━━',
+      '⛔ この画面で送っても記録されません',
+      `   ${r.verdictReason}`,
+      '━━━━━━━━━━━━━━━━━━━━━━━━',
+      '',
+    ] : [];
     const text = [
+      ...verdict,
       line('媒体', `${r.platform}（v${r.version}）`),
       line('URL', r.url),
       line('通信の検知', r.netHook ? 'あり' : 'なし ← F5してください'),
@@ -2963,6 +2983,7 @@ async function runDiagnose() {
         ...r.lines.map((l, i) => `  ${String(i + 1).padStart(2)}行 ${l.slice(0, 60)}`)] : []),
       '',
       '画面にあるボタン（○＝認識対象／×＝対象外）',
+      ...(r.detectBy ? [`  送信の検知方法: ${r.detectBy}`] : []),
       ...(r.buttons || []).map(b => '  ' + b),
       r.error ? `\nエラー: ${r.error}` : '',
     ].join('\n');
