@@ -1185,6 +1185,24 @@ async function reportRecordFailure(reason, extra = {}) {
 // 1行に連結される（「佐々木 貴紀株式会社SHIFT」「栗原 裕也日本メドトロニック株式会社」）。
 // 姓名の切れ目が文字列からは決められないので、推測で切らずに残している。
 // どの画面でどう出ているかが分かれば、その画面のDOMから会社名だけを読む修正ができる
+// 会社名が取れないまま記録された画面を特定するための報告。
+// 実データでビズリーチに「会社名なし」が複数あったが、実機で確認した
+// 「検索 → カード → スカウトを作成 → スカウトを送信」の画面では正しく
+// 取れている。別の画面から送っているはずで、その画面のURLが分かれば直せる。
+// page_path には location.pathname が入る
+let _reportedNoCompanyAt = 0;
+function reportMissingCompany(info) {
+  try {
+    // 一括送信は候補者ごとの詳細が画面に出ないため会社名が無くて当然。
+    // これを報告すると本物が埋もれる
+    if (!info || Object.keys(info).length === 0) return;
+    if ((info.company || '').trim()) return;
+    if (Date.now() - _reportedNoCompanyAt < 10 * 60 * 1000) return;
+    _reportedNoCompanyAt = Date.now();
+    reportRecordFailure('記録はできたが会社名を取れない', { buttonText: _lastButtonText });
+  } catch (_) {}
+}
+
 const DODAX_NAME_IN_COMPANY = /^[一-龯々]{1,5}[ 　][^\s　]{1,20}(?:株式会社|合同会社|有限会社|ホールディングス|銀行|証券|保険|グループ)/;
 let _reportedNameInCompanyAt = 0;
 function reportDodaxNameInCompany(company) {
@@ -1597,6 +1615,7 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
   }
   _recentlyRecorded.set(candidateId, now);
   reportDodaxNameInCompany(info.company || '');
+  reportMissingCompany(info);
   const positionName = templateName || fallbackPosition || '';
   const industry = gicsAutoClassify(info.company || '');
 
