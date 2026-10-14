@@ -1156,6 +1156,15 @@ let _lastButtonAt = 0;
 let _lastRecognizedSendAt = 0;
 // 同じパスを何度も送らないための記録
 const _reportedPaths = new Map();
+// 送信APIが未登録の媒体で、APIを特定するために通信を控える期間。
+// これまでは名前に scout/message/send 等を含むものだけを報告していたが、
+// LinkedInで実際に送信した際、失敗ログに通信が1件も残らなかった（ボタンの
+// 認識失敗だけが記録された）。送信APIの名前がこちらの想定どおりとは限らない。
+// 送信ボタンを押した直後の通信に限れば、名前で絞らなくても対象は十分に少ない
+let _sendDiscoveryUntil = 0;
+let _sendDiscoveryCount = 0;
+// 計測・ログ送信の類は送信APIではありえない。これを除かないと本物が埋もれる
+const TRACKING_PATHS = /(?:^|\/)(?:li\/track|track|platform-telemetry|telemetry|realtime|analytics|metrics|beacon|csp|collect|log|logs|events?)(?:\/|$)/i;
 
 async function reportRecordFailure(reason, extra = {}) {
   try {
@@ -1544,6 +1553,19 @@ window.addEventListener('snowwe:request', e => {
         const path = new URL(String(url), location.origin).pathname;
         const ignored = IGNORED_REQUESTS[platform];
         if (ignored && ignored.test(path)) return;
+        // 送信ボタンを押した直後は、名前で絞らずに控える（上のコメントの理由）。
+        // 1回の送信につき10件までにして、報告が溢れないようにする
+        if (Date.now() < _sendDiscoveryUntil && !TRACKING_PATHS.test(path)
+            && _sendDiscoveryCount < 10
+            && Date.now() - (_reportedPaths.get(path) || 0) > 30 * 60 * 1000) {
+          _sendDiscoveryCount++;
+          _reportedPaths.set(path, Date.now());
+          reportRecordFailure('送信直後の通信（送信APIの特定用）', {
+            buttonText: _lastButtonText,
+            path,
+          });
+          return;
+        }
         const looksLikeSend = /scout|message|offer|approach|mail|send/i.test(path);
         const inScoutFlow = Date.now() - _lastButtonAt < 60 * 1000;
         const alreadyReported = Date.now() - (_reportedPaths.get(path) || 0) < 30 * 60 * 1000;
@@ -2804,6 +2826,12 @@ document.addEventListener('click', e => {
         && !/履歴|一覧|探す|検索|条件|設定|テンプレート/.test(textCore);
       if (looksLikeSend) {
         reportRecordFailure('送信に当たるボタンを認識できない', { buttonText: textCore });
+        // ボタンを認識できていない場合こそ、通信から送信を検知できるようにしたい。
+        // 直後の通信を控えて報告する（認識できた場合と同じ扱い）
+        if (!SEND_REQUESTS[getPlatform()]) {
+          _sendDiscoveryUntil = Date.now() + 20 * 1000;
+          _sendDiscoveryCount = 0;
+        }
         try {
           showAutoStatus(
             `⚠️ 「${textCore}」は記録対象として認識できていません。`
@@ -2817,7 +2845,15 @@ document.addEventListener('click', e => {
   }
 
   console.log('[Snow-we] スカウト系ボタン検知:', JSON.stringify(text));
-  if (isSendBtn) _lastRecognizedSendAt = Date.now();
+  if (isSendBtn) {
+    _lastRecognizedSendAt = Date.now();
+    // 送信APIが分かっていない媒体では、この直後の通信を控えて報告する。
+    // 一度これを拾えばSEND_REQUESTSに登録でき、ボタンの文言に依存しなくなる
+    if (!SEND_REQUESTS[getPlatform()]) {
+      _sendDiscoveryUntil = Date.now() + 20 * 1000;
+      _sendDiscoveryCount = 0;
+    }
+  }
 
   // 拡張機能との接続が切れていると、この先の記録処理は必ず失敗する。
   // 送信してから失敗に気づいても手遅れ（記録は復元できない）なので、
