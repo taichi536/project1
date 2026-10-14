@@ -2600,7 +2600,17 @@ document.addEventListener('click', e => {
   // 「〇〇さんにメッセージを送信」で作成画面が開く（実機で確認）。
   // ここで候補者を控えておかないと、作成画面には /talent/profile/ のリンクが
   // 無く識別子を取れない
-  const isLinkedinStart = getPlatform() === 'linkedin' && /さんにメッセージを送信/.test(text);
+  // 実機のHTMLで確認した属性で判定する。文言は候補者名が入るうえ、媒体側の
+  // 表記変更でも壊れる。属性のほうが安定する
+  //   <button ... data-test-component="message-icon-btn"
+  //               data-live-test-component="message-icon-btn"
+  //               class="... profile-item-actions__item">
+  const isLinkedinStart = getPlatform() === 'linkedin' && (() => {
+    try {
+      if (btn.closest('[data-test-component="message-icon-btn"], [data-live-test-component="message-icon-btn"]')) return true;
+    } catch (_) {}
+    return /さんにメッセージを送信/.test(text);
+  })();
   const isScoutBtn           = !isGreen && (textCore === 'スカウト' || textCore === '再スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする') || text.includes('スカウトを作成') || isLinkedinStart);
   const isConfirmBtn         = textCore === '確認';
   // Bizreach: モーダル内の最終送信ボタンは「スカウトを送信」という文言で、
