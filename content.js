@@ -1301,8 +1301,27 @@ function isNetHookAlive() {
   try { return document.documentElement.getAttribute('data-snowwe-net-hook') === '1'; } catch (_) { return false; }
 }
 
+/**
+ * LinkedIn: 作成中のメッセージ（宛先がその候補者）を候補者情報の読み取り元にする。
+ * 一覧の封筒から始められず控えが無いときの、送信時のフォールバック。
+ * 実データで「送信ボタンは押されたが候補者を特定できない」が発生し、
+ * 送信そのものが記録されなかった
+ */
+function findLinkedinDetailPanel() {
+  try {
+    for (const d of document.querySelectorAll('[role="dialog"], .artdeco-modal')) {
+      const t = (d.innerText || '');
+      if (!/メッセージを作成|宛先/.test(t)) continue;
+      const r = d.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return d;
+    }
+  } catch (_) {}
+  return null;
+}
+
 function findDetailPanelForPlatform(platform) {
-  return platform === 'ambi' ? findAMBIDetailPanel() :
+  return platform === 'linkedin' ? findLinkedinDetailPanel() :
+    platform === 'ambi' ? findAMBIDetailPanel() :
     platform === 'rds' ? findRDSDetailPanel() :
     platform === 'dodax' ? (findDodaxProfilePane() || findDodaxDetailPanel()) :
     platform === 'bizreach' ? findBizreachDetailPanel() :
@@ -1550,19 +1569,24 @@ window.addEventListener('snowwe:request', e => {
     // 無関係な通信は入らない
     if (!pattern || !pattern.test(String(url))) {
       try {
-        const path = new URL(String(url), location.origin).pathname;
+        const u = new URL(String(url), location.origin);
+        const path = u.pathname;
+        // GraphQLの媒体では、パスは全ての操作で共通で（LinkedInは
+        // /talent/api/graphql）、何の操作かはクエリ文字列のqueryId等にしか出ない。
+        // パスだけ報告しても送信APIを特定できないため、クエリ文字列も残す
+        const fullPath = (path + (u.search || '')).slice(0, 300);
         const ignored = IGNORED_REQUESTS[platform];
         if (ignored && ignored.test(path)) return;
         // 送信ボタンを押した直後は、名前で絞らずに控える（上のコメントの理由）。
         // 1回の送信につき10件までにして、報告が溢れないようにする
         if (Date.now() < _sendDiscoveryUntil && !TRACKING_PATHS.test(path)
             && _sendDiscoveryCount < 10
-            && Date.now() - (_reportedPaths.get(path) || 0) > 30 * 60 * 1000) {
+            && Date.now() - (_reportedPaths.get(fullPath) || 0) > 30 * 60 * 1000) {
           _sendDiscoveryCount++;
-          _reportedPaths.set(path, Date.now());
+          _reportedPaths.set(fullPath, Date.now());
           reportRecordFailure('送信直後の通信（送信APIの特定用）', {
             buttonText: _lastButtonText,
-            path,
+            path: fullPath,
           });
           return;
         }
@@ -1928,6 +1952,23 @@ function getCandidateId(cardEl) {
     const fromUrl = location.pathname.match(/\/talent\/profile\/([A-Za-z0-9_-]{10,})/)
       || location.pathname.match(/\/profile\/([A-Za-z0-9_-]{10,})/);
     if (fromUrl) return `linkedin_${fromUrl[1]}`;
+    // 候補者1人だけを開いている画面（作成中のメッセージ、候補者の詳細）では、
+    // 渡された塊にリンクが無くても、画面のどこかに1つだけプロフィールのリンクがある。
+    // 種類の違うIDを作らないよう、画面全体で1人に絞れるときだけ使う
+    try {
+      const ids = new Set();
+      for (const a of document.querySelectorAll('a[href*="/talent/profile/"]')) {
+        const m = (a.getAttribute('href') || '').match(/\/talent\/profile\/([A-Za-z0-9_-]{10,})/);
+        if (m) ids.add(m[1]);
+      }
+      if (ids.size === 1) return `linkedin_${[...ids][0]}`;
+    } catch (_) {}
+    // パイプラインで候補者を開くと /talent/hire/<案件>/manage/<候補者> になる（実機で確認）。
+    // この画面から送ると、プロフィールのIDが画面に出ておらず候補者を特定できず、
+    // 送信そのものが記録されなかった（実データで確認）。
+    // プロフィールのIDとは別系統の番号なので、取り違えないよう接頭辞を分けておく
+    const fromHire = location.pathname.match(/\/talent\/hire\/\d+\/manage\/(\d{6,})/);
+    if (fromHire) return `linkedin_hire_${fromHire[1]}`;
     // 識別子が取れないまま記録すると、同じ人が別人として積み上がる。
     // ハッシュに落とさず、特定できなかったことを残す
     console.warn('[Snow-we] LinkedIn: 候補者の識別子を取れません');
@@ -7835,12 +7876,8 @@ function diagnoseCurrentPage() {
     if (platform === 'linkedin') {
       // 作成中のメッセージが開いているなら、その宛先が送信相手。開いたまま診断すると
       // 一覧の先頭行（全く別の候補者）を読んで見せてしまい、控えと食い違って見える
-      for (const d of document.querySelectorAll('[role="dialog"], .artdeco-modal')) {
-        const t = (d.innerText || '');
-        if (!/メッセージを作成|宛先/.test(t)) continue;
-        const r = d.getBoundingClientRect();
-        if (r.width > 0 && r.height > 0) { el = d; source = '作成中のメッセージ'; break; }
-      }
+      const compose = findLinkedinDetailPanel();
+      if (compose) { el = compose; source = '作成中のメッセージ'; }
     }
     if (platform === 'linkedin' && !el) {
       const b = document.querySelector('[data-test-component="message-icon-btn"]');
