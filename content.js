@@ -2395,7 +2395,22 @@ function extractBasicInfo(cardEl) {
     //
     // 検索一覧は「｜」区切り、パイプラインは「,」区切りで、どちらも会社名が最後にくる。
     // 肩書きが先、勤務先が後という並びはLinkedInの見出しの書き方として共通している
-    const headline = lines.find(l => /[|｜,，]/.test(l)
+    // 見出し行は候補者名のすぐ下にあり、「職歴」「教育」等の見出しより前にしか
+    // 現れない。以前はカード全体から「区切り文字＋会社名キーワード」を含む行を
+    // 探していたため、プロフィール画面では過去の職歴の行
+    // （例「Software Engineer, Toyota Motor Corporation · 2016年 – 2018年」。
+    // 「Corp」がキーワードに一致する）が見出しより先に見つかり、現職ではなく
+    // 前職が会社名として記録される事故が実機で確認された。
+    // 探す範囲を見出しより前に限る
+    const sectionIdx = lines.findIndex(l =>
+      /^(職歴|教育|学歴|資格|スキル|受賞|推薦|ボランティア|プロジェクト)/.test(l)
+      || /^(Experience|Education|Skills|Licenses|Certifications|Volunteer)/i.test(l));
+    const headLines = sectionIdx >= 0 ? lines.slice(0, sectionIdx) : lines;
+    // 在籍期間（「2016年 – 2018年」「2016 - 2018」）を含む行は職歴の明細であって
+    // 見出しではない。見出しが見つからない画面（英語UI等）での保険
+    const hasPeriod = l => /\d{4}年?\s*[-–—〜~]/.test(l);
+    const headline = headLines.find(l => /[|｜,，]/.test(l)
+      && !hasPeriod(l)
       && /(株式会社|合同会社|有限会社|Inc\.?|Corp|Ltd|LLC|GmbH)/i.test(l));
     if (headline) {
       company = headline.split(/[|｜,，]/).map(x => x.trim()).filter(Boolean).pop() || '';
@@ -2405,23 +2420,33 @@ function extractBasicInfo(cardEl) {
     //   職歴 / プロフィールの職歴です / toyotaのSoftware Engineer · 2016年 – 2018年
     // 実体は「〈会社〉の〈役職〉 · 期間」という形。最初に出てくるものが直近の職歴
     if (!company) {
-      const i = lines.findIndex(l => l === '職歴');
+      const i = lines.findIndex(l => l === '職歴' || /^Experience$/i.test(l));
       if (i >= 0) {
-        for (let k = i + 1; k < Math.min(lines.length, i + 7); k++) {
+        const hits = [];
+        for (let k = i + 1; k < Math.min(lines.length, i + 20); k++) {
           const m = lines[k].match(/^(.+)の[^の]+?\s*[·・]/);
-          if (m) { company = m[1].trim(); break; }
+          if (m) hits.push({ value: m[1].trim(), line: lines[k] });
         }
+        // 「2016年 – 2018年」で終わる過去の職歴ではなく、「– 現在」の現職を選ぶ。
+        // 並び順が常に新しい順とは限らないため、期間の表記で判断する
+        const current = hits.find(h => /(現在|Present)/i.test(h.line));
+        company = ((current || hits[0]) || {}).value || '';
       }
     }
     // プロフィール画面ではクラスで取れる。subtitle は職歴にも学歴にも付くので、
     // 学校へのリンクを含む塊は飛ばす
     if (!company) {
+      // ここも「最初に見つかったもの」では前職を拾う。期間に「現在」を含む塊を優先する
+      let first = '';
       for (const sub of cardEl.querySelectorAll('.background-entity__summary-definition--subtitle')) {
         const block = sub.closest('li, section, article, div');
         if (block && block.querySelector('.background-entity__school-link')) continue;
         const v = (sub.textContent || '').trim();
-        if (v) { company = v; break; }
+        if (!v) continue;
+        if (!first) first = v;
+        if (block && /(現在|Present)/i.test(block.textContent || '')) { company = v; break; }
       }
+      if (!company) company = first;
     }
     // 大学は「教育」の次の行。「名古屋大学、大学院工学研究科」のように
     // 「、」の前が学校名になる
@@ -7752,6 +7777,23 @@ function diagnoseCurrentPage() {
     // 往復になる（実際にビズリーチとLinkedInで繰り返した）
     try {
       out.lines = (el.innerText || '').split('\n').map(l => l.trim()).filter(Boolean).slice(0, 20);
+    } catch (_) {}
+    // 会社名がどの行から来たのかを出す。値が画面と違うときの原因は2通りしかなく、
+    // 「読み取り元にその文字列があるか」で一度に切り分けられる:
+    //   ある  → 読み取り規則の問題（過去の職歴・業種表記などを拾っている）
+    //   ない  → 別の画面・別の候補者を読んでいる（控えが古い等）
+    // これが無いと、毎回「この1行を開発者ツールで実行して」の往復になる
+    try {
+      const all = (el.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
+      const where = (v) => {
+        if (!v || v.startsWith('(') || v.startsWith('エラー')) return '';
+        const i = all.findIndex(l => l.includes(v));
+        return i >= 0
+          ? `${i + 1}行目「${all[i].slice(0, 60)}」`
+          : '読み取り元のどの行にも無い（クラス指定で取得した値か、別の画面の値）';
+      };
+      out.companyWhere = where(out.company);
+      if (out.pending && out.pending.company) out.pendingCompanyWhere = where(out.pending.company);
     } catch (_) {}
   }
 
