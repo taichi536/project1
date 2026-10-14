@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Snow-we スカウト パーソナライズ生成",
-  "version": "1.58.0",
+  "version": "1.59.0",
   "description": "候補者プロフィールからパーソナライズ文を1〜2文で自動生成します",
   "icons": {
     "16": "icons/icon16.png",
@@ -41,7 +41,8 @@
     "https://*.hrtech.jp/*",
     "https://*.hrtech.rikunabi.com/*",
     "https://*.supabase.co/*",
-    "https://143-198-195-132.nip.io/*"
+    "https://143-198-195-132.nip.io/*",
+    "https://www.linkedin.com/talent/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -77,7 +78,8 @@
         "https://ats.hrtech.rikunabi.com/*",
         "https://*.rikunabi.com/*",
         "https://*.hrtech.jp/*",
-        "https://*.hrtech.rikunabi.com/*"
+        "https://*.hrtech.rikunabi.com/*",
+        "https://www.linkedin.com/talent/*"
       ],
       "js": [
         "content.js"
@@ -103,7 +105,8 @@
         "https://ats.hrtech.rikunabi.com/*",
         "https://*.rikunabi.com/*",
         "https://*.hrtech.jp/*",
-        "https://*.hrtech.rikunabi.com/*"
+        "https://*.hrtech.rikunabi.com/*",
+        "https://www.linkedin.com/talent/*"
       ],
       "js": [
         "net-hook.js"

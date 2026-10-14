@@ -572,6 +572,9 @@ function getPlatform() {
   if (h.includes('ambi') || h.includes('en-ambi'))         return 'ambi';
   if (h.includes('green-japan'))                            return 'green';
   if (h.includes('mynavi'))                                 return 'mynavi';
+  // LinkedIn Recruiter のみ。個人利用の linkedin.com では拡張機能を動かさない
+  // （manifest の対象も /talent/ 配下に限っている）
+  if (h.includes('linkedin.com') && location.pathname.startsWith('/talent')) return 'linkedin';
   return 'unknown';
 }
 
@@ -3046,6 +3049,11 @@ document.addEventListener('click', e => {
         if (_lastNotSendRequestAt >= sendClickedAt) return;
       }
       reportRecordFailure('送信ボタンは押されたが候補者を特定できない', { buttonText: textCore });
+      // LinkedInは対応作業中で、まだ候補者を特定できないのが分かっている。
+      // 送信のたびに警告を出しても直す手がかりにはならず、画面が煩わしくなるだけ。
+      // 報告は残すので、送信の通信とボタンの文言はこれで集まる。
+      // ★対応を入れたらこの除外も消すこと（消し忘れると本物の失敗が見えなくなる）
+      if (getPlatform() === 'linkedin') return;
       try {
         showAutoStatus(
           '⚠️ この送信は記録されませんでした（候補者を特定できていません）。'
