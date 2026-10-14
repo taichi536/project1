@@ -2179,6 +2179,12 @@ function extractBasicInfo(cardEl) {
     const slide = document.querySelector('.slide_desc_scout');
     if (slide) ageMatch = (slide.innerText || '').match(/(\d{2,3})歳/);
   }
+  // doda-Xのスカウト送信画面では、年齢は左上の見出しにあり、候補者情報を読む
+  // 詳細パネルの中には無い（会員番号と同じ理由）。この画面に出ている候補者は
+  // 1人だけなので、画面全体から拾っても取り違えない
+  if (!ageMatch && getPlatform() === 'dodax' && /\/scout\/sent/.test(location.pathname)) {
+    ageMatch = (document.body.innerText || '').match(/(\d{2,3})歳/);
+  }
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
   // 大学名を抽出（学歴セクション優先）
@@ -2197,6 +2203,15 @@ function extractBasicInfo(cardEl) {
     // 実データで「学生時代にはイギリスの大学」が大学名として記録されていた
     || /(学生時代|時代に|留学|卒業後|在学中|その後|海外の|国内の|などの|といった|における)/.test(s)
     || /^(?:の|は|に|で|を|と|も|や)/.test(s);
+  // 海外の大学は「大学」の字を含まないため、日本語の規則では一切拾えず、
+  // 学歴が画面に出ていても空欄になっていた（実機で「Northwestern University」
+  // 「Santa Barbara City College」を確認）。会社名を誤って拾わないよう、
+  // 学校であることが語尾から確実に言えるものだけに限る
+  const extractEnglishUniv = (t) => {
+    const m = t.match(/\bUniversity of [A-Z][A-Za-z.&'-]+(?:\s+[A-Z][A-Za-z.&'-]+)?/)
+      || t.match(/\b[A-Z][A-Za-z.&'-]+(?:\s+[A-Z][A-Za-z.&'-]+){0,3}\s+(?:University|College|Polytechnic|Institute of Technology)\b/);
+    return m ? m[0].trim() : '';
+  };
   const extractUnivFromText = (t) => {
     // 「学歴」「最終学歴」セクション以降から優先的に抽出
     const eduIdx = t.search(/学歴|最終学歴/);
@@ -2205,6 +2220,8 @@ function extractBasicInfo(cardEl) {
       const m = (eduSection.match(/([^\s\n　]{2,20}(?:大学院|大学|高専|専門学校))/g) || [])
         .map(cleanUnivName).find(s => !isGenericUnivPhrase(s));
       if (m) return m;
+      const en = extractEnglishUniv(eduSection);
+      if (en) return en;
     }
     // 学歴セクションがない場合は全体から抽出（会社名候補・応募資格の一般語を除外）
     const m = t.match(/([^\s\n　]{2,20}(?:大学院|大学|高専|専門学校))/g) || [];
@@ -2213,7 +2230,7 @@ function extractBasicInfo(cardEl) {
       .filter(s => !companyWords.test(s))
       .map(cleanUnivName)
       .find(s => !isGenericUnivPhrase(s));
-    return candidate || '';
+    return candidate || extractEnglishUniv(t);
   };
   univ = extractUnivFromText(text);
   // RDS/AMBI/Greenはカードに大学名が出ないため、詳細パネルからも取得を試みる
@@ -7804,7 +7821,14 @@ function diagnoseCurrentPage() {
 
   out.source = source || '見つかりません';
   if (el) {
-    try { out.candidateId = getCandidateId(el) || '(取れません)'; } catch (e) { out.candidateId = 'エラー: ' + e.message; }
+    try {
+      out.candidateId = getCandidateId(el) || '(取れません)';
+      // 作成中のメッセージには /talent/profile/ のリンクが無く、ここからは識別子を
+      // 取れない。記録には控えのIDを使うので問題ないが、不具合と誤解されないようにする
+      if (out.candidateId === '(取れません)' && source === '作成中のメッセージ') {
+        out.candidateId = '(この画面には出ません。控えのIDを使います)';
+      }
+    } catch (e) { out.candidateId = 'エラー: ' + e.message; }
     try {
       const info = extractBasicInfo(el);
       out.company = info.company || '(取れません)';
