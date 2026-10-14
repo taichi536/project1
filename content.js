@@ -2780,7 +2780,13 @@ document.addEventListener('click', e => {
   // 単独の「送信」「送信する」とは一致しない（実機で確認）。このボタンは
   // 「スカウトを作成」で開いたモーダルの最終送信であり、以前は未認識ボタン扱いで
   // recordScoutSentまで到達せず、Bizreachだけ自動記録が一切行われていなかった
-  const isSendBtn            = textCore === '送信' || textCore === '送信する' || textCore === 'スカウトを送信';
+  // LinkedInの作成画面の送信ボタンは、読み上げ用の「このメッセージを送信」と表示上の
+  // 「送信」が両方テキストに出るため「このメッセージを送信送信」になり、完全一致では
+  // 拾えなかった（実機で確認。実際に送った1件が記録されず、画面には未認識の警告が出た）。
+  // 一覧の封筒と、パイプラインの「メッセージ」は作成画面を開くボタンなので除く
+  const isLinkedinSend = getPlatform() === 'linkedin' && !isLinkedinStart
+    && /メッセージを送信/.test(textCore);
+  const isSendBtn            = textCore === '送信' || textCore === '送信する' || textCore === 'スカウトを送信' || isLinkedinSend;
   const isTemplateConfirmBtn = textCore === '確定';
   if (!isScoutBtn && !isConfirmBtn && !isSendBtn && !isTemplateConfirmBtn) {
     // スカウト関連らしきボタンなのに上の固定パターンに一致しないものを検知する診断ログ
