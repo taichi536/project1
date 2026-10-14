@@ -7964,7 +7964,12 @@ function diagnoseCurrentPage() {
   let hasSendBtn = false;
   let hasStartBtn = false;
   try {
-    const seen = [];
+    // 表示件数で打ち切ると、認識対象のボタンが一覧から溢れて「送信ボタンが無い」と
+    // 誤判定する。実機で、作成画面の送信ボタンが14件目以降にあり、送信できる画面
+    // なのに⛔と出た。判定は全ボタンを見て行い、打ち切るのは表示だけにする。
+    // 認識対象（○）は必ず表示する
+    const known = [];
+    const others = [];
     for (const b of document.querySelectorAll('button, a, [role="button"]')) {
       const { text: t, textCore: core } = readButtonLabel(b);
       if (!t || t.length > 40) continue;
@@ -7974,11 +7979,13 @@ function diagnoseCurrentPage() {
       if (k.isStart) hasStartBtn = true;
       const role = k.isSend ? '送信' : k.isStart ? 'スカウト開始'
         : k.isConfirm ? '確認' : k.isTemplateConfirm ? '確定' : '';
-      const line = `${role ? '○' : '×'} ${t.slice(0, 24)}${role ? `（${role}）` : ''}`;
-      if (!seen.includes(line)) seen.push(line);
-      if (seen.length >= 14) break;
+      // 複数行の文字が入ると一覧が崩れる（実機で「11＋改行＋未確認の候補者」が出た）
+      const label = t.replace(/\s+/g, ' ').slice(0, 24);
+      const line = `${role ? '○' : '×'} ${label}${role ? `（${role}）` : ''}`;
+      const bucket = role ? known : others;
+      if (!bucket.includes(line)) bucket.push(line);
     }
-    out.buttons = seen;
+    out.buttons = known.concat(others.slice(0, Math.max(0, 16 - known.length)));
   } catch (_) {}
 
   // ── ここから「送ったら記録されるか」の事前判定 ──
@@ -8025,13 +8032,26 @@ function diagnoseCurrentPage() {
       out.willRecordAge = info.age || '';
     }
 
+    // 送信画面を開く前の一覧でも押されるため、「まだ送信画面ではない」状態を
+    // 失敗と区別する。ここを分けないと、一覧を開くたびに⛔が出て狼少年になる
     if (!canDetect) {
-      out.verdict = 'ng';
-      out.verdictReason = 'この画面の送信を検知できません（送信ボタンを認識できず、送信APIも未登録）';
+      if (hasStartBtn) {
+        out.verdict = 'wait';
+        out.verdictReason = 'この画面にはまだ送信ボタンがありません。'
+          + 'スカウト開始のボタン（封筒／メッセージ 等）を押して送信画面を開いてから、もう一度調べてください';
+      } else {
+        out.verdict = 'ng';
+        out.verdictReason = 'この画面の送信を検知できません（送信ボタンを認識できず、送信APIも未登録）';
+      }
     } else if (!id) {
-      out.verdict = 'ng';
-      out.verdictReason = '候補者を特定できません'
-        + (hasStartBtn ? '（先にスカウト開始のボタンを押してください）' : '');
+      if (hasStartBtn) {
+        out.verdict = 'wait';
+        out.verdictReason = '候補者がまだ特定されていません。'
+          + 'スカウト開始のボタンを押してから、もう一度調べてください';
+      } else {
+        out.verdict = 'ng';
+        out.verdictReason = '候補者を特定できません（この画面から送ると記録が残りません）';
+      }
     } else {
       out.verdict = 'ok';
       out.verdictReason = `${out.detectBy}で検知し、${idSource}から候補者を特定します`;
