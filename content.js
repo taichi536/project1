@@ -7061,16 +7061,27 @@ function findGreenDetailPanel() {
 // Bizreach詳細パネルを特定する（カードクリックで開く右パネル）
 // -------------------------------------------------------
 function findBizreachDetailPanel() {
-  // 方法1: Bizreach固有のAngularコンポーネント名で直接特定
+  // 方法1: Bizreach固有のAngularコンポーネント名で直接特定。
+  //
+  // ess-resume-pane を先頭に置く。年齢(34歳)は ess-resume-detail の外、
+  // ヘッダー側にあり、detail だけを見ていると年齢が取れない。実機で確認した：
+  //   ess-resume-detail … 在籍企業名あり / 年齢なし
+  //   ess-resume-pane   … 在籍企業名あり / 年齢あり / 件名(送信欄)なし
+  // 年齢は突き合わせにも使う項目なので、落とすと検証が弱くなる。
+  //
+  // 画面に出ていない要素は掴まない。古いパネルが残っていた場合に
+  // 別の候補者の情報を拾うため
   const componentSelectors = [
-    'ess-resume-detail', 'ess-resume-view', 'ess-resume-detail-content',
+    'ess-resume-pane', 'ess-resume-detail', 'ess-resume-view', 'ess-resume-detail-content',
     '[class*="resume-detail"]', '[class*="resume-view"]', '[class*="candidate-detail"]',
   ];
   for (const sel of componentSelectors) {
-    const el = document.querySelector(sel);
-    if (el) {
+    for (const el of document.querySelectorAll(sel)) {
       const t = (el.innerText || '').trim();
-      if (t.length > 100) return el;
+      if (t.length <= 100) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      return el;
     }
   }
 
