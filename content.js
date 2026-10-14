@@ -2338,29 +2338,52 @@ function extractBasicInfo(cardEl) {
     // 誤った社名を作るより、連結されたまま残して報告し、画面の構造を
     // 確認してから直す（reportDodaxNameInCompany）
   } else if (getPlatform() === 'linkedin') {
-    // LinkedIn Recruiter。実機のDOMで確認した取得先：
-    //   大学   a.background-entity__school-link            → 東京理科大学
-    //   会社名 dd.background-entity__summary-definition--subtitle → トヨタ自動車株式会社
+    // LinkedIn Recruiter。一覧・パイプラインの行は、クラス名ではなくテキストの
+    // 並びで出る（実機で確認）:
+    //   小久保 慎平 / 3次コンタクト / ソーシング
+    //   Digital Transformation Acceleration, KPMGコンサルティング株式会社  ← 役職, 会社名
+    //   日本 · ビジネスコンサルティング・サービス
+    //   職歴  KPMGジャパン／KPMG Japanのマネージャー · 2023年 – 現在
+    //   教育  名古屋大学、大学院工学研究科 · 2003年 – 2005年
     //
-    // subtitle は「経歴の見出しの下」という意味のクラスで、職歴にも学歴にも付く。
-    // 学歴側を会社名として拾わないよう、学校へのリンクを含む塊は飛ばす。
-    // 先頭が最新の職歴になる（実機で System Engineer / トヨタ自動車株式会社 が先頭）
-    const subs = Array.from(cardEl.querySelectorAll('.background-entity__summary-definition--subtitle'));
-    for (const sub of subs) {
-      const block = sub.closest('li, section, article, div');
-      if (block && block.querySelector('.background-entity__school-link')) continue;
-      const v = (sub.textContent || '').trim();
-      if (v) { company = v; break; }
+    // 検索一覧は「｜」区切り、パイプラインは「,」区切りで、どちらも会社名が最後にくる。
+    // 肩書きが先、勤務先が後という並びはLinkedInの見出しの書き方として共通している
+    const headline = lines.find(l => /[|｜,，]/.test(l)
+      && /(株式会社|合同会社|有限会社|Inc\.?|Corp|Ltd|LLC|GmbH)/i.test(l));
+    if (headline) {
+      company = headline.split(/[|｜,，]/).map(x => x.trim()).filter(Boolean).pop() || '';
     }
-    // 見出し（「システムエンジニア｜車両制御・ADAS｜…｜トヨタ自動車株式会社」）は
-    // 最後の区切りの後ろが勤務先になっていることが多い。subtitleが取れないときの保険
+    // 「職歴」の次の行から。「〈会社〉の〈役職〉 · 期間」という形
     if (!company) {
-      const head = lines.find(l => /[|｜]/.test(l) && /(株式会社|合同会社|有限会社|Inc|Corp|Ltd)/i.test(l));
-      if (head) company = head.split(/[|｜]/).map(x => x.trim()).filter(Boolean).pop() || '';
+      const i = lines.findIndex(l => l === '職歴');
+      const line = i >= 0 ? (lines[i + 1] || '') : '';
+      const m = line.match(/^(.+)の[^の]+?\s*[·・]/);
+      if (m) company = m[1].trim();
     }
-    const school = cardEl.querySelector('a.background-entity__school-link');
-    if (school) univ = (school.textContent || '').trim();
-    // LinkedInには年齢が無い。ageMatchは空のままにする（突き合わせは会社名と大学で行う）
+    // プロフィール画面ではクラスで取れる。subtitle は職歴にも学歴にも付くので、
+    // 学校へのリンクを含む塊は飛ばす
+    if (!company) {
+      for (const sub of cardEl.querySelectorAll('.background-entity__summary-definition--subtitle')) {
+        const block = sub.closest('li, section, article, div');
+        if (block && block.querySelector('.background-entity__school-link')) continue;
+        const v = (sub.textContent || '').trim();
+        if (v) { company = v; break; }
+      }
+    }
+    // 大学は「教育」の次の行。「名古屋大学、大学院工学研究科」のように
+    // 「、」の前が学校名になる
+    const eduIdx = lines.findIndex(l => l === '教育' || l === '学歴');
+    const eduLine = (eduIdx >= 0 ? lines[eduIdx + 1] : '')
+      || lines.find(l => /(大学|大学院|高専|College|University)/i.test(l)) || '';
+    if (eduLine) {
+      const u = eduLine.split(/[、,，·・]/)[0].trim();
+      if (/(大学|大学院|高専|College|University)/i.test(u)) univ = u;
+    }
+    if (!univ) {
+      const school = cardEl.querySelector('a.background-entity__school-link');
+      if (school) univ = (school.textContent || '').trim();
+    }
+    // LinkedInには年齢が無い。空のままにする（突き合わせは会社名と大学で行う）
   } else if (getPlatform() === 'bizreach') {
     // Bizreachのカードは 年齢/新着タグ → 都道府県 → 年収 → 経過時間 → 送信通数(N通) →
     // 会社名 → 部署名 → 学歴… という固定順序で並ぶ(実機で確認)。以前は company = lines[0]
@@ -2533,6 +2556,11 @@ document.addEventListener('click', e => {
   if (!text) {
     text = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '').trim();
   }
+  // LinkedInの送信ボタンは <span aria-hidden="true">送信</span> を持つ。
+  // aria-hidden のため innerText に出てこず、aria-label も title も無いので、
+  // 上の2つでは文字を一切取れない（実機で確認。「送信」で検索して0件だった）。
+  // textContent なら読める。他媒体の判定は変えない
+  if (!text) text = (btn.textContent || '').trim();
   // AMBIの送信ボタンは実際のDOMが「送 信」のように文字間にスペースを挟んで表示される
   // （字間デザイン）ため、素の完全一致だとずっと素通りしていた。空白（半角・全角）を
   // 除去した文字列で判定することで、こうした字間デザインの差異を吸収する
@@ -2609,6 +2637,11 @@ document.addEventListener('click', e => {
     try {
       if (btn.closest('[data-test-component="message-icon-btn"], [data-live-test-component="message-icon-btn"]')) return true;
     } catch (_) {}
+    // パイプライン画面(/talent/hire/.../manage/all)では、行ごとの「メッセージ」
+    // ボタンから作成画面を開く。封筒アイコンだけを見ていると、この経路の送信を
+    // 丸ごと取りこぼす（実機の運用を確認: 封筒から送るか、パイプラインに追加して
+    // そこから送るかの2通り）
+    if (textCore === 'メッセージ') return true;
     return /さんにメッセージを送信/.test(text);
   })();
   const isScoutBtn           = !isGreen && (textCore === 'スカウト' || textCore === '再スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする') || text.includes('スカウトを作成') || isLinkedinStart);
@@ -2725,8 +2758,10 @@ document.addEventListener('click', e => {
     // LinkedIn: 一覧の各行が候補者。封筒アイコンの祖先をたどって、
     // /talent/profile/ のリンクを持つ最小の塊をその候補者の行とみなす
     if (!card && getPlatform() === 'linkedin') {
+      // 実機で確認: 封筒アイコンから11段上の div.row__top-section に
+      // /talent/profile/ のリンクがある。余裕をみて15段まで遡る
       let el = btn;
-      for (let i = 0; el && i < 8; i++, el = el.parentElement) {
+      for (let i = 0; el && i < 15; i++, el = el.parentElement) {
         if (el.querySelector && el.querySelector('a[href*="/talent/profile/"]')) { card = el; break; }
       }
     }
