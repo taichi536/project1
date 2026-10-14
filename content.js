@@ -1325,6 +1325,17 @@ function readSendFormSnapshot(platform) {
       const row = label && label.closest('div, tr, li');
       const a = row && row.querySelector('a');
       if (a) snap.templateRaw = (a.textContent || '').trim();
+    } else if (platform === 'linkedin') {
+      // テンプレート名は検索ボックスの値に入る（実機で確認：選ぶと
+      // 「AC）インダストリーコンサルタント（自動車領域） - BUS」が入った状態になる）。
+      // これが取れないと、サイドパネルで選んでいるポジションが使われ、
+      // 実際に送ったテンプレートと食い違う（実機で確認）
+      for (const inp of document.querySelectorAll('input')) {
+        const ph = (inp.getAttribute('placeholder') || '') + (inp.getAttribute('aria-label') || '');
+        if (!/テンプレート|template/i.test(ph)) continue;
+        const v = (inp.value || '').trim();
+        if (v) { snap.templateRaw = v; break; }
+      }
     }
     // 本文欄は画面によって位置が違うので、表示されている textarea のうち最も長い値を本文とみなす
     // 見えている欄が無ければ（判定を誤った場合も含めて）全体から選ぶ
@@ -1337,6 +1348,18 @@ function readSendFormSnapshot(platform) {
       if (ta.getClientRects().length > 0 && v.length > bestVisible.length) bestVisible = v;
     }
     snap.bodyText = (bestVisible || best).substring(0, 2000);
+
+    // LinkedInの本文は textarea ではなく contenteditable の編集領域（実機で確認）。
+    // textarea だけを見ていたため本文がまったく取れていなかった
+    if (!snap.bodyText && platform === 'linkedin') {
+      let ce = '';
+      for (const ed of document.querySelectorAll('[contenteditable="true"]')) {
+        if (ed.getClientRects().length === 0) continue;
+        const t = (ed.innerText || '').trim();
+        if (t.length > ce.length) ce = t;
+      }
+      snap.bodyText = ce.substring(0, 2000);
+    }
   } catch (_) {}
   return snap;
 }
@@ -7724,6 +7747,12 @@ function diagnoseCurrentPage() {
     } catch (e) {
       out.company = out.univ = out.age = 'エラー: ' + e.message;
     }
+    // 読み取り元の中身。値が画面と違うとき、どの行を見て間違えたのかが
+    // これで分かる。これが無いと、毎回「開発者ツールでこの1行を実行して」の
+    // 往復になる（実際にビズリーチとLinkedInで繰り返した）
+    try {
+      out.lines = (el.innerText || '').split('\n').map(l => l.trim()).filter(Boolean).slice(0, 20);
+    } catch (_) {}
   }
 
   try {
