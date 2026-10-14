@@ -2982,7 +2982,13 @@ document.addEventListener('click', e => {
       if (pr) {
         const p = JSON.parse(pr);
         const snap = readSendFormSnapshot(getPlatform());
-        if (!p.templateRaw && snap.templateRaw) p.templateRaw = snap.templateRaw;
+        // ビズリーチはテンプレート名が送信画面に出たままなので、押した時点の画面の値が
+        // 常に正しい。「まだ入っていなければ入れる」だと、一度送信を押して入力エラー等で
+        // 成立しなかったあとにテンプレートを選び直して送り直した場合、最初に押したときの
+        // 名前が残る。画面から読めたときだけ上書きする（読めなければ既存の値を残す）。
+        // RDSは「確定」を押した時点でしか取れないため、こちらは従来どおりにする
+        if (getPlatform() === 'bizreach' && snap.templateRaw) p.templateRaw = snap.templateRaw;
+        else if (!p.templateRaw && snap.templateRaw) p.templateRaw = snap.templateRaw;
         if (!p.bodyText && snap.bodyText) p.bodyText = snap.bodyText;
         sessionStorage.setItem('pendingScout', JSON.stringify(p));
       }
