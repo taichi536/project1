@@ -7627,12 +7627,106 @@ function extractProfile(maxChars) {
 // -------------------------------------------------------
 // メッセージリスナー
 // -------------------------------------------------------
+// -------------------------------------------------------
+// 画面診断：いまの画面で何が取れるかを、拡張機能自身に答えさせる
+// -------------------------------------------------------
+//
+// これが無いと、媒体が画面を変えるたびに「開発者ツールでこの1行を実行してください」を
+// 繰り返すことになる。実際にビズリーチとLinkedInで何度も往復した。
+// 記録に使うのと同じ処理をその場で走らせて結果を見せれば、誰でも、どの媒体の
+// どの画面でも、2秒で「正しく取れているか」を確認できる。
+//
+// 読み取るだけで、記録も送信もしない。
+function diagnoseCurrentPage() {
+  const platform = getPlatform();
+  const out = {
+    platform,
+    url: location.pathname,
+    version: (() => { try { return chrome.runtime.getManifest().version; } catch (_) { return ''; } })(),
+    netHook: isNetHookAlive(),
+    sendRequestRegistered: !!SEND_REQUESTS[platform],
+    bulkRequestRegistered: !!BULK_SEND_REQUESTS[platform],
+  };
+
+  // 候補者をどこから読むか。記録時と同じ優先順にする
+  let el = null;
+  let source = '';
+  try {
+    if (platform === 'linkedin') {
+      const b = document.querySelector('[data-test-component="message-icon-btn"]');
+      let p = b;
+      for (let i = 0; p && i < 15; i++, p = p.parentElement) {
+        if (p.querySelector && p.querySelector('a[href*="/talent/profile/"]')) { el = p; source = '一覧の行'; break; }
+      }
+    }
+    if (!el) {
+      const panel = findDetailPanelForPlatform(platform);
+      if (panel) { el = panel; source = '詳細パネル'; }
+    }
+    if (!el) {
+      const cards = findCandidateCardsByPlatform();
+      if (cards.length) { el = cards[0]; source = `一覧カード(${cards.length}件中の1件目)`; }
+    }
+  } catch (e) {
+    out.error = e.message;
+  }
+
+  out.source = source || '見つかりません';
+  if (el) {
+    try { out.candidateId = getCandidateId(el) || '(取れません)'; } catch (e) { out.candidateId = 'エラー: ' + e.message; }
+    try {
+      const info = extractBasicInfo(el);
+      out.company = info.company || '(取れません)';
+      out.univ = info.univ || '(取れません)';
+      out.age = info.age || '(取れません)';
+    } catch (e) {
+      out.company = out.univ = out.age = 'エラー: ' + e.message;
+    }
+  }
+
+  try {
+    const snap = readSendFormSnapshot(platform);
+    out.template = snap.templateRaw || '(取れません)';
+    out.bodyLength = (snap.bodyText || '').length;
+  } catch (_) {}
+
+  // 画面にある、送信・スカウトに関わるボタンの文言。認識対象かどうかも併せて出す。
+  // ここに出ているのに「対象外」なら、そのボタンから送った分は記録されない
+  try {
+    const seen = [];
+    for (const b of document.querySelectorAll('button, a, [role="button"]')) {
+      let t = (b.innerText || '').trim();
+      if (!t) t = (b.getAttribute('aria-label') || b.getAttribute('title') || '').trim();
+      if (!t) t = (b.textContent || '').trim();
+      if (!t || t.length > 30) continue;
+      if (!/スカウト|送信|送る|メッセージ|確定|確認/.test(t)) continue;
+      const core = t.replace(/[\s　]/g, '').replace(/[^぀-ヿ一-鿿]/g, '');
+      const known = core === '送信' || core === '送信する' || core === 'スカウトを送信'
+        || core === 'スカウト' || core === '再スカウト' || core === '確認' || core === '確定'
+        || /スカウトを送る|スカウトする|スカウトを作成/.test(t)
+        || (platform === 'linkedin' && (core === 'メッセージ' || /さんにメッセージを送信/.test(t)));
+      const line = `${known ? '○' : '×'} ${t.slice(0, 24)}`;
+      if (!seen.includes(line)) seen.push(line);
+      if (seen.length >= 12) break;
+    }
+    out.buttons = seen;
+  } catch (_) {}
+
+  return out;
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // async処理を含むハンドラはIIFEでラップ
   // 承認待ちポップアップから、同じスカウトルーム（room_url）を既に開いているタブが
   // あった場合に、新しいタブを増やさずそのタブへ直接メッセージで探索を依頼するために使う
   // （URLのhash書き換えだけではSPAの同一ページ内遷移になり、ページロードが発生せず
   // content.js側のトリガーが再実行されないため、メッセージ経由で直接呼び出す）
+  if (request.action === 'diagnosePage') {
+    try { sendResponse({ ok: true, result: diagnoseCurrentPage() }); }
+    catch (e) { sendResponse({ ok: false, error: e.message }); }
+    return false;
+  }
+
   if (request.action === 'snowweFindCandidate') {
     if (getPlatform() === 'rds' && request.params?.company) {
       snowweFindAndHighlightCandidate(request.params);

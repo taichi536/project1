@@ -2889,3 +2889,67 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     }
   });
 });
+
+// ============================================================
+// 画面診断（設定タブ）
+// ============================================================
+//
+// 媒体が画面を変えるたびに「開発者ツールでこの1行を実行してください」を繰り返して
+// いた。ビズリーチとLinkedInで何度も往復した。記録に使うのと同じ処理をその場で
+// 走らせて結果を見せれば、誰でも、どの媒体のどの画面でも確認できる。
+// 画面の表示と違う項目があれば、それが直すべき場所だと一目で分かる。
+async function runDiagnose() {
+  const pre = $('diagnose-result');
+  const copyBtn = $('diagnose-copy-btn');
+  pre.style.display = 'block';
+  pre.textContent = '診断中...';
+  copyBtn.style.display = 'none';
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    let res;
+    try {
+      res = await chrome.tabs.sendMessage(tab.id, { action: 'diagnosePage' });
+    } catch (_) {
+      // content.jsが動いていない。更新後にページを再読み込みしていない場合がこれ
+      pre.textContent = 'この画面では拡張機能が動いていません。\nページを再読み込み（F5）してから、もう一度押してください。';
+      return;
+    }
+    if (!res || !res.ok) {
+      pre.textContent = `診断できませんでした: ${res?.error || '応答がありません'}`;
+      return;
+    }
+    const r = res.result;
+    const line = (k, v) => `${k.padEnd(12, '　')} ${v}`;
+    const text = [
+      line('媒体', `${r.platform}（v${r.version}）`),
+      line('URL', r.url),
+      line('通信の検知', r.netHook ? 'あり' : 'なし ← F5してください'),
+      line('送信API', r.sendRequestRegistered ? '登録済み（確実に検知できます）'
+        : (r.bulkRequestRegistered ? '一括送信のみ登録済み' : '未登録（ボタンで検知します）')),
+      '',
+      line('読み取り元', r.source),
+      line('候補者ID', r.candidateId || '-'),
+      line('会社名', r.company || '-'),
+      line('大学', r.univ || '-'),
+      line('年齢', r.age || '-'),
+      line('テンプレート', r.template || '-'),
+      line('本文', r.bodyLength ? `${r.bodyLength}文字` : '(取れません)'),
+      '',
+      '画面にあるボタン（○＝認識対象／×＝対象外）',
+      ...(r.buttons || []).map(b => '  ' + b),
+      r.error ? `\nエラー: ${r.error}` : '',
+    ].join('\n');
+    pre.textContent = text;
+    copyBtn.style.display = 'inline-block';
+    copyBtn.onclick = () => {
+      navigator.clipboard.writeText(text).then(() => {
+        copyBtn.textContent = 'コピーしました';
+        setTimeout(() => { copyBtn.textContent = '結果をコピー'; }, 2000);
+      }).catch(() => {});
+    };
+  } catch (e) {
+    pre.textContent = `診断できませんでした: ${e.message}`;
+  }
+}
+
+if ($('diagnose-btn')) $('diagnose-btn').addEventListener('click', () => runDiagnose());

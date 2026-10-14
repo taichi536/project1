@@ -687,6 +687,20 @@
 </div>
 
 <div class="tab-content" id="tab-settings">
+  <div style="border:1px solid #E5E3DD; border-radius:8px; padding:10px; margin-bottom:12px; background:#FCFCFA;">
+    <div style="font-size:12px; font-weight:600; margin-bottom:4px;">🔎 この画面で何が取れるか</div>
+    <div style="font-size:10px; color:#888780; margin-bottom:8px;">
+      候補者を表示した状態で押すと、記録に使うのと同じ処理をその場で走らせて結果を出します。
+      読み取るだけで、記録も送信もしません。画面の表示と違う項目があれば、それが直すべき場所です。
+    </div>
+    <button id="diagnose-btn" style="font-size:11px; padding:5px 10px;">この画面を診断する</button>
+    <pre id="diagnose-result" style="display:none; margin-top:8px; font-size:10px; line-height:1.6;
+         white-space:pre-wrap; word-break:break-all; background:#F5F4F0; border:1px solid #E5E3DD;
+         border-radius:6px; padding:8px; max-height:320px; overflow:auto;"></pre>
+    <button id="diagnose-copy-btn" style="display:none; font-size:10px; padding:4px 8px; margin-top:6px;
+            background:#F5F4F0; color:#5A5852; border:1px solid #E5E3DD;">結果をコピー</button>
+  </div>
+
 
   <div class="setting-group">
     <div class="label">年齢（歳）</div>
