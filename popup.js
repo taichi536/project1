@@ -2926,8 +2926,9 @@ async function runDiagnose() {
       line('  会社名', r.pending.company),
       line('  大学', r.pending.univ),
       line('  年齢', r.pending.age),
-      line('  ポジション', r.pending.position),
       ...(r.pendingCompanyWhere ? [line('  会社名の出所', r.pendingCompanyWhere)] : []),
+      line('  ポジション', r.positionToRecord || r.pending.fallbackPosition || '(なし)'),
+      ...(r.positionSource ? [line('  ポジションの出所', r.positionSource)] : []),
       '',
     ] : (r.pendingExpected === false ? [
       '▼ 控えはありません（この媒体では正常です）',

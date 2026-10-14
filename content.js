@@ -2011,6 +2011,17 @@ function getCandidateId(cardEl) {
       return '';
     })();
     if (dataNum) return `dodax_${dataNum}`;
+    // スカウト送信画面では、会員番号は左上の見出しと「宛先」欄にあり、
+    // 候補者情報を読む詳細パネルの中には無い（実機で確認。ハッシュIDに落ちていた）。
+    // ハッシュIDは表示内容が変わると別人扱いになり、突き合わせもできない。
+    // この画面に出ている候補者は1人だけなので、画面全体から拾っても取り違えない
+    if (/\/scout\/sent/.test(location.pathname)) {
+      const body = (document.body.innerText || '');
+      const atesaki = body.match(/宛先[\s　]*[：:]?[\s　]*\n?[\s　]*(\d{8})(?!\d)/);
+      if (atesaki) return `dodax_${atesaki[1]}`;
+      const nums = [...new Set((body.match(/(?:^|\n)[\s　]*\d{8}[\s　]*(?=\n|$)/g) || []).map(s => s.trim()))];
+      if (nums.length === 1) return `dodax_${nums[0]}`;
+    }
     // ハッシュに落ちる前に、どんな形だったかを残す（値は残さない）
     try {
       if (Date.now() - (window.__snowweDodaxIdReportedAt || 0) < 30 * 60 * 1000) throw 0;
@@ -2313,6 +2324,22 @@ function extractBasicInfo(cardEl) {
       for (let k = zaisekiIdx + 1; k < Math.min(lines.length, zaisekiIdx + 4); k++) {
         const v = lines[k].split(/[／/]/)[0].trim();
         if (v && !isNotCompanyName(v) && !isMessageLine(v)) { company = v; break; }
+      }
+    }
+    // スカウト送信画面の詳細パネルでは、ラベルと値が同じ行にまとまって出る（実機で確認）:
+    //   在籍企業 enechain   リスク管理 2024年11月 ～ 在職中  学歴 東京大学大学院 電気 …
+    // ラベルの完全一致では見つからず、「enechain」のように会社名キーワードを
+    // 含まない社名だと以降の規則にも掛からないため、会社名が空欄になっていた
+    if (!company) {
+      const inline = lines.find(l => /^在籍企業(?:名)?[\s　]/.test(l));
+      if (inline) {
+        let after = inline.replace(/^在籍企業(?:名)?[\s　]*[：:]?[\s　]*/, '');
+        // 同じ行に次の項目まで入っているため、項目名・在籍期間・空白2つ以上で切る
+        after = after.split(/学歴|職務要約|スキル|直近の職務経歴|経験職種|経験業種|マネジメント経験|言語/)[0];
+        after = after.split(/[\s　]{2,}/)[0];
+        after = after.split(/[\s　]*\d{4}年/)[0];
+        const v = after.split(/[／/]/)[0].trim();
+        if (v && !isNotCompanyName(v) && !isMessageLine(v)) company = v;
       }
     }
 
@@ -7732,7 +7759,11 @@ function diagnoseCurrentPage() {
         company: (p.info && p.info.company) || '(取れません)',
         univ: (p.info && p.info.univ) || '(取れません)',
         age: (p.info && p.info.age) || '(取れません)',
-        position: p.templateName || p.templateRaw || p.fallbackPosition || '(なし)',
+        // 控えの時点ではテンプレートはまだ選ばれていないことが多く、ここに入るのは
+        // 「拡張機能で選択中のポジション」。記録されるのは送信時に読むテンプレート名が
+        // 優先なので、控えの値だけを見せると画面と違う名前が出て誤解を招く（実機で確認）。
+        // 実際に記録される値は下の positionToRecord で出す
+        fallbackPosition: p.templateName || p.templateRaw || p.fallbackPosition || '',
         agoSec: p.ts ? Math.round((Date.now() - p.ts) / 1000) : null,
       };
     }
@@ -7743,6 +7774,16 @@ function diagnoseCurrentPage() {
   let source = '';
   try {
     if (platform === 'linkedin') {
+      // 作成中のメッセージが開いているなら、その宛先が送信相手。開いたまま診断すると
+      // 一覧の先頭行（全く別の候補者）を読んで見せてしまい、控えと食い違って見える
+      for (const d of document.querySelectorAll('[role="dialog"], .artdeco-modal')) {
+        const t = (d.innerText || '');
+        if (!/メッセージを作成|宛先/.test(t)) continue;
+        const r = d.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) { el = d; source = '作成中のメッセージ'; break; }
+      }
+    }
+    if (platform === 'linkedin' && !el) {
       const b = document.querySelector('[data-test-component="message-icon-btn"]');
       let p = b;
       for (let i = 0; p && i < 15; i++, p = p.parentElement) {
@@ -7805,6 +7846,13 @@ function diagnoseCurrentPage() {
       out.template = _cachedGreenTemplate + '（選択を記憶した値）';
     }
     out.bodyLength = (snap.bodyText || '').length;
+    // 記録されるポジション名は recordScoutSent と同じ順序で決める。
+    // 送信フォームのテンプレート名が最優先で、取れないときだけ控えた値を使う
+    const tmpl = snap.templateRaw || (platform === 'green' ? _cachedGreenTemplate : '') || '';
+    const fb = (out.pending && out.pending.fallbackPosition) || '';
+    out.positionToRecord = tmpl || fb || '(なし)';
+    out.positionSource = tmpl ? '送信フォームのテンプレート'
+      : (fb ? '拡張機能で選択中のポジション（テンプレートが読めないため）' : '');
   } catch (_) {}
   // Greenには候補者ごとの「スカウト開始」ボタンが無く、送信時に詳細モーダルから
   // 組み立てる設計。控えが無いのが正常なので、不具合と誤解されないようにする
