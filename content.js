@@ -2353,12 +2353,18 @@ function extractBasicInfo(cardEl) {
     if (headline) {
       company = headline.split(/[|｜,，]/).map(x => x.trim()).filter(Boolean).pop() || '';
     }
-    // 「職歴」の次の行から。「〈会社〉の〈役職〉 · 期間」という形
+    // 「職歴」の数行先から。見出しの直後には読み上げ用のラベル行が入るため、
+    // 次の行だけを見ると外す（実機で確認）:
+    //   職歴 / プロフィールの職歴です / toyotaのSoftware Engineer · 2016年 – 2018年
+    // 実体は「〈会社〉の〈役職〉 · 期間」という形。最初に出てくるものが直近の職歴
     if (!company) {
       const i = lines.findIndex(l => l === '職歴');
-      const line = i >= 0 ? (lines[i + 1] || '') : '';
-      const m = line.match(/^(.+)の[^の]+?\s*[·・]/);
-      if (m) company = m[1].trim();
+      if (i >= 0) {
+        for (let k = i + 1; k < Math.min(lines.length, i + 7); k++) {
+          const m = lines[k].match(/^(.+)の[^の]+?\s*[·・]/);
+          if (m) { company = m[1].trim(); break; }
+        }
+      }
     }
     // プロフィール画面ではクラスで取れる。subtitle は職歴にも学歴にも付くので、
     // 学校へのリンクを含む塊は飛ばす
@@ -2372,9 +2378,17 @@ function extractBasicInfo(cardEl) {
     }
     // 大学は「教育」の次の行。「名古屋大学、大学院工学研究科」のように
     // 「、」の前が学校名になる
+    // 「教育」の数行先から。ここにも読み上げ用のラベル行が入る（実機で確認）:
+    //   教育 / プロフィールの学歴です / 立命館大学、Master's degree · 2006年 – 2008年
+    // 学校名は「、」の前
     const eduIdx = lines.findIndex(l => l === '教育' || l === '学歴');
-    const eduLine = (eduIdx >= 0 ? lines[eduIdx + 1] : '')
-      || lines.find(l => /(大学|大学院|高専|College|University)/i.test(l)) || '';
+    let eduLine = '';
+    if (eduIdx >= 0) {
+      for (let k = eduIdx + 1; k < Math.min(lines.length, eduIdx + 7); k++) {
+        if (/(大学|大学院|高専|College|University)/i.test(lines[k])) { eduLine = lines[k]; break; }
+      }
+    }
+    if (!eduLine) eduLine = lines.find(l => /(大学|大学院|高専|College|University)/i.test(l)) || '';
     if (eduLine) {
       const u = eduLine.split(/[、,，·・]/)[0].trim();
       if (/(大学|大学院|高専|College|University)/i.test(u)) univ = u;
