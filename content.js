@@ -2664,6 +2664,21 @@ document.addEventListener('click', e => {
       }
     }
 
+    // Bizreachの「スカウトを作成」は履歴書パネル(ess-resume-detail)の外、下部のバーに
+    // 置かれているため contains(btn) が成立しない。実機のログで
+    // 「カード検出: なし / _selectedCard: なし」を確認した。
+    // カードが決まらないと pendingScout が作られず、送信時のフォールバックに頼ることに
+    // なる。フォールバックでも会社名は取れるが、パネルの再描画待ち
+    // (readCandidateWhenStable) を通らないため、前の候補者の情報を拾う余地が残る。
+    // 表示されている履歴書パネルがあれば、それを候補者の情報源として使う
+    if (!card && getPlatform() === 'bizreach') {
+      const panel = findBizreachDetailPanel();
+      if (panel) {
+        const r = panel.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) card = panel;
+      }
+    }
+
     console.log('[Snow-we] カード検出:', card ? 'あり' : 'なし', '/ _selectedCard:', _selectedCard ? 'あり' : 'なし', '/ カード総数:', cards.length);
 
     if (card) {
