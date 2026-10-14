@@ -7758,8 +7758,15 @@ function diagnoseCurrentPage() {
   try {
     const snap = readSendFormSnapshot(platform);
     out.template = snap.templateRaw || '(取れません)';
+    // Greenはテンプレートのチップを押した記録から覚える方式で、送信フォームからは読めない
+    if (platform === 'green' && !snap.templateRaw && _cachedGreenTemplate) {
+      out.template = _cachedGreenTemplate + '（選択を記憶した値）';
+    }
     out.bodyLength = (snap.bodyText || '').length;
   } catch (_) {}
+  // Greenには候補者ごとの「スカウト開始」ボタンが無く、送信時に詳細モーダルから
+  // 組み立てる設計。控えが無いのが正常なので、不具合と誤解されないようにする
+  out.pendingExpected = platform !== 'green';
 
   // 画面にある、送信・スカウトに関わるボタンの文言。認識対象かどうかも併せて出す。
   // ここに出ているのに「対象外」なら、そのボタンから送った分は記録されない
@@ -7772,8 +7779,11 @@ function diagnoseCurrentPage() {
       if (!t || t.length > 30) continue;
       if (!/スカウト|送信|送る|メッセージ|確定|確認/.test(t)) continue;
       const core = t.replace(/[\s　]/g, '').replace(/[^぀-ヿ一-鿿]/g, '');
+      // Greenは画面上部のナビの「スカウト」タブが誤ってヒットするため対象外にしてある。
+      // 実際の判定と同じ扱いにしないと、診断が嘘をつく
       const known = core === '送信' || core === '送信する' || core === 'スカウトを送信'
-        || core === 'スカウト' || core === '再スカウト' || core === '確認' || core === '確定'
+        || (platform !== 'green' && (core === 'スカウト' || core === '再スカウト'))
+        || core === '確認' || core === '確定'
         || /スカウトを送る|スカウトする|スカウトを作成/.test(t)
         || (platform === 'linkedin' && (core === 'メッセージ' || /さんにメッセージを送信/.test(t)));
       const line = `${known ? '○' : '×'} ${t.slice(0, 24)}`;
