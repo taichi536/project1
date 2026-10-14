@@ -7065,10 +7065,15 @@ function findBizreachDetailPanel() {
     // 位置条件を 0.4 → 0.25 に緩和（レイアウト差異を吸収）
     if (rect.left > viewportWidth * 0.25 && rect.width > 250 && t.length > 150 && t.length < 25000) {
       if (!resumeOnly.some(kw => t.includes(kw))) return;
-      if (composeMarkers.some(kw => t.includes(kw))) return;
-      try { if (el.closest('[role="dialog"], [class*="modal"], [class*="dialog"]')) return; } catch (_) {}
       const matchCount = keywords.filter(kw => t.includes(kw)).length;
-      if (matchCount >= 2) candidates.push({ el, score: t.length + matchCount * 500 });
+      if (matchCount < 2) return;
+      // 作成画面を含むものは、履歴書だけの要素が他に無い場合の最後の手段として残す。
+      // 除外してしまうと候補が1つも無くなり、候補者を特定できず記録が丸ごと
+      // 消える（誤った会社名で記録されるより悪い）
+      let penalty = 0;
+      if (composeMarkers.some(kw => t.includes(kw))) penalty += 100000;
+      try { if (el.closest('[role="dialog"], [class*="modal"], [class*="dialog"]')) penalty += 100000; } catch (_) {}
+      candidates.push({ el, score: t.length + matchCount * 500 - penalty });
     }
   });
   if (candidates.length === 0) return null;
