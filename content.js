@@ -7672,6 +7672,24 @@ function diagnoseCurrentPage() {
     bulkRequestRegistered: !!BULK_SEND_REQUESTS[platform],
   };
 
+  // 実際に記録されるのは、スカウト開始のボタンを押した時点で控えた内容
+  // (pendingScout)。診断が画面を読み直すと、ページ最初の候補者を拾ってしまい、
+  // 送ろうとしている相手とは別人の値を見せることになる。控えがあればそれを出す
+  try {
+    const raw = sessionStorage.getItem('pendingScout');
+    if (raw) {
+      const p = JSON.parse(raw);
+      out.pending = {
+        candidateId: p.id || '(なし)',
+        company: (p.info && p.info.company) || '(取れません)',
+        univ: (p.info && p.info.univ) || '(取れません)',
+        age: (p.info && p.info.age) || '(取れません)',
+        position: p.templateName || p.templateRaw || p.fallbackPosition || '(なし)',
+        agoSec: p.ts ? Math.round((Date.now() - p.ts) / 1000) : null,
+      };
+    }
+  } catch (_) {}
+
   // 候補者をどこから読むか。記録時と同じ優先順にする
   let el = null;
   let source = '';

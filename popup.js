@@ -2920,6 +2920,20 @@ async function runDiagnose() {
     }
     const r = res.result;
     const line = (k, v) => `${k.padEnd(12, '　')} ${v}`;
+    const pend = r.pending ? [
+      `▼ 実際に記録される内容（スカウト開始を押した時点の控え / ${r.pending.agoSec}秒前）`,
+      line('  候補者ID', r.pending.candidateId),
+      line('  会社名', r.pending.company),
+      line('  大学', r.pending.univ),
+      line('  年齢', r.pending.age),
+      line('  ポジション', r.pending.position),
+      '',
+    ] : [
+      '▼ 控えがありません',
+      '  スカウト開始のボタン（封筒／スカウトを作成 等）をまだ押していないか、',
+      '  押しても候補者を特定できていません。押した直後にもう一度診断してください。',
+      '',
+    ];
     const text = [
       line('媒体', `${r.platform}（v${r.version}）`),
       line('URL', r.url),
@@ -2927,6 +2941,8 @@ async function runDiagnose() {
       line('送信API', r.sendRequestRegistered ? '登録済み（確実に検知できます）'
         : (r.bulkRequestRegistered ? '一括送信のみ登録済み' : '未登録（ボタンで検知します）')),
       '',
+      ...pend,
+      '▼ いま画面から読み直した場合（参考。別の候補者を拾っていることがあります）',
       line('読み取り元', r.source),
       line('候補者ID', r.candidateId || '-'),
       line('会社名', r.company || '-'),
