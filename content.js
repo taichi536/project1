@@ -1863,6 +1863,22 @@ function getCandidateId(cardEl) {
     // user_idがまだ反映されていない場合のみハッシュにフォールバック
   }
 
+  // LinkedIn Recruiter: 候補者ごとに /talent/profile/<ID> のリンクがある（実機で確認）。
+  //   https://www.linkedin.com/talent/profile/AEMAAGznHsUBYRf86xaAzlmHrO5bVS1nq9yF4EA?project=21
+  // カード内のリンクを先に見て、無ければ開いているURLから取る
+  if (getPlatform() === 'linkedin') {
+    const a = cardEl && cardEl.querySelector && cardEl.querySelector('a[href*="/talent/profile/"]');
+    const fromCard = a && (a.getAttribute('href') || '').match(/\/talent\/profile\/([A-Za-z0-9_-]{10,})/);
+    if (fromCard) return `linkedin_${fromCard[1]}`;
+    const fromUrl = location.pathname.match(/\/talent\/profile\/([A-Za-z0-9_-]{10,})/)
+      || location.pathname.match(/\/profile\/([A-Za-z0-9_-]{10,})/);
+    if (fromUrl) return `linkedin_${fromUrl[1]}`;
+    // 識別子が取れないまま記録すると、同じ人が別人として積み上がる。
+    // ハッシュに落とさず、特定できなかったことを残す
+    console.warn('[Snow-we] LinkedIn: 候補者の識別子を取れません');
+    return '';
+  }
+
   // AMBI: hidden input.js_sid から候補者ID取得
   if (getPlatform() === 'ambi') {
     const sidInput = cardEl.querySelector('input.js_sid');
@@ -2321,6 +2337,30 @@ function extractBasicInfo(cardEl) {
     // してしまう（実際にそうなる分割規則を検討して破棄した）。
     // 誤った社名を作るより、連結されたまま残して報告し、画面の構造を
     // 確認してから直す（reportDodaxNameInCompany）
+  } else if (getPlatform() === 'linkedin') {
+    // LinkedIn Recruiter。実機のDOMで確認した取得先：
+    //   大学   a.background-entity__school-link            → 東京理科大学
+    //   会社名 dd.background-entity__summary-definition--subtitle → トヨタ自動車株式会社
+    //
+    // subtitle は「経歴の見出しの下」という意味のクラスで、職歴にも学歴にも付く。
+    // 学歴側を会社名として拾わないよう、学校へのリンクを含む塊は飛ばす。
+    // 先頭が最新の職歴になる（実機で System Engineer / トヨタ自動車株式会社 が先頭）
+    const subs = Array.from(cardEl.querySelectorAll('.background-entity__summary-definition--subtitle'));
+    for (const sub of subs) {
+      const block = sub.closest('li, section, article, div');
+      if (block && block.querySelector('.background-entity__school-link')) continue;
+      const v = (sub.textContent || '').trim();
+      if (v) { company = v; break; }
+    }
+    // 見出し（「システムエンジニア｜車両制御・ADAS｜…｜トヨタ自動車株式会社」）は
+    // 最後の区切りの後ろが勤務先になっていることが多い。subtitleが取れないときの保険
+    if (!company) {
+      const head = lines.find(l => /[|｜]/.test(l) && /(株式会社|合同会社|有限会社|Inc|Corp|Ltd)/i.test(l));
+      if (head) company = head.split(/[|｜]/).map(x => x.trim()).filter(Boolean).pop() || '';
+    }
+    const school = cardEl.querySelector('a.background-entity__school-link');
+    if (school) univ = (school.textContent || '').trim();
+    // LinkedInには年齢が無い。ageMatchは空のままにする（突き合わせは会社名と大学で行う）
   } else if (getPlatform() === 'bizreach') {
     // Bizreachのカードは 年齢/新着タグ → 都道府県 → 年収 → 経過時間 → 送信通数(N通) →
     // 会社名 → 部署名 → 学歴… という固定順序で並ぶ(実機で確認)。以前は company = lines[0]
@@ -2556,7 +2596,12 @@ document.addEventListener('click', e => {
   // Greenは候補者をクリックするとモーダルが開き、その中の送信アイコンで完結するので、
   // 送信時のフォールバック（詳細モーダルから候補者情報を復元する処理）で記録できる
   const isGreen = getPlatform() === 'green';
-  const isScoutBtn           = !isGreen && (textCore === 'スカウト' || textCore === '再スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする') || text.includes('スカウトを作成'));
+  // LinkedIn Recruiterには「スカウト」という語が無く、一覧の封筒アイコンの
+  // 「〇〇さんにメッセージを送信」で作成画面が開く（実機で確認）。
+  // ここで候補者を控えておかないと、作成画面には /talent/profile/ のリンクが
+  // 無く識別子を取れない
+  const isLinkedinStart = getPlatform() === 'linkedin' && /さんにメッセージを送信/.test(text);
+  const isScoutBtn           = !isGreen && (textCore === 'スカウト' || textCore === '再スカウト' || text.includes('スカウトを送る') || text.includes('スカウトする') || text.includes('スカウトを作成') || isLinkedinStart);
   const isConfirmBtn         = textCore === '確認';
   // Bizreach: モーダル内の最終送信ボタンは「スカウトを送信」という文言で、
   // 単独の「送信」「送信する」とは一致しない（実機で確認）。このボタンは
@@ -2664,6 +2709,15 @@ document.addEventListener('click', e => {
           if (dist < minDist) { minDist = dist; card = c; }
         }
         if (minDist > 300) card = null;
+      }
+    }
+
+    // LinkedIn: 一覧の各行が候補者。封筒アイコンの祖先をたどって、
+    // /talent/profile/ のリンクを持つ最小の塊をその候補者の行とみなす
+    if (!card && getPlatform() === 'linkedin') {
+      let el = btn;
+      for (let i = 0; el && i < 8; i++, el = el.parentElement) {
+        if (el.querySelector && el.querySelector('a[href*="/talent/profile/"]')) { card = el; break; }
       }
     }
 
