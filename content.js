@@ -1315,6 +1315,16 @@ function readSendFormSnapshot(platform) {
     } else if (platform === 'dodax') {
       const el = document.querySelector('.vs__selected');
       snap.templateRaw = el ? (el.getAttribute('title') || el.textContent || '').trim() : '';
+    } else if (platform === 'rds') {
+      // 送信フォームの「求人票」欄に、ポジション名がそのまま入っている（実機で確認）
+      //   アクセンチュア）デジタルワークプレイスコンサルタント / アーキテクト / エンジニア
+      // これまでRDSはテンプレート選択の「確定」でしか拾えず、その経路を通らないと
+      // ポジションが分からなかった
+      const label = Array.from(document.querySelectorAll('*'))
+        .find(e => !e.children.length && (e.textContent || '').trim() === '求人票');
+      const row = label && label.closest('div, tr, li');
+      const a = row && row.querySelector('a');
+      if (a) snap.templateRaw = (a.textContent || '').trim();
     }
     // 本文欄は画面によって位置が違うので、表示されている textarea のうち最も長い値を本文とみなす
     // 見えている欄が無ければ（判定を誤った場合も含めて）全体から選ぶ
@@ -2269,6 +2279,20 @@ function extractBasicInfo(cardEl) {
       company = lines.find(l => !isEduLine(l) && !isMessageLine(l) && companyRe.test(l))?.split(/[／/]/)[0].trim() || '';
     }
   } else if (getPlatform() === 'dodax') {
+    // 送信画面のモーダルには「在籍企業」というラベルがあり、その下が
+    //   公益社団法人SVリーグ        ← 会社名
+    //   経営基盤本部広報グループ…    ← 部署名
+    //   共同ピーアール株式会社       ← 1つ前の勤務先
+    // という並びになる（実機で確認）。近さだけで探すと部署名を拾い、
+    // 会社名として不適切と判定されて空欄になっていた。ラベルの直後を最優先する
+    const zaisekiIdx = lines.findIndex(l => l === '在籍企業' || l === '在籍企業名');
+    if (zaisekiIdx >= 0) {
+      for (let k = zaisekiIdx + 1; k < Math.min(lines.length, zaisekiIdx + 4); k++) {
+        const v = lines[k].split(/[／/]/)[0].trim();
+        if (v && !isNotCompanyName(v) && !isMessageLine(v)) { company = v; break; }
+      }
+    }
+
     // doda-X: 「現職」「在籍」の近くか、会社名キーワードを含む行を優先
     const companyRe2 = /株式会社|合同会社|有限会社|LLC|Inc\.|Co\.,|ホールディングス|グループ|銀行|証券|保険|大学|病院/;
     // companyRe2は「◯◯大学病院」のような会社名も拾えるよう「大学」「病院」を含むが、
@@ -2279,7 +2303,7 @@ function extractBasicInfo(cardEl) {
     // 語を含まない学歴表記（研究科・専攻名）も会社名として誤って拾われる不具合が実データで
     // 確認されたため、これらの語を含む行も学歴行として除外する
     const isEduLine = l => /卒業|修了|在学|入学|研究科|専攻/.test(l);
-    const idx2 = lines.findIndex(l => l === '現職' || l.includes('在籍'));
+    const idx2 = company ? -1 : lines.findIndex(l => l === '現職' || l.includes('在籍'));
     if (idx2 >= 0) {
       for (let i = Math.max(0, idx2 - 3); i < Math.min(lines.length, idx2 + 3); i++) {
         if (i === idx2) continue;
