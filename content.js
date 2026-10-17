@@ -1317,12 +1317,21 @@ function isNetHookAlive() {
  * 送信そのものが記録されなかった
  */
 function findLinkedinDetailPanel() {
+  const visible = (el) => {
+    try {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    } catch (_) { return false; }
+  };
   try {
     for (const d of document.querySelectorAll('[role="dialog"], .artdeco-modal')) {
-      const t = (d.innerText || '');
-      if (!/メッセージを作成|宛先/.test(t)) continue;
-      const r = d.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) return d;
+      if (/メッセージを作成|宛先/.test(d.innerText || '') && visible(d)) return d;
+    }
+    // 候補者のプロフィールだけを開いた画面（「検索結果から」等のモーダル）。
+    // 実データで、この画面から送ったスカウトは読み取り元が見つからず、
+    // 会社名が空欄のまま記録されていた
+    for (const d of document.querySelectorAll('[role="dialog"], .artdeco-modal')) {
+      if (/公開プロフィール|職歴/.test(d.innerText || '') && visible(d)) return d;
     }
   } catch (_) {}
   return null;
@@ -2544,6 +2553,23 @@ function extractBasicInfo(cardEl) {
       && /(株式会社|合同会社|有限会社|Inc\.?|Corp|Ltd|LLC|GmbH)/i.test(l));
     if (headline) {
       company = headline.split(/[|｜,，]/).map(x => x.trim()).filter(Boolean).pop() || '';
+    }
+    // 英語の見出しは区切り文字ではなく「役職 at 会社名」と書く（LinkedInの標準）。
+    // 実データで「Market Data Analyst at Nissan Motor Corporation」から会社名を
+    // 取れず、記録が空欄になっていた。最後の「 at 」より後ろを会社名とみなす
+    if (!company) {
+      for (const l of headLines) {
+        if (hasPeriod(l)) continue;
+        const m = l.match(/^.+\s+at\s+(.+)$/);
+        if (!m) continue;
+        const v = m[1].trim().replace(/[.,、。]+$/, '');
+        // 「… at scale」のような文章の一部を拾わないよう、長さと中身で絞る
+        if (!v || v.length > 60) continue;
+        if (isNotCompanyName(v)) continue;
+        if (!/^[A-Z0-9]|[ぁ-んァ-ヶ一-鿿]/.test(v)) continue;
+        company = v;
+        break;
+      }
     }
     // 「職歴」の数行先から。見出しの直後には読み上げ用のラベル行が入るため、
     // 次の行だけを見ると外す（実機で確認）:
