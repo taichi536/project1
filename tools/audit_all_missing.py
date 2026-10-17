@@ -73,9 +73,19 @@ def post_json(url, payload, timeout=340):
         # GASはエラー時にHTMLのページを返す（権限切れ、実行時エラー、実行回数の
         # 上限など）。そのままJSONとして読もうとすると「Expecting value」で
         # 落ち、何が起きたのか分からないまま終わる。中身を見せる
-        head = raw.strip()[:400].replace('\n', ' ')
         print('❌ GASがJSON以外を返しました。')
-        print(f'   HTTP {status} / 応答の先頭: {head}')
+        # 先頭をそのまま出すとGoogleのスクリプトばかりで、肝心のメッセージが
+        # 見えない（実際に ppConfig の中身だけが出て原因が分からなかった）。
+        # タグを落とした「画面に見える文字」を出す
+        title = re.search(r'<title[^>]*>(.*?)</title>', raw, re.S | re.I)
+        visible = re.sub(r'(?is)<(script|style)[^>]*>.*?</\1>', ' ', raw)
+        visible = re.sub(r'<[^>]+>', ' ', visible)
+        visible = re.sub(r'\s+', ' ', visible).strip()
+        print(f'   HTTP {status}')
+        if title:
+            t = re.sub(r'\s+', ' ', title.group(1)).strip()[:200]
+            print(f'   タイトル: {t}')
+        print(f'   本文: {visible[:400] or "(表示される文字なし)"}')
         if '<html' in raw.lower() or '<!doctype' in raw.lower():
             print('   HTMLが返っています。考えられる原因:')
             print('   ・GASのデプロイのアクセス権限が「全員」でなくなっている')
