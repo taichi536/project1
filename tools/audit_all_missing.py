@@ -31,7 +31,15 @@ JST = datetime.timezone(datetime.timedelta(hours=9))
 MEDIA_LABEL_TO_KEY = {
     'RDS': 'rds', 'ビズリーチ': 'bizreach', 'dodaX': 'dodax', 'doda X': 'dodax',
     'アンビ': 'ambi', 'AMBI': 'ambi', 'Green': 'green', 'グリーン': 'green', 'マイナビ': 'mynavi',
+    # シートの表記は「Linkedin」、Supabase側は「linkedin」。この表にLinkedInが無く、
+    # シートの表記がそのまま媒体キーになっていたため、大文字小文字が違うだけで
+    # 別の媒体として扱われ、10件すべてが「記録漏れ100%」かつ「自動記録にあって
+    # シートに無いもの10件」として両側に出ていた（実際は両方に同じ10件がある）
+    'Linkedin': 'linkedin', 'LinkedIn': 'linkedin', 'リンクトイン': 'linkedin',
 }
+# 表記ゆれ（大文字小文字・前後の空白）で媒体キーが割れるのを防ぐ。
+# 上の表に無い媒体も小文字に揃えてから突き合わせる
+_MEDIA_NORM = {k.strip().lower(): v for k, v in MEDIA_LABEL_TO_KEY.items()}
 KANJI_VARIANTS = {
     '鐵': '鉄', '廣': '広', '龍': '竜', '澤': '沢', '齋': '斎', '邊': '辺', '會': '会',
     # 大学名で実際に表記が割れるもの。「慶應義塾大学」と「慶応義塾大学」が
@@ -117,7 +125,8 @@ for r in gas.get('records', []):
     wd = r.get('workDate') or ''
     if wd < fetch_from or wd > DAY_TO or not r.get('date'):
         continue
-    pkey = MEDIA_LABEL_TO_KEY.get(r.get('platform', ''), r.get('platform', ''))
+    raw_media = (r.get('platform') or '').strip()
+    pkey = _MEDIA_NORM.get(raw_media.lower(), raw_media.lower())
     who = r.get('recruiter') or '(空欄)'
     r['_t'] = datetime.datetime.fromtimestamp(r['date'] / 1000, tz=datetime.timezone.utc).astimezone(JST)
     gas_by_key[(who, pkey)].append(r)
@@ -141,7 +150,7 @@ while True:
 supa_by_key = defaultdict(list)
 for s in supa_rows:
     s['_t'] = datetime.datetime.fromisoformat(str(s['sent_at']).replace('Z', '+00:00')).astimezone(JST)
-    supa_by_key[((s.get('recruiter_name') or '(空欄)'), s.get('platform') or '')].append(s)
+    supa_by_key[((s.get('recruiter_name') or '(空欄)'), (s.get('platform') or '').strip().lower())].append(s)
 print(f'  Supabase: {len(supa_rows)}件\n', flush=True)
 
 # 1件も読めていないのに集計に進むと、シートの全件が「漏れ」と表示され、
