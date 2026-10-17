@@ -64,7 +64,24 @@ def post_json(url, payload, timeout=340):
     req = urllib.request.Request(url, data=body, method='POST', headers={})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read().decode('utf-8')
-        return json.loads(raw) if raw.strip() else {}
+        status = resp.status
+    if not raw.strip():
+        return {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # GASはエラー時にHTMLのページを返す（権限切れ、実行時エラー、実行回数の
+        # 上限など）。そのままJSONとして読もうとすると「Expecting value」で
+        # 落ち、何が起きたのか分からないまま終わる。中身を見せる
+        head = raw.strip()[:400].replace('\n', ' ')
+        print('❌ GASがJSON以外を返しました。')
+        print(f'   HTTP {status} / 応答の先頭: {head}')
+        if '<html' in raw.lower() or '<!doctype' in raw.lower():
+            print('   HTMLが返っています。考えられる原因:')
+            print('   ・GASのデプロイのアクセス権限が「全員」でなくなっている')
+            print('   ・GAS側で実行時エラーが出ている（スクリプトエディタの実行ログを確認）')
+            print('   ・1日の実行時間・呼び出し回数の上限に達した（時間をおいて再実行）')
+        sys.exit(1)
 
 
 def get_json(url, timeout=90):
