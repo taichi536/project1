@@ -1163,6 +1163,7 @@ const _reportedPaths = new Map();
 // 送信ボタンを押した直後の通信に限れば、名前で絞らなくても対象は十分に少ない
 let _sendDiscoveryUntil = 0;
 let _sendDiscoveryCount = 0;
+let _sendDiscoveryButton = '';
 // 計測・ログ送信の類は送信APIではありえない。これを除かないと本物が埋もれる
 const TRACKING_PATHS = /(?:^|\/)(?:li\/track|track|platform-telemetry|telemetry|realtime|analytics|metrics|beacon|csp|collect|log|logs|events?)(?:\/|$)/i;
 
@@ -1584,8 +1585,12 @@ window.addEventListener('snowwe:request', e => {
             && Date.now() - (_reportedPaths.get(fullPath) || 0) > 30 * 60 * 1000) {
           _sendDiscoveryCount++;
           _reportedPaths.set(fullPath, Date.now());
+          // 窓が開いている20秒の間に次の操作へ進むと、_lastButtonTextが
+          // 「次の候補者」等に変わり、どのボタンの直後の通信だったのか
+          // 分からなくなる（実データで全件そうなった）。窓を開いた時点の
+          // 文言を使う
           reportRecordFailure('送信直後の通信（送信APIの特定用）', {
-            buttonText: _lastButtonText,
+            buttonText: _sendDiscoveryButton || _lastButtonText,
             path: fullPath,
           });
           return;
@@ -2198,6 +2203,10 @@ function isNotCompanyName(s) {
   if (/^\d{1,4}$/.test(v)) return true;
   if (/^[A-Z]{2,4}[)）]/.test(v)) return true;
   if (/^(すべて展開|もっと見る|続きを読む|詳細|一覧)$/.test(v)) return true;
+  // 法人格だけが残った断片は会社名として使えない。実データでLinkedInから
+  // 「K.K.」がそのまま記録されていた（社名の前半を落としている）
+  if (/^(?:K\.?K\.?|G\.?K\.?|Inc\.?|Co\.?|Corp\.?|Ltd\.?|LLC|LLP|GmbH|PLC|Pte\.?|Pty\.?|S\.A\.|B\.V\.)$/i
+      .test(v.replace(/[,，、.]+$/, '').trim() + (/[.]$/.test(v) ? '.' : ''))) return true;
   if (/(株式会社|有限会社|合同会社|㈱|法人|Inc|Co\.|Corp|Ltd|LLC|銀行|省|庁)/i.test(v)) return false;
   if (/(大学|大学院|学部|学科|高等専門学校|専門学校|高校)/.test(v)) return true;
   if (/(部長|課長|係長|次長|室長|本部長|グループ長|リーダー|マネージャー|代理|担当)\s*$/.test(v)) return true;
@@ -2873,6 +2882,7 @@ document.addEventListener('click', e => {
         if (!SEND_REQUESTS[getPlatform()]) {
           _sendDiscoveryUntil = Date.now() + 20 * 1000;
           _sendDiscoveryCount = 0;
+          _sendDiscoveryButton = textCore.slice(0, 60);
         }
         try {
           showAutoStatus(
@@ -2894,6 +2904,7 @@ document.addEventListener('click', e => {
     if (!SEND_REQUESTS[getPlatform()]) {
       _sendDiscoveryUntil = Date.now() + 20 * 1000;
       _sendDiscoveryCount = 0;
+      _sendDiscoveryButton = textCore.slice(0, 60);
     }
   }
 
