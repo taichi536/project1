@@ -1251,6 +1251,14 @@ const SEND_REQUESTS = {
   rds: /\/scouting\/scoutroom\/\d+\/scout(?:\?|$)/,
   // 失敗ログから判明: スカウトを送信 → POST /v1/api/send-scout
   bizreach: /\/v1\/api\/send-scout(?:\?|$)/,
+  // 失敗ログから判明。LinkedInは全ての操作が /talent/api/graphql を通るため、
+  // パスだけでは送信を見分けられない。何の操作かはクエリ文字列の queryId に出る。
+  // 実データで、送信ボタン（このメッセージを送信送信）の直後に飛んでいたのは
+  //   queryId=talentMultiMessagePosts.be0f985141a7cf89d4d410c4e5839e8f  ← 送信そのもの
+  //   queryId=talentRecruiterTracking.ab2236be...                      ← 操作ログ
+  // queryIdの後ろのハッシュは媒体側の更新で変わるため、名前の部分だけを見る。
+  // 採用アシスタントへの指示（talentCopilotMessages）は別物なので混ざらない
+  linkedin: /\/talent\/api\/graphql\?[^#]*queryId=talentMultiMessagePosts\./,
 };
 
 // 1回の通信で複数人に送る経路。doda X の一括スカウト送信が該当する。
@@ -1595,14 +1603,20 @@ window.addEventListener('snowwe:request', e => {
           });
           return;
         }
-        const looksLikeSend = /scout|message|offer|approach|mail|send/i.test(path);
+        // LinkedInのように全操作が同じパス（/talent/api/graphql）を通る媒体では、
+        // 媒体側がqueryIdを変えた瞬間に送信APIの照合が外れ、記録が静かに止まる。
+        // パスに送信らしい語が無いので、上の語句判定では報告もされない。
+        // 認識できた送信ボタンの直後に来たgraphqlは、たとえ照合が外れていても残す
+        const sendJustClicked = Date.now() - _lastRecognizedSendAt < 20 * 1000;
+        const looksLikeSend = /scout|message|offer|approach|mail|send/i.test(path)
+          || (sendJustClicked && /graphql/i.test(path));
         const inScoutFlow = Date.now() - _lastButtonAt < 60 * 1000;
-        const alreadyReported = Date.now() - (_reportedPaths.get(path) || 0) < 30 * 60 * 1000;
+        const alreadyReported = Date.now() - (_reportedPaths.get(fullPath) || 0) < 30 * 60 * 1000;
         if (looksLikeSend && inScoutFlow && !alreadyReported) {
-          _reportedPaths.set(path, Date.now());
+          _reportedPaths.set(fullPath, Date.now());
           reportRecordFailure('送信の可能性がある通信（未登録）', {
             buttonText: _lastButtonText,
-            path,
+            path: fullPath,
           });
         }
       } catch (_) {}
