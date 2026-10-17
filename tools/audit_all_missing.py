@@ -59,12 +59,44 @@ if not GAS_URL:
     sys.exit(1)
 
 
+def describe_html(raw, status):
+    """GASはエラーをHTMLのページで返す。タグを落として、画面に見える文字を出す"""
+    title = re.search(r'<title[^>]*>(.*?)</title>', raw, re.S | re.I)
+    visible = re.sub(r'(?is)<(script|style)[^>]*>.*?</\1>', ' ', raw)
+    visible = re.sub(r'<[^>]+>', ' ', visible)
+    visible = re.sub(r'\s+', ' ', visible).strip()
+    print(f'   HTTP {status}')
+    if title:
+        t = re.sub(r'\s+', ' ', title.group(1)).strip()[:200]
+        print(f'   タイトル: {t}')
+    print(f'   本文: {visible[:400] or "(表示される文字なし)"}')
+
+
 def post_json(url, payload, timeout=340):
     body = json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(url, data=body, method='POST', headers={})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        raw = resp.read().decode('utf-8')
-        status = resp.status
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode('utf-8')
+            status = resp.status
+    except urllib.error.HTTPError as e:
+        # 404はデプロイが見つからない（URLが古い・デプロイを消した・作り直した）。
+        # 本文にGoogleの説明が入っていることがあるので、それも出す
+        raw = ''
+        try:
+            raw = e.read().decode('utf-8', 'replace')
+        except Exception:
+            pass
+        print(f'❌ GASがHTTP {e.code} を返しました。')
+        if raw:
+            describe_html(raw, e.code)
+        if e.code == 404:
+            print('   デプロイが見つかりません。考えられる原因:')
+            print('   ・GASを再デプロイしてURLが変わった（環境変数GAS_URLが古い）')
+            print('   ・デプロイを削除した／アーカイブした')
+            print('   確認: Apps Script → デプロイ → デプロイを管理 → ウェブアプリのURL')
+            print('   いまのGAS_URLの末尾: ...' + (url or '')[-12:])
+        sys.exit(1)
     if not raw.strip():
         return {}
     try:
@@ -74,18 +106,7 @@ def post_json(url, payload, timeout=340):
         # 上限など）。そのままJSONとして読もうとすると「Expecting value」で
         # 落ち、何が起きたのか分からないまま終わる。中身を見せる
         print('❌ GASがJSON以外を返しました。')
-        # 先頭をそのまま出すとGoogleのスクリプトばかりで、肝心のメッセージが
-        # 見えない（実際に ppConfig の中身だけが出て原因が分からなかった）。
-        # タグを落とした「画面に見える文字」を出す
-        title = re.search(r'<title[^>]*>(.*?)</title>', raw, re.S | re.I)
-        visible = re.sub(r'(?is)<(script|style)[^>]*>.*?</\1>', ' ', raw)
-        visible = re.sub(r'<[^>]+>', ' ', visible)
-        visible = re.sub(r'\s+', ' ', visible).strip()
-        print(f'   HTTP {status}')
-        if title:
-            t = re.sub(r'\s+', ' ', title.group(1)).strip()[:200]
-            print(f'   タイトル: {t}')
-        print(f'   本文: {visible[:400] or "(表示される文字なし)"}')
+        describe_html(raw, status)
         if '<html' in raw.lower() or '<!doctype' in raw.lower():
             print('   HTMLが返っています。考えられる原因:')
             print('   ・GASのデプロイのアクセス権限が「全員」でなくなっている')
