@@ -2373,10 +2373,14 @@ function extractBasicInfo(cardEl) {
     if (slide) ageMatch = (slide.innerText || '').match(/(\d{2,3})歳/);
   }
   // doda-Xのスカウト送信画面では、年齢は左上の見出しにあり、候補者情報を読む
-  // 詳細パネルの中には無い（会員番号と同じ理由）。この画面に出ている候補者は
-  // 1人だけなので、画面全体から拾っても取り違えない
+  // 詳細パネルの中には無い（会員番号と同じ理由）。
+  // ただし画面全体から最初の「◯歳」を拾うと、右側のスカウト本文に含まれる
+  // 年齢（「32歳」等）を先に拾ってしまう。実機で、画面に59歳と出ているのに
+  // 32歳と読み取っていた。見出しは「会員番号 → 年齢」の並びなので、
+  // 8桁の会員番号の直後にあるものだけを年齢として使う
   if (!ageMatch && getPlatform() === 'dodax' && /\/scout\/sent/.test(location.pathname)) {
-    ageMatch = (document.body.innerText || '').match(/(\d{2,3})歳/);
+    const body = (document.body.innerText || '');
+    ageMatch = body.match(/\b\d{8}\b[\s\S]{0,60}?(\d{2,3})歳/);
   }
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
