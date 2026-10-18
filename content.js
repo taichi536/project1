@@ -235,6 +235,63 @@ function showOutdatedBanner(vs) {
   }).catch(() => {});
 }
 
+// 記録が誤った内容になる不具合を直した版より前では、送信そのものを止める。
+// 「更新してください」の案内だけでは更新されないまま送られ続け、あとから直せない
+// 記録（誤ったポジション・空の会社名）が積み上がるため。
+// 止めるのは、最低バージョンを実際に取得できて、かつその情報が新しいときだけ。
+// 取得できなかったことを理由に止めると、通信が不調なだけで仕事が止まる
+let _blockSendUntilUpdate = false;
+let _blockSendMessage = '';
+let _blockSendMin = '';
+function refreshMinVersionGate() {
+  chrome.storage.local.get(['minVersion']).then(({ minVersion: mv }) => {
+    try {
+      if (!mv || !mv.min || !mv.checkedAt) return;
+      // 2週間以上前の情報は使わない（古い判定で止め続けない）
+      if (Date.now() - mv.checkedAt > 14 * 24 * 60 * 60 * 1000) return;
+      const current = chrome.runtime.getManifest().version;
+      _blockSendUntilUpdate = String(mv.min).localeCompare(current, undefined, { numeric: true }) > 0;
+      _blockSendMessage = mv.message || '';
+      _blockSendMin = mv.min;
+    } catch (_) {}
+  }).catch(() => {});
+}
+refreshMinVersionGate();
+
+function showUpdateRequiredOverlay() {
+  try {
+    if (document.getElementById('snowwe-must-update')) return;
+    const bar = document.createElement('div');
+    bar.id = 'snowwe-must-update';
+    bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2147483647;'
+      + 'background:#B3261E;color:#fff;padding:14px 18px;font-size:13px;line-height:1.7;'
+      + 'font-family:system-ui,-apple-system,sans-serif;box-shadow:0 -2px 12px rgba(0,0,0,.3)';
+    const current = (() => { try { return chrome.runtime.getManifest().version; } catch (_) { return '?'; } })();
+    bar.innerHTML = '<div style="font-weight:700;margin-bottom:4px">⛔ 更新してから送信してください'
+      + `（いま v${current} / 必要 v${_blockSendMin}）</div>`
+      + `<div>${(_blockSendMessage || '').replace(/[<>]/g, '')}</div>`
+      + '<div style="margin-top:6px">update（update.command / update.bat）を実行し、'
+      + 'chrome://extensions の「更新」を押してから、このページを再読み込み（F5）してください。</div>';
+    document.body.appendChild(bar);
+  } catch (_) {}
+}
+
+// 送信・スカウト開始のボタンを、サイト側の処理より先に止める（capture段階）
+document.addEventListener('click', e => {
+  if (!_blockSendUntilUpdate) return;
+  if (document.documentElement.getAttribute('data-snow-we-id') !== _INSTANCE_ID) return;
+  let btn = null;
+  try { btn = e.target.closest && e.target.closest('button, a, [role="button"]'); } catch (_) {}
+  if (!btn) return;
+  const { text, textCore } = readButtonLabel(btn);
+  const kind = classifyScoutButton(btn, text, textCore);
+  if (!kind.isStart && !kind.isSend) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+  showUpdateRequiredOverlay();
+}, true);
+
 chrome.storage.local.get(['versionStatus']).then(({ versionStatus: vs }) => {
   try {
     if (!vs || !vs.latest) return;
@@ -8080,6 +8137,22 @@ function diagnoseCurrentPage() {
     out.buttons = known.concat(others.slice(0, Math.max(0, 16 - known.length)));
   } catch (_) {}
 
+  // doda Xは、1人だけ選んで送っても一括送信の通信（bulkSendScout）を通る。
+  // この経路は、画面で選んだ候補者をボタンを押した時点で控える作りなので、
+  // 送らずに「いま選ばれている人から何が取れるか」をそのまま確認できる
+  if (platform === 'dodax') {
+    try {
+      const picked = captureSelectedCandidateIds();
+      out.bulkSelected = picked.length;
+      out.bulkSamples = picked.slice(0, 3).map(it => ({
+        id: it.id,
+        company: (it.info && it.info.company) || '',
+        univ: (it.info && it.info.univ) || '',
+        age: (it.info && it.info.age) || '',
+      }));
+    } catch (_) {}
+  }
+
   // ── ここから「送ったら記録されるか」の事前判定 ──
   // これまでの診断は「画面から何が読めるか」しか見ていなかった。記録が成立するには
   // その先に「送信を検知できるか」「候補者を特定できるか」が必要で、そこから先は
@@ -8087,6 +8160,15 @@ function diagnoseCurrentPage() {
   // 失敗が1つずつ見つかる進め方になり、そのたびに未記録のスカウトが出た。
   // 記録側とまったく同じ手順を、送信せずにここで走らせる
   try {
+    // 更新が必要な版では、そもそも送信を止める。判定の一番上に出す
+    if (_blockSendUntilUpdate) {
+      out.verdict = 'ng';
+      out.verdictReason = `更新が必要です（いま v${out.version} / 必要 v${_blockSendMin}）。`
+        + 'この版では送信そのものを止めています。update を実行し、'
+        + 'chrome://extensions の「更新」→ ページを再読み込みしてください';
+      out.buttonsNote = '更新するまで、送信・スカウト開始のボタンは押しても進みません';
+      return out;
+    }
     const canDetect = (SEND_REQUESTS[platform] && isNetHookAlive()) || hasSendBtn;
     out.detectBy = (SEND_REQUESTS[platform] && isNetHookAlive()) ? '送信の通信（確実）'
       : hasSendBtn ? '送信ボタンの文言' : '';
@@ -8135,6 +8217,10 @@ function diagnoseCurrentPage() {
         out.verdict = 'ng';
         out.verdictReason = 'この画面の送信を検知できません（送信ボタンを認識できず、送信APIも未登録）';
       }
+    } else if (!id && out.bulkSelected) {
+      // 一括送信の経路は控えも詳細パネルも使わない。選ばれている人数で判断する
+      out.verdict = 'ok';
+      out.verdictReason = `一括送信として、いま選ばれている${out.bulkSelected}人を記録します`;
     } else if (!id) {
       if (hasStartBtn) {
         out.verdict = 'wait';

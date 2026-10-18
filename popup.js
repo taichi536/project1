@@ -2989,6 +2989,10 @@ async function runDiagnose() {
       line('テンプレート', r.template || '-'),
       line('本文', r.bodyLength ? `${r.bodyLength}文字` : '(取れません)'),
       '',
+      ...(r.bulkSelected ? ['', `一括送信で記録される候補者: ${r.bulkSelected}人（いまチェックが入っている人）`,
+        ...(r.bulkSamples || []).map(b => `  ${b.id} / 会社 ${b.company || '(取れません)'}`
+          + ` / 大学 ${b.univ || '(取れません)'} / 年齢 ${b.age || '(取れません)'}`),
+        ...(r.bulkSelected > 3 ? [`  …ほか ${r.bulkSelected - 3}人`] : [])] : []),
       ...(r.lines && r.lines.length ? ['', '読み取り元の中身（先頭20行）',
         ...r.lines.map((l, i) => `  ${String(i + 1).padStart(2)}行 ${l.slice(0, 60)}`)] : []),
       '',

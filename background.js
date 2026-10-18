@@ -1079,6 +1079,9 @@ async function sendHeartbeat(trigger) {
 //    自分で再読み込みする。開発者モードで読み込んだ拡張は、再読み込みでディスクから読み直す
 // ② GitHub の main と比べて古ければ、媒体の画面に警告を出す（content.js が表示する）
 const LATEST_MANIFEST_URL = 'https://raw.githubusercontent.com/taichi536/project1/main/manifest.json';
+// 「この版より前では送らせない」最低バージョン。記録が誤った内容になる不具合を
+// 直したときだけ上げる。通常の更新では上げない（毎回止まると仕事にならない）
+const MIN_VERSION_URL = 'https://raw.githubusercontent.com/taichi536/project1/main/min-version.json';
 
 function compareVersions(a, b) {
   const pa = String(a || '').split('.').map(n => parseInt(n, 10) || 0);
@@ -1118,6 +1121,23 @@ async function checkVersions() {
     const latest = (await res.json()).version;
     await chrome.storage.local.set({
       versionStatus: { current, latest, outdated: compareVersions(latest, current) > 0, checkedAt: Date.now() },
+    });
+  } catch (_) {}
+
+  // ③ 最低バージョン。これを下回る版では送信そのものを止める。
+  // 取得に失敗したときは何も保存しない（取得できないことを理由に止めない）
+  try {
+    const res = await fetch(MIN_VERSION_URL, { cache: 'no-store' });
+    if (!res.ok) return;
+    const j = await res.json();
+    if (!j || !j.min) return;
+    await chrome.storage.local.set({
+      minVersion: {
+        min: String(j.min),
+        message: String(j.message || ''),
+        blocked: compareVersions(j.min, current) > 0,
+        checkedAt: Date.now(),
+      },
     });
   } catch (_) {}
 }
