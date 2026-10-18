@@ -2146,7 +2146,10 @@ function getCandidateId(cardEl) {
         el = el.parentElement;
       }
     }
-    if (buMatch) return `bizreach_resume-${buMatch[1]}`;
+    // 会員番号は「BU02708454」と0で桁埋めされているが、一覧カードの要素IDは
+    // 「resume-2708454」で0が無い。そのままだと同じ人が経路によって2つのIDで
+    // 記録されるため、先頭の0を落として一覧側の形にそろえる（実機のHTMLで確認）
+    if (buMatch) return `bizreach_resume-${buMatch[1].replace(/^0+(?=\d)/, '')}`;
     // 直接 id を持つ場合
     if (cardEl.id && cardEl.id.startsWith('resume-')) return `bizreach_${cardEl.id}`;
     // 子要素の bui-drawer-trigger に id がある（実際のBizreach構造）
@@ -2431,6 +2434,43 @@ function extractBasicInfo(cardEl) {
         univ: u,
       };
     }
+  }
+
+  // ビズリーチも、一覧カード・詳細パネルとも項目ごとに属性が付いている
+  // （実機のHTMLで確認）:
+  //   一覧カード ess-resume-list-item
+  //     <li data-age> 41歳 </li>
+  //     <div data-company-name><h2> 三菱商事株式会社 </h2>…</div>
+  //     <p data-education><span class="item-label">学歴：</span>大学院卒（修士） / ブリストル大学 </p>
+  //   詳細パネル ess-resume-pane
+  //     .resume-pane-header-top <li data-age> 41歳 </li>
+  //     .company-list の最初の li の .company-name（現職）
+  //     最初の .education-name（一覧カードの学歴と同じ学校）
+  // 一覧カードの <p data-position-name> は候補者自身の部署なので使わない
+  // （こちらが送るポジションとは無関係）
+  let bizreachCard = null;
+  // 一覧全体のような、複数の候補者を含む要素を渡されたときは使わない
+  // （最初の候補者の値を拾ってしまうため）
+  if (getPlatform() === 'bizreach' && cardEl.querySelector
+      && !cardEl.querySelector('ess-resume-list-item')) {
+    const txt = el => (el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '');
+    const ageEl = cardEl.querySelector('.resume-pane-header-top [data-age]')
+      || cardEl.querySelector('[data-age]');
+    const ageTxt = (txt(ageEl).match(/^(\d{2,3})歳$/) || [])[0] || '';
+    let comp = txt(cardEl.querySelector('[data-company-name] h2'));
+    if (!comp) {
+      const ce = cardEl.querySelector('.company-list > li .company-name');
+      comp = txt(ce && (ce.querySelector('a span') || ce));
+    }
+    let u = '';
+    const eduEl = cardEl.querySelector('[data-education]');
+    if (eduEl) {
+      // 「学歴：大学院卒（修士） / ブリストル大学」。学校名は「 / 」の後ろ
+      const parts = txt(eduEl).replace(/^学歴[：:]\s*/, '').split(/\s*\/\s*/);
+      if (parts.length >= 2) u = parts.slice(1).join(' / ').trim();
+    }
+    if (!u) u = txt(cardEl.querySelector('.education-name'));
+    if (ageTxt || comp || u) bizreachCard = { company: comp, age: ageTxt, univ: u };
   }
 
   // 大学名を抽出（学歴セクション優先）
@@ -2896,6 +2936,11 @@ function extractBasicInfo(cardEl) {
     if (dodaxCard.company) company = dodaxCard.company;
     if (dodaxCard.univ) univ = dodaxCard.univ;
     if (dodaxCard.age) ageMatch = [dodaxCard.age, dodaxCard.age.replace('歳', '')];
+  }
+  if (bizreachCard) {
+    if (bizreachCard.company) company = bizreachCard.company;
+    if (bizreachCard.univ) univ = bizreachCard.univ;
+    if (bizreachCard.age) ageMatch = [bizreachCard.age, bizreachCard.age.replace('歳', '')];
   }
 
   if (company && isNotCompanyName(company)) {
@@ -7486,6 +7531,46 @@ function findDodaxProfilePane() {
   return null;
 }
 
+/**
+ * 画面に本当に出ている要素かを判定する。
+ *
+ * display:none の要素は innerText も矩形も空になるので自然に外れるが、
+ * visibility:hidden・opacity:0・画面の外に逃がしてある要素は、innerText も
+ * 矩形もそのまま返ってくる。doda X の候補者一覧には、中身が入っていない
+ * 候補者詳細の下敷き（「更新日 undefined歳」「入力なし」だけが並ぶ）が
+ * この状態で置かれており、これを詳細パネルとして掴んでしまって、
+ * ハッシュIDと空の会社名で記録しようとしていた（実機の診断で確認）
+ */
+function isElementOnScreen(el, opts) {
+  try {
+    if (!el || !el.getClientRects || el.getClientRects().length === 0) return false;
+    const st = window.getComputedStyle(el);
+    if (st.visibility === 'hidden' || st.visibility === 'collapse') return false;
+    // 親の opacity は子の computedStyle に出ないため、祖先もたどる
+    for (let a = el; a && a.nodeType === 1; a = a.parentElement) {
+      if (parseFloat(window.getComputedStyle(a).opacity || '1') < 0.05) return false;
+    }
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return false;
+    // 引き出しの待機状態など、画面の外に逃がしてあるもの
+    if (r.right <= 0 || r.left >= window.innerWidth) return false;
+    // ボタンは下にスクロールした先にあるのが普通なので、縦は見ない指定ができる
+    if (!(opts && opts.allowScroll)) {
+      if (r.bottom <= 0 || r.top >= window.innerHeight) return false;
+    }
+    return true;
+  } catch (_) { return false; }
+}
+
+/**
+ * 値が流し込まれていない下敷き（テンプレート）かどうか。
+ * 「undefined歳」のように、置き換えられなかった変数がそのまま文字として
+ * 出ているものは、候補者の情報ではない
+ */
+function isUnfilledPanelText(t) {
+  return /undefined/.test(t || '');
+}
+
 // -------------------------------------------------------
 // doda X 詳細パネルを特定する（カードクリックで開く右パネル）
 // -------------------------------------------------------
@@ -7508,7 +7593,9 @@ function findDodaxDetailPanel() {
     const rect = el.getBoundingClientRect();
     const t = (el.innerText || '').trim();
     if (nonProfileMarkers.some(m => t.includes(m))) return;
+    if (isUnfilledPanelText(t)) return;
     if (rect.width > 200 && rect.width < viewportWidth * 0.7 && t.length > 100 && t.length < 30000) {
+      if (!isElementOnScreen(el)) return;
       // 一致した種類の数を優先スコアに加える。候補者一覧全体のような大きい
       // コンテナは文字数は多くても一致キーワードの種類は偏りやすいため、
       // 単純な文字数だけで選ぶと候補者一覧側に負けてしまうことがある
@@ -7524,7 +7611,9 @@ function findDodaxDetailPanel() {
       const rect = el.getBoundingClientRect();
       const t = (el.innerText || '').trim();
       if (nonProfileMarkers.some(m => t.includes(m))) return;
+      if (isUnfilledPanelText(t)) return;
       if (rect.width > 200 && rect.width < viewportWidth * 0.7 && t.length > 50) {
+        if (!isElementOnScreen(el)) return;
         candidates.push({ el, score: t.length, left: Math.round(rect.left) });
       }
     });
@@ -8190,6 +8279,9 @@ function diagnoseCurrentPage() {
       const { text: t, textCore: core } = readButtonLabel(b);
       if (!t || t.length > 40) continue;
       if (!/スカウト|送信|送る|メッセージ|確定|確認/.test(t)) continue;
+      // 閉じた引き出しの中など、見えていないボタンは押せないので数えない。
+      // doda X の一覧画面で、隠れた送信フォームの「送信する」を○と数えていた
+      if (!isElementOnScreen(b, { allowScroll: true })) continue;
       const k = classifyScoutButton(b, t, core);
       if (k.isSend) hasSendBtn = true;
       if (k.isStart) hasStartBtn = true;
@@ -8284,8 +8376,18 @@ function diagnoseCurrentPage() {
         out.verdict = 'ng';
         out.verdictReason = 'この画面の送信を検知できません（送信ボタンを認識できず、送信APIも未登録）';
       }
-    } else if (!id && out.bulkSelected) {
-      // 一括送信の経路は控えも詳細パネルも使わない。選ばれている人数で判断する
+    } else if (out.bulkSelected && (platform === 'dodax' || !id)) {
+      // 一括送信の経路は控えも詳細パネルも使わない。選ばれている人数で判断する。
+      // doda X は1人でも一括送信の通信を通り、記録も選ばれた人から作るので、
+      // 詳細パネルから候補者が取れていてもこちらを優先する。以前は一覧画面の
+      // 見えない下敷きから作った空の候補者で ✅ と出ていた
+      if (platform === 'dodax' && id) {
+        out.willRecordId = '';
+        out.willRecordIdSource = '';
+        out.willRecordCompany = '';
+        out.willRecordUniv = '';
+        out.willRecordAge = '';
+      }
       out.verdict = 'ok';
       out.verdictReason = `一括送信として、いま選ばれている${out.bulkSelected}人を記録します`;
     } else if (!id) {
