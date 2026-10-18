@@ -233,8 +233,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   // 保存済みのポジションを復元
   if (result.currentPosition) posSel.value = result.currentPosition;
-  // popup表示時に現在の選択を即座に保存（初回も含む）
-  if (posSel.value) chrome.storage.local.set({ currentPosition: posSel.value });
+  // この選択欄は display:none で画面に出しておらず（使われていないため隠した）、
+  // 誰も操作していない。にもかかわらずポップアップを開くたびに
+  // 「選択されていることになっている先頭の項目」を保存していたため、
+  // 身に覚えのないポジション名が保存され続けていた。
+  // 実データで、doda XとLinkedInの記録のポジションが、送信画面のテンプレートでは
+  // なくこの値（ポジション一覧の先頭）になっていた。保存はしない
   // ポジション変更時にchrome.storageへ保存
   posSel.addEventListener('change', () => {
     chrome.storage.local.set({ currentPosition: posSel.value });

@@ -1567,7 +1567,7 @@ window.addEventListener('snowwe:request', e => {
         (async () => {
           const name = bulkSnap.templateRaw ? await resolveTemplateName(bulkSnap.templateRaw) : '';
           for (const it of picked) {
-            recordScoutSent(it.id, it.info || {}, name, bulkSnap.bodyText || '', _cachedCurrentPosition);
+            recordScoutSent(it.id, it.info || {}, name, bulkSnap.bodyText || '', '');
           }
         })();
         return;
@@ -1595,7 +1595,7 @@ window.addEventListener('snowwe:request', e => {
       (async () => {
         const name = bodySnap.templateRaw ? await resolveTemplateName(bodySnap.templateRaw) : '';
         for (const id of ids) {
-          recordScoutSent(`${platform}_${id}`, {}, name, bodySnap.bodyText || '', _cachedCurrentPosition);
+          recordScoutSent(`${platform}_${id}`, {}, name, bodySnap.bodyText || '', '');
         }
       })();
       return;
@@ -1746,7 +1746,22 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
   _recentlyRecorded.set(candidateId, now);
   reportDodaxNameInCompany(info.company || '');
   reportMissingCompany(info);
-  const positionName = templateName || fallbackPosition || '';
+  // fallbackPosition（拡張機能で「選択中」とされていたポジション）は使わない。
+  // この値は、画面に出していない選択欄の先頭項目で、ポップアップを開くたびに
+  // 上書きされていた。実データでdoda X 40件・LinkedIn 10件の記録が、送信画面の
+  // テンプレートではなくこの値になっており、連続する行で同じ名前が並んでいた。
+  // 送信画面から読めたテンプレート名だけを使い、読めなければ空欄にする
+  const positionName = templateName || '';
+  if (!positionName) {
+    // 空欄が続くようなら、その媒体の送信画面からテンプレートを読めていない。
+    // 気づけるように残す（30分に1回まで）
+    try {
+      if (Date.now() - (window.__snowwePosReportedAt || 0) > 30 * 60 * 1000) {
+        window.__snowwePosReportedAt = Date.now();
+        reportRecordFailure('記録はできたがポジションを取れない', { buttonText: _lastButtonText });
+      }
+    } catch (_) {}
+  }
   const industry = gicsAutoClassify(info.company || '');
 
   // ① ローカル記録（メイン・必ず保存）
@@ -1838,7 +1853,13 @@ async function recordScoutSent(candidateId, info, templateName, templateRaw = ''
         candidate_industry: industry,
         company_name: info.company || '',
         university: info.univ || '',
-        position_name: positionName || sharedCurrentPosition,
+        // 以前は positionName が空のとき sharedCurrentPosition（拡張機能で
+        // 「選択中」とされていたポジション）で埋めていた。この値はポップアップを
+        // 開くたびに、画面に出していない選択欄の先頭項目で上書きされており、
+        // 実際に送ったポジションとは無関係だった。実データでdoda X・LinkedInの
+        // 記録が、送信画面のテンプレートではなくこの値になっていた。
+        // 誤った値を入れるより空欄のほうがよい（シート側に正しい値がある）
+        position_name: positionName,
         recruiter_name: sharedRecruiter,
         sent_at: new Date(now).toISOString(),
         scout_message: templateRaw || '',
