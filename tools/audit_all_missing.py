@@ -224,6 +224,8 @@ details = {}
 used_ids = set()
 # 突き合わせの質。本人確認できた分と、時刻が近いだけの分を分けて数える
 match_how = {}
+# 「時刻のみ」で結び付けた行の中身。どちらの値がどう違うのかを後で出す
+timeonly_rows = []
 # 担当者×媒体ごとの「時刻のみ」の件数
 unconfirmed_by_key = {}
 for key in sorted(set(gas_by_key) | set(supa_by_key), key=lambda k: (k[1] == '', k)):
@@ -304,6 +306,7 @@ for key in sorted(set(gas_by_key) | set(supa_by_key), key=lambda k: (k[1] == '',
                 match_how[how] = match_how.get(how, 0) + 1
                 if how == '時刻のみ':
                     unconfirmed_by_key[key] = unconfirmed_by_key.get(key, 0) + 1
+                    timeonly_rows.append((who, media, g, hit))
         elif lo <= g['_t'] < hi:
             miss.append(g)
 
@@ -337,6 +340,35 @@ for how in ('大学一致', '会社一致', '時刻のみ'):
 if match_how.get('時刻のみ', 0):
     print('  ※「時刻のみ」は別人を結び付けている可能性があります。')
     print('    この分は「記録できている」と言い切れません。')
+
+# 「時刻のみ」になった行は、シートと自動記録で大学も会社名も一致しなかったもの。
+# 件数だけ出しても何を直せばよいか分からないため、両方の値を並べて出す。
+# どちらが欠けているのか（取得できていない／表記が違う／別人）が一目で分かる
+if timeonly_rows:
+    print(f'\n=== 時刻のみで結び付けた {len(timeonly_rows)}件の中身 ===')
+    print('   シート側 → 自動記録側 の順。値が違う項目が、直す対象です。')
+    for who, media, g, s_row in timeonly_rows[:30]:
+        print(f'\n  {g["_t"].strftime("%m/%d %H:%M")} {who} / {media or "(媒体未入力)"}')
+        for label, gv, sv in (
+            ('大学  ', g.get('university') or g.get('univ') or '', s_row.get('university') or ''),
+            ('会社  ', g.get('company') or g.get('company_name') or '', s_row.get('company_name') or ''),
+            ('年齢  ', g.get('age') or '', s_row.get('candidate_age') or ''),
+            ('ポジション', g.get('position') or '', s_row.get('position_name') or ''),
+        ):
+            gv, sv = str(gv).strip(), str(sv).strip()
+            if not gv and not sv:
+                mark = '両方なし'
+            elif not sv:
+                mark = '← 自動記録が取れていない'
+            elif not gv:
+                mark = '← シートが空欄'
+            elif norm(gv) == norm(sv):
+                mark = '一致'
+            else:
+                mark = '← 食い違い'
+            print(f'    {label} シート「{gv[:40] or "(空)"}」 / 自動記録「{sv[:40] or "(空)"}」 {mark}')
+    if len(timeonly_rows) > 30:
+        print(f'\n  （ほか {len(timeonly_rows)-30}件）')
 
 # ── 逆方向 ──
 # シートに無いのに自動記録にあるもの。送っていないのに記録されていれば、
