@@ -776,6 +776,15 @@ function findCandidateCardsByPlatform() {
   }
 
   if (platform === 'dodax') {
+    // 候補者検索結果の一覧は <li id="search-result-0..29"> が1人分（実機のHTMLで確認）。
+    // 大きさと文言での推測では、親子の塊を拾ったり1人分を取り逃したりする。
+    // 一括送信のチェックボックス（.bulk-scout-chk）もこの中にあるため、
+    // 「選択された候補者」を数えるにはこの単位でなければならない
+    const listItems = Array.from(document.querySelectorAll('li[id^="search-result-"]'));
+    if (listItems.length > 0) {
+      console.log('[Snow-we] doda-x 一覧カード検出数:', listItems.length);
+      return listItems;
+    }
     // doda-X (doda-x.jp / x.doda.jp) の候補者カード
     const hits = dedup(Array.from(document.querySelectorAll('div, article, li')).filter(el => {
       const rect = el.getBoundingClientRect();
@@ -2180,6 +2189,12 @@ function getCandidateId(cardEl) {
       console.warn('[Snow-we] getCandidateId(dodax): 候補者カードではない要素のためIDを返しません');
       return null;
     }
+    // 一覧カードでは会員番号が専用のクラスに入っている（実機のHTMLで確認）:
+    //   <span class="txt-ellipsis user-name-line">00898993</span>
+    // 文字列の並びから探すより確実
+    const numEl = cardEl.querySelector && cardEl.querySelector('.user-name-line');
+    const numTxt = numEl ? (numEl.textContent || '').trim() : '';
+    if (/^\d{8}$/.test(numTxt)) return `dodax_${numTxt}`;
     const lineNum = text.match(/(?:^|\n)\s*(\d{8})\s*(?=\n|$)/);
     if (lineNum) return `dodax_${lineNum[1]}`;
     const dodaxUrl = findProfileUrl(cardEl);
@@ -2385,6 +2400,38 @@ function extractBasicInfo(cardEl) {
     if (header) ageMatch = header;
   }
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+  // doda X の候補者検索結果の一覧カードは、項目ごとに専用のクラスが付いている
+  // （実機のHTMLで確認）:
+  //   <span class="company-name">日本アイ・ビー・エム株式会社</span>
+  //   <ul class="pipe-line title-box">
+  //     <li><span class="user-name-line">00898993</span></li><li>59歳</li>…
+  //   <dt>学歴</dt><dd><p>大学卒 <span>千葉大学</span> <span>工学部合成科学科</span></p></dd>
+  // 文字列の並びから推測する必要がない。一括送信はこのカードから控えるため、
+  // ここが正確であることが doda X の記録の質を決める
+  let dodaxCard = null;
+  if (getPlatform() === 'dodax' && cardEl.querySelector) {
+    const numEl = cardEl.querySelector('.user-name-line');
+    if (numEl && /^\d{8}$/.test((numEl.textContent || '').trim())) {
+      const cEl = cardEl.querySelector('.company-name');
+      const ageTxt = Array.from(cardEl.querySelectorAll('ul.title-box li'))
+        .map(li => (li.textContent || '').trim())
+        .find(t => /^\d{2,3}歳$/.test(t)) || '';
+      let u = '';
+      for (const dt of cardEl.querySelectorAll('dt')) {
+        if ((dt.textContent || '').trim() !== '学歴') continue;
+        // 「大学卒  千葉大学  工学部合成科学科」。学校名は最初のspan
+        const sp = dt.nextElementSibling && dt.nextElementSibling.querySelector('span');
+        if (sp) u = (sp.textContent || '').trim();
+        break;
+      }
+      dodaxCard = {
+        company: cEl ? (cEl.textContent || '').trim() : '',
+        age: ageTxt,
+        univ: u,
+      };
+    }
+  }
 
   // 大学名を抽出（学歴セクション優先）
   let univ = '';
@@ -2844,6 +2891,13 @@ function extractBasicInfo(cardEl) {
   //   「運用企画部部長代理 責任投資推進室 グループ長」「ソリューション推進部　戦略G グループリーダー」（部署・役職欄を拾った）
   //   「基本情報」（画面のラベルそのもの）
   // 社名として使えない以上、誤った値を残すより空欄にする方が安全（後から手で補える）
+  // 一覧カードからクラスで取れていれば、それを最優先にする（上のコメントの理由）
+  if (dodaxCard) {
+    if (dodaxCard.company) company = dodaxCard.company;
+    if (dodaxCard.univ) univ = dodaxCard.univ;
+    if (dodaxCard.age) ageMatch = [dodaxCard.age, dodaxCard.age.replace('歳', '')];
+  }
+
   if (company && isNotCompanyName(company)) {
     console.warn('[Snow-we] 会社名として不適切な値のため空欄にします:', company);
     company = '';
