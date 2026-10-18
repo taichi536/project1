@@ -2372,15 +2372,17 @@ function extractBasicInfo(cardEl) {
     const slide = document.querySelector('.slide_desc_scout');
     if (slide) ageMatch = (slide.innerText || '').match(/(\d{2,3})歳/);
   }
-  // doda-Xのスカウト送信画面では、年齢は左上の見出しにあり、候補者情報を読む
-  // 詳細パネルの中には無い（会員番号と同じ理由）。
-  // ただし画面全体から最初の「◯歳」を拾うと、右側のスカウト本文に含まれる
-  // 年齢（「32歳」等）を先に拾ってしまう。実機で、画面に59歳と出ているのに
-  // 32歳と読み取っていた。見出しは「会員番号 → 年齢」の並びなので、
-  // 8桁の会員番号の直後にあるものだけを年齢として使う
-  if (!ageMatch && getPlatform() === 'dodax' && /\/scout\/sent/.test(location.pathname)) {
-    const body = (document.body.innerText || '');
-    ageMatch = body.match(/\b\d{8}\b[\s\S]{0,60}?(\d{2,3})歳/);
+  // doda-Xのスカウト送信画面では、候補者の年齢は左上の見出しにしかない。
+  // 読み取り元の詳細パネルには年齢の欄が無く、代わりに職務要約・職務経歴の
+  // 文章が長く入っている。そこに出てくる年齢（「32歳で転職し」等）を
+  // 最初の「◯歳」として拾ってしまい、実機で画面に59歳と出ている候補者を
+  // 32歳と読み取っていた。
+  // 見出しは「会員番号 → 年齢」の並びなので、8桁の会員番号の直後にある
+  // ものを年齢とする。パネル側で何か見つかっていても、こちらを優先する
+  // （パネル側で見つかるのは文章中の年齢で、候補者の年齢ではないため）
+  if (getPlatform() === 'dodax' && /\/scout\/sent/.test(location.pathname)) {
+    const header = (document.body.innerText || '').match(/\b\d{8}\b[\s\S]{0,60}?(\d{2,3})歳/);
+    if (header) ageMatch = header;
   }
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
@@ -8086,6 +8088,13 @@ function diagnoseCurrentPage() {
           : '読み取り元のどの行にも無い（クラス指定で取得した値か、別の画面の値）';
       };
       out.companyWhere = where(out.company);
+      out.univWhere = where(out.univ);
+      // 年齢は、職務経歴の文章の中の年齢を拾う事故が実際にあった。
+      // 会社名と同じように、どの行から来たのかを出す
+      out.ageWhere = where(out.age);
+      if (out.age && !out.ageWhere) {
+        out.ageWhere = '読み取り元のどの行にも無い（画面の見出しから取得した値）';
+      }
       if (out.pending && out.pending.company) out.pendingCompanyWhere = where(out.pending.company);
     } catch (_) {}
   }
