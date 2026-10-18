@@ -45,6 +45,8 @@ KANJI_VARIANTS = {
     # 大学名で実際に表記が割れるもの。「慶應義塾大学」と「慶応義塾大学」が
     # 別大学として扱われ、同じ人を結び付けられなくなっていた
     '應': '応', '學': '学', '國': '国', '藝': '芸', '豐': '豊', '壽': '寿',
+    # 「野村証券」(シート) と「野村證券株式会社」(自動記録) が別会社として扱われていた
+    '證': '証',
 }
 
 args = [a for a in sys.argv[1:] if not a.startswith('-')]
@@ -131,14 +133,38 @@ def get_json(url, timeout=90):
         raise
 
 
+# 小書きのカナは表記が割れる。実データで「富士フィルム」(シート) と
+# 「富士フイルム」(自動記録) が別会社として扱われていた
+SMALL_KANA = str.maketrans('ァィゥェォャュョヮヵヶ', 'アイウエオヤユヨワカケ')
+
+
 def norm(s):
-    """会社名を比べるための正規化。法人格・記号・空白・旧字体の違いを吸収する"""
+    """会社名を比べるための正規化。法人格・記号・空白・旧字体・小書きカナ・
+    よくある略称の違いを吸収する"""
     s = unicodedata.normalize('NFKC', str(s or '')).lower()
     for a, b in KANJI_VARIANTS.items():
         s = s.replace(a, b)
+    # シートは略称で書かれることが多い。実データで「日清食品HD」と
+    # 「日清食品ホールディングス株式会社…」が結び付かなかった。
+    # 「日清食品hd」のように日本語に続くため \b は使えない（日本語も単語文字
+    # として扱われ、境界にならない）。英数字が前後に無いことで判定する。
+    # 小書きカナを揃える前に置き換える（置き換えた文字列も同じ正規化を通すため）
+    s = re.sub(r'(?<![a-z0-9])hd(?![a-z0-9])', 'ホールディングス', s)
+    s = s.translate(SMALL_KANA)
     s = re.sub(r'(株式会社|有限会社|合同会社|\(株\)|㈱)', '', s)
     s = re.sub(r'[・\s,、.。／/\-ー－&()（）]', '', s)
     return s.strip()
+
+
+def company_match(a, b):
+    """会社名が同じと言えるか。支店・事業部・役職が後ろに付く形があるため
+    包含も認めるが、短い一致は別会社どうしを結び付ける（「三菱」で三菱商事と
+    三菱電機が一致してしまう）。短い方が4文字以上のときだけ認める"""
+    if not (a and b):
+        return False
+    if a == b:
+        return True
+    return min(len(a), len(b)) >= 4 and (a in b or b in a)
 
 
 def norm_age(v):
@@ -268,14 +294,30 @@ for key in sorted(set(gas_by_key) | set(supa_by_key), key=lambda k: (k[1] == '',
                 # 会社名は支店・事業部が付く形があるため前方一致を残すが、
                 # 短い前方一致は別会社どうしを結び付ける（「三菱」で三菱商事と
                 # 三菱電機が一致してしまう）。短い方が4文字以上のときだけ認める
-                if gc == sc or (min(len(gc), len(sc)) >= 4
-                                and (gc.startswith(sc) or sc.startswith(gc))):
+                # 以前は前方一致だけだったため、自動記録側の会社名の後ろに
+                # 部署・役職が付いている行（「…ホールディングス株式会社食品
+                # 開発部　課長」）が結び付かなかった
+                if company_match(gc, sc):
                     hit, how = s, '会社一致'
                     break
         # 大学も会社も取れていない（または崩れている）行が「時刻のみ」に落ちていた。
         # シートには年齢とポジションがあり、自動記録側にも両方ある。2つとも
         # 一致すれば、5分の窓の中では同じ人と見てよい（年齢だけ・ポジションだけ
         # では、同じ条件の候補者に連続送信したときに別人を結び付けうる）
+        # シートの大学名は略称で書かれる（「市立」「電通」「つくば」）。
+        # 完全一致では結び付かないが、片方がもう片方を含み、かつ会社名も
+        # 一致するなら同じ人と見てよい。大学だけでの部分一致は別人を
+        # 結び付けうるため認めない
+        if not hit and gu and gc:
+            for s in unused:
+                if abs((s['_t'] - g['_t']).total_seconds()) > 300:
+                    continue
+                su, sc = norm_univ(s.get('university')), norm(s.get('company_name'))
+                if not (su and sc):
+                    continue
+                if (gu in su or su in gu) and company_match(gc, sc):
+                    hit, how = s, '大学(略称)と会社の一致'
+                    break
         if not hit:
             ga, gp = norm_age(g.get('age')), norm(g.get('position'))
             if ga and gp:
@@ -333,7 +375,7 @@ print(f'\n合計: シート {total_sheet}件 / 漏れ {total_miss}件 ({total_mi
 # 以前は区別していなかったため、別人を結び付けていても気づけなかった
 print('\n=== 突き合わせの質 ===')
 matched_total = sum(match_how.values())
-for how in ('大学一致', '会社一致', '時刻のみ'):
+for how in ('大学一致', '会社一致', '大学(略称)と会社の一致', '年齢とポジション一致', '時刻のみ'):
     n = match_how.get(how, 0)
     if matched_total:
         print(f'  {how}: {n}件 ({n / matched_total * 100:.1f}%)')

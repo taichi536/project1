@@ -1512,16 +1512,24 @@ let _pendingBulkIds = [];
 let _pendingBulkAt = 0;
 
 function captureSelectedCandidateIds() {
-  const ids = [];
+  // 識別子だけでなく、カードに出ている会社名・大学・年齢も一緒に控える。
+  // 一括送信の経路では空の情報で記録しており、実データでdoda Xの28件が
+  // 会社名・大学・年齢・ポジションすべて空欄になっていた（シートとの
+  // 突き合わせが「時刻が近いだけ」になり、本人確認ができない）。
+  // 送信画面へ進むと一覧が消えるため、控えられるのはこの時点だけ
+  const picked = [];
   try {
     for (const card of findCandidateCardsByPlatform()) {
       const box = card.querySelector('input[type="checkbox"]');
       if (!box || !box.checked) continue;
       const id = getCandidateId(card);
-      if (id && !ids.includes(id)) ids.push(id);
+      if (!id || picked.some(p => p.id === id)) continue;
+      let info = {};
+      try { info = extractBasicInfo(card); } catch (_) {}
+      picked.push({ id, info });
     }
   } catch (_) {}
-  return ids;
+  return picked;
 }
 
 // net-hook.js が生きているか。生きていなければボタン検知の従来経路に任せる。
@@ -1553,9 +1561,15 @@ window.addEventListener('snowwe:request', e => {
         const picked = _pendingBulkIds.slice();
         _pendingBulkIds = [];
         console.log(`[Snow-we] 一括送信を検知: 画面で選択されていた${picked.length}件を記録します`);
-        for (const id of picked) {
-          recordScoutSent(id, {}, '', '', _cachedCurrentPosition);
-        }
+        // テンプレート名と本文は、送信が成立したこの時点なら送信画面から読める。
+        // 以前は渡しておらず、ポジションも本文も空のまま記録していた
+        const bulkSnap = readSendFormSnapshot(platform);
+        (async () => {
+          const name = bulkSnap.templateRaw ? await resolveTemplateName(bulkSnap.templateRaw) : '';
+          for (const it of picked) {
+            recordScoutSent(it.id, it.info || {}, name, bulkSnap.bodyText || '', _cachedCurrentPosition);
+          }
+        })();
         return;
       }
       const ids = extractBulkCandidateIds(e.detail && e.detail.body);
@@ -1575,9 +1589,15 @@ window.addEventListener('snowwe:request', e => {
       }
       // 一括送信では候補者ごとの詳細が画面に出ていないため、年齢・会社名・大学は
       // 残せない。送った事実・相手・ポジションだけでも残すほうがよい
-      for (const id of ids) {
-        recordScoutSent(`${platform}_${id}`, {}, '', '', _cachedCurrentPosition);
-      }
+      // こちらは通信の中身から識別子だけを取り出す経路で、候補者の詳細は
+      // 分からない。テンプレート名と本文は画面から読めるので、それだけでも渡す
+      const bodySnap = readSendFormSnapshot(platform);
+      (async () => {
+        const name = bodySnap.templateRaw ? await resolveTemplateName(bodySnap.templateRaw) : '';
+        for (const id of ids) {
+          recordScoutSent(`${platform}_${id}`, {}, name, bodySnap.bodyText || '', _cachedCurrentPosition);
+        }
+      })();
       return;
     }
 
