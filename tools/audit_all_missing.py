@@ -212,7 +212,12 @@ supa_rows = []
 offset = 0
 while True:
     page = get_json(
-        f'{SUPABASE_URL}/rest/v1/scouts?select=platform,recruiter_name,company_name,university,sent_at'
+        # 年齢・ポジションを取っていなかったため、「年齢とポジション一致」の
+        # 照合が一度も成立せず（両方とも常に空）、本来そこで結び付くはずの行が
+        # 「時刻のみ」に落ちていた。中身を並べて出したときも、すべての行で
+        # 「自動記録が取れていない」と表示され、記録側の不具合に見えていた
+        f'{SUPABASE_URL}/rest/v1/scouts?select=platform,recruiter_name,company_name,'
+        f'university,candidate_age,position_name,sent_at'
         f'&sent_at=gte.{fetch_from}T00:00:00&sent_at=lt.{end_excl}T15:00:00'
         f'&order=sent_at.asc&limit=1000&offset={offset}')
     if not page:
