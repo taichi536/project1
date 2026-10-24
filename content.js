@@ -31,7 +31,11 @@ chrome.storage.local.get(['gasSettings', 'recruiterName']).then(r => {
 // 表示は「テンプレート」のまま変わらず、送信時にDOMを読むだけでは選択内容が分からない
 // （実機で確認）。このため「テンプレート」チップのクリックを起点に、直後に選ばれる
 // メニュー項目のテキストをここに保持しておき、送信時のpendingScout復元時に使う
-let _cachedGreenTemplate = '';
+// ページを読み込み直すと消え、その後の送信がポジション空欄で記録されていた
+// （実データで確認）。同じタブの中では引き継ぐ
+let _cachedGreenTemplate = (() => {
+  try { return sessionStorage.getItem('snowweGreenTemplate') || ''; } catch (_) { return ''; }
+})();
 let _greenTemplatePickerOpenTs = 0;
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -2503,11 +2507,23 @@ function extractBasicInfo(cardEl) {
     const eduIdx = t.search(/学歴|最終学歴/);
     if (eduIdx >= 0) {
       const eduSection = t.substring(eduIdx, eduIdx + 300);
-      const m = (eduSection.match(/([^\s\n　]{2,20}(?:大学院|大学|高専|専門学校))/g) || [])
+      const m = (eduSection.match(/([^\s\n　]{2,20}(?:大学院|大学校|大学|高専|専門学校))/g) || [])
         .map(cleanUnivName).find(s => !isGenericUnivPhrase(s));
       if (m) return m;
       const en = extractEnglishUniv(eduSection);
       if (en) return en;
+      // 高校。シートには書かれているのに空欄で記録されていた（実データで確認）。
+      // 「高校」は職務経歴の文章にも出てくるため、学歴欄の中に限る
+      const other = (eduSection.match(/([^\s\n　]{2,20}(?:高等学校|高校))/g) || [])
+        .map(cleanUnivName).find(s => !isGenericUnivPhrase(s));
+      if (other) return other;
+      // RDSは「種別 学校名」の形で、専門学校は学校名の側に「専門学校」が付かない
+      // （「専門学校 名古屋スクール・オブ・ビジネス」）。種別を付けて残す
+      const labeled = eduSection.match(/(?:^|\n)\s*(専門学校|高等学校|高校|短期大学|専門職短期大学|その他)[ 　]+([^\n]{2,30})/);
+      if (labeled) {
+        const name = labeled[2].trim();
+        return /(大学院|大学|高専|専門学校|高等学校|高校)/.test(name) ? cleanUnivName(name) : `${labeled[1]} ${name}`;
+      }
     }
     // 学歴セクションがない場合は全体から抽出（会社名候補・応募資格の一般語を除外）
     const m = t.match(/([^\s\n　]{2,20}(?:大学院|大学|高専|専門学校))/g) || [];
@@ -2533,7 +2549,7 @@ function extractBasicInfo(cardEl) {
   }
   // 学校名の体をなしていない値は残さない。実データで「物」という1文字が
   // 大学名として記録されていた（誤った値を残すより空欄の方が後から補いやすい）
-  if (univ && !/(大学院|大学|高専|高等専門学校|専門学校|学院|カレッジ|College|University)/i.test(univ)) {
+  if (univ && !/(大学院|大学|高専|高等専門学校|専門学校|高等学校|高校|学院|カレッジ|College|University)/i.test(univ)) {
     console.warn('[Snow-we] 大学名として不適切な値のため空欄にします:', univ);
     univ = '';
   }
@@ -3037,10 +3053,12 @@ document.addEventListener('click', e => {
       _greenTemplatePickerOpenTs = Date.now();
     }
     const menuItem = e.target.closest('li[role="menuitem"]');
-    if (menuItem && _greenTemplatePickerOpenTs && Date.now() - _greenTemplatePickerOpenTs < 8000) {
+    // 8秒では、一覧を見比べてから選ぶと間に合わず、選んだのに空欄で記録されていた
+    if (menuItem && _greenTemplatePickerOpenTs && Date.now() - _greenTemplatePickerOpenTs < 60000) {
       const name = (menuItem.innerText || '').trim();
       if (name && name !== '＋テンプレートを作成') {
         _cachedGreenTemplate = name;
+        try { sessionStorage.setItem('snowweGreenTemplate', name); } catch (_) {}
         console.log('[Snow-we] green: テンプレート選択を検知:', name);
       }
       _greenTemplatePickerOpenTs = 0;
@@ -7474,7 +7492,8 @@ function cleanUnivName(raw) {
   let s = raw.replace(/[（(（(].*/, '').trim();
   // [\S]*(?:大学院|大学|高専|専門学校) をグリーディに使うと
   // "早稲田大学法学部" → "早稲田大学"、"東京大学大学院工学系研究科" → "東京大学大学院" になる
-  const m = s.match(/[\S]*(?:大学院|大学|高専|専門学校)/);
+  // 「大学校」は「大学」より先に試す。逆だと「日本航空大学校」が「日本航空大学」になる
+  const m = s.match(/[\S]*(?:大学院|大学校|大学|高専|専門学校|高等学校|高校)/);
   s = m ? m[0] : s;
   // Greenは学校名の末尾に学校種別を連結して表示するため「シンガポール国立大学大学」の
   // ように「大学」が重複することがある(実機で確認)。「大阪大学大学院」のような正当な
