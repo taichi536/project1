@@ -2384,6 +2384,29 @@ function isMessageLine(line) {
 }
 
 // カードから基本情報を抽出（履歴保存用）
+// LinkedIn の職歴一覧から、いまの勤務先を読む。同じ会社で役職が複数ある人は
+// 会社ごとにまとめて表示され、会社名は data-test-grouped-position-entity-company-name
+// に入る。まとめていない職歴は会社のページへのリンクで会社名を出す。
+// 並びは新しい順だが、期間に「現在」を含むものを優先する（副業・兼務が先に来ることがある）
+function readLinkedinCurrentCompany(root) {
+  try {
+    const list = root && root.querySelector('.experience-card ul');
+    if (!list) return '';
+    const entries = [...list.children];
+    const isCurrent = li => /(現在|Present)/i.test(li.innerText || li.textContent || '');
+    const ordered = entries.filter(isCurrent).concat(entries.filter(li => !isCurrent(li)));
+    for (const li of ordered) {
+      const g = li.querySelector('[data-test-grouped-position-entity-company-name]');
+      const gv = g ? g.textContent.trim() : '';
+      if (gv) return gv;
+      const link = [...li.querySelectorAll('a[href*="/company/"]')]
+        .map(a => (a.textContent || '').replace(/\s+/g, ' ').trim()).find(Boolean);
+      if (link) return link;
+    }
+  } catch (_) {}
+  return '';
+}
+
 function extractBasicInfo(cardEl) {
   const text = (cardEl.innerText || '');
   let ageMatch = text.match(/(\d{2,3})歳/);
@@ -2755,7 +2778,14 @@ function extractBasicInfo(cardEl) {
     // 在籍期間（「2016年 – 2018年」「2016 - 2018」）を含む行は職歴の明細であって
     // 見出しではない。見出しが見つからない画面（英語UI等）での保険
     const hasPeriod = l => /\d{4}年?\s*[-–—〜~]/.test(l);
-    const headline = headLines.find(l => /[|｜,，]/.test(l)
+    // まず画面の部品から読む。メッセージ作成画面の宛先プロフィールには職歴の
+    // 一覧（.experience-card）があり、会社名は専用の要素に入っている（保存した
+    // HTMLで確認）。見出しの書き方は人によってばらばらで、文字の並びからの推測では
+    // 「Toyota Motor Corporation - Group Manager」や、同じ会社で役職が複数ある人の
+    // 「トヨタ自動車株式会社 / 19年7ヶ月」から会社名を取れず、空欄で記録されていた
+    company = readLinkedinCurrentCompany(cardEl)
+      || readLinkedinCurrentCompany(document.querySelector('.recipient-profile'));
+    const headline = company ? null : headLines.find(l => /[|｜,，]/.test(l)
       && !hasPeriod(l)
       && /(株式会社|合同会社|有限会社|Inc\.?|Corp|Ltd|LLC|GmbH)/i.test(l));
     if (headline) {
