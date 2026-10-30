@@ -6,9 +6,15 @@
 拡張機能の接続切れ(Extension context invalidated)による漏れは、
 「ある時点から連続して漏れる」形になるため、連続ブロックも検出して表示する。
 
+比べる相手は拡張機能が書いた行だけ（ext_version があるもの）。
+2026-10-24 からシートの行が Supabase に写されており（ext_version が空）、
+それと突き合わせるとシート同士を比べることになって必ず一致してしまう。
+写しも含めたいときだけ --with-sync を付ける。
+
 実行:
   python3 audit_all_missing.py                      # 直近7日
   python3 audit_all_missing.py 2026-09-17 2026-09-18 # 期間指定
+  python3 audit_all_missing.py 2026-10-25 2026-10-29 --with-sync
 """
 import json
 import os
@@ -174,6 +180,29 @@ def norm_age(v):
     return m.group(0) if m else ''
 
 
+# 同じ人とみなす送信時刻の差。シートは手で書くため数分ずれることがある
+WINDOW_SEC = 600
+
+
+def is_date_only(g):
+    """シートに送信時刻が無い行（LinkedIn など）。GAS が日付だけの行を
+    12:00:00 にしているため、時刻での突き合わせができない"""
+    if g.get('timeEstimated'):
+        return True
+    t = g['_t']
+    return t.hour == 12 and t.minute == 0 and t.second == 0
+
+
+def near(s, g):
+    """自動記録 s とシート行 g が、時刻の上で同じ送信でありうるか。
+    時刻の無いシート行は同じ日なら可とする（大学・会社などの一致を別に要求する）"""
+    if is_date_only(g):
+        # 後日入力の行は入力時刻が入っているため、シートのタブの日付で比べる
+        wd = g.get('workDate') or g['_t'].date().isoformat()
+        return s['_t'].date().isoformat() == wd
+    return abs((s['_t'] - g['_t']).total_seconds()) <= WINDOW_SEC
+
+
 def norm_univ(s):
     s = unicodedata.normalize('NFKC', str(s or '')).lower()
     for a, b in KANJI_VARIANTS.items():
@@ -206,7 +235,10 @@ for r in gas.get('records', []):
     gas_by_key[(who, pkey)].append(r)
 print(f'  シート: {sum(len(v) for v in gas_by_key.values())}件', flush=True)
 
-print(f'[2/2] Supabaseから取得中...', flush=True)
+WITH_SYNC = '--with-sync' in sys.argv
+# シートの写し（ext_version が空）を外し、拡張機能が書いた行だけと比べる
+EXT_FILTER = '' if WITH_SYNC else '&ext_version=not.is.null'
+print(f"[2/2] Supabaseから取得中...（{'写しも含む' if WITH_SYNC else '拡張機能の記録のみ'}）", flush=True)
 end_excl = (datetime.date.fromisoformat(DAY_TO) + datetime.timedelta(days=1)).isoformat()
 supa_rows = []
 offset = 0
@@ -217,7 +249,8 @@ while True:
         # 「時刻のみ」に落ちていた。中身を並べて出したときも、すべての行で
         # 「自動記録が取れていない」と表示され、記録側の不具合に見えていた
         f'{SUPABASE_URL}/rest/v1/scouts?select=platform,recruiter_name,company_name,'
-        f'university,candidate_age,position_name,sent_at'
+        f'university,candidate_age,position_name,sent_at,ext_version'
+        f'{EXT_FILTER}'
         f'&sent_at=gte.{fetch_from}T00:00:00&sent_at=lt.{end_excl}T15:00:00'
         f'&order=sent_at.asc&limit=1000&offset={offset}')
     if not page:
@@ -257,6 +290,8 @@ used_ids = set()
 match_how = {}
 # 「時刻のみ」で結び付けた行の中身。どちらの値がどう違うのかを後で出す
 timeonly_rows = []
+# 本人確認できた組。項目ごとの一致を後で数える
+pairs = []
 # 担当者×媒体ごとの「時刻のみ」の件数
 unconfirmed_by_key = {}
 for key in sorted(set(gas_by_key) | set(supa_by_key), key=lambda k: (k[1] == '', k)):
@@ -283,7 +318,7 @@ for key in sorted(set(gas_by_key) | set(supa_by_key), key=lambda k: (k[1] == '',
         # 「東京大学」と「東京大学大学院」はどちらも「東京」に揃うので、
         # 前方一致が無くても一致する。完全一致で足りる
         for s in unused:
-            if abs((s['_t'] - g['_t']).total_seconds()) > 300:
+            if not near(s, g):
                 continue
             su = norm_univ(s.get('university'))
             if gu and su and gu == su:
@@ -291,7 +326,7 @@ for key in sorted(set(gas_by_key) | set(supa_by_key), key=lambda k: (k[1] == '',
                 break
         if not hit:
             for s in unused:
-                if abs((s['_t'] - g['_t']).total_seconds()) > 300:
+                if not near(s, g):
                     continue
                 sc = norm(s.get('company_name'))
                 if not (gc and sc):
@@ -302,7 +337,11 @@ for key in sorted(set(gas_by_key) | set(supa_by_key), key=lambda k: (k[1] == '',
                 # 以前は前方一致だけだったため、自動記録側の会社名の後ろに
                 # 部署・役職が付いている行（「…ホールディングス株式会社食品
                 # 開発部　課長」）が結び付かなかった
-                if company_match(gc, sc):
+                # 時刻の無い行（LinkedIn）は会社名でしか結び付けられず、シートは
+                # 「ソニー」のような短い略称で書かれる。同じ担当者・媒体・日に絞って
+                # いるので、短くても片方がもう片方を含めば同じ人とみなす
+                loose = is_date_only(g) and min(len(gc), len(sc)) >= 2 and (gc in sc or sc in gc)
+                if company_match(gc, sc) or loose:
                     hit, how = s, '会社一致'
                     break
         # 大学も会社も取れていない（または崩れている）行が「時刻のみ」に落ちていた。
@@ -315,7 +354,7 @@ for key in sorted(set(gas_by_key) | set(supa_by_key), key=lambda k: (k[1] == '',
         # 結び付けうるため認めない
         if not hit and gu and gc:
             for s in unused:
-                if abs((s['_t'] - g['_t']).total_seconds()) > 300:
+                if not near(s, g):
                     continue
                 su, sc = norm_univ(s.get('university')), norm(s.get('company_name'))
                 if not (su and sc):
@@ -327,7 +366,7 @@ for key in sorted(set(gas_by_key) | set(supa_by_key), key=lambda k: (k[1] == '',
             ga, gp = norm_age(g.get('age')), norm(g.get('position'))
             if ga and gp:
                 for s in unused:
-                    if abs((s['_t'] - g['_t']).total_seconds()) > 300:
+                    if not near(s, g):
                         continue
                     sa, sp = norm_age(s.get('candidate_age')), norm(s.get('position_name'))
                     if sa and sp and ga == sa and gp == sp:
@@ -338,7 +377,7 @@ for key in sorted(set(gas_by_key) | set(supa_by_key), key=lambda k: (k[1] == '',
         # 別人を結び付けている可能性があるため、一致とは別に数える。
         # 以前はこれを区別せず「一致」に含めていたので、本人確認ができているのか
         # 時刻が近かっただけなのかが分からなかった
-        if not hit:
+        if not hit and not is_date_only(g):
             best, best_gap = None, 181
             for s in unused:
                 gap = abs((s['_t'] - g['_t']).total_seconds())
@@ -351,6 +390,8 @@ for key in sorted(set(gas_by_key) | set(supa_by_key), key=lambda k: (k[1] == '',
             used_ids.add(id(hit))
             if lo <= g['_t'] < hi:
                 match_how[how] = match_how.get(how, 0) + 1
+                if how != '時刻のみ':
+                    pairs.append((who, media, g, hit))
                 if how == '時刻のみ':
                     unconfirmed_by_key[key] = unconfirmed_by_key.get(key, 0) + 1
                     timeonly_rows.append((who, media, g, hit))
@@ -416,6 +457,64 @@ if timeonly_rows:
             print(f'    {label} シート「{gv[:40] or "(空)"}」 / 自動記録「{sv[:40] or "(空)"}」 {mark}')
     if len(timeonly_rows) > 30:
         print(f'\n  （ほか {len(timeonly_rows)-30}件）')
+
+# ── 項目ごとの一致 ──
+# 漏れていないことに加えて、記録した中身がシートと同じかを確かめる。
+# 大学・会社は表記ゆれ（略称・株式会社の有無）を一致とみなす
+
+
+def field_verdict(kind, gv, sv):
+    gv, sv = str(gv or '').strip(), str(sv or '').strip()
+    if not gv and not sv:
+        return '両方空'
+    if not sv:
+        return '記録が空'
+    if not gv:
+        return 'シート空'
+    if kind == 'univ':
+        a, b = norm_univ(gv), norm_univ(sv)
+        ok = a == b or (min(len(a), len(b)) >= 2 and (a in b or b in a))
+    elif kind == 'company':
+        a, b = norm(gv), norm(sv)
+        ok = company_match(a, b) or (min(len(a), len(b)) >= 2 and (a in b or b in a))
+    elif kind == 'age':
+        ok = norm_age(gv) == norm_age(sv)
+    else:
+        a, b = norm(gv), norm(sv)
+        ok = a == b or (min(len(a), len(b)) >= 4 and (a in b or b in a))
+    return '一致' if ok else '食い違い'
+
+
+FIELDS = (('大学', 'univ', ('university', 'univ'), 'university'),
+          ('会社', 'company', ('company', 'company_name'), 'company_name'),
+          ('年齢', 'age', ('age',), 'candidate_age'),
+          ('ポジション', 'position', ('position',), 'position_name'))
+VERDICTS = ('一致', '食い違い', '記録が空', 'シート空', '両方空')
+print(f'\n=== 記録の中身がシートと合っているか（本人確認できた {len(pairs)}件）===')
+print('   「記録が空」「食い違い」が直す対象。「シート空」「両方空」は問題なし。')
+by_media = defaultdict(list)
+for p in pairs:
+    by_media[p[1] or '(媒体未入力)'].append(p)
+bad_rows = []
+for media, ps in sorted(by_media.items()):
+    gaps = sorted(abs((s['_t'] - g['_t']).total_seconds()) for _, _, g, s in ps if not is_date_only(g))
+    gap_txt = (f'時刻差 中央{int(gaps[len(gaps)//2])}秒・最大{int(gaps[-1])}秒' if gaps
+               else '時刻差 —（シートに時刻なし）')
+    print(f'\n  {media}: {len(ps)}件  {gap_txt}')
+    for label, kind, gkeys, skey in FIELDS:
+        cnt = {v: 0 for v in VERDICTS}
+        for who, _, g, s in ps:
+            gv = next((g.get(k) for k in gkeys if g.get(k)), '')
+            v = field_verdict(kind, gv, s.get(skey))
+            cnt[v] += 1
+            if v in ('食い違い', '記録が空'):
+                bad_rows.append((who, media, label, v, g, gv, s.get(skey)))
+        print(f'    {label:6s} ' + '  '.join(f'{v}{cnt[v]}' for v in VERDICTS if cnt[v]))
+if bad_rows:
+    print(f'\n  直す対象 {len(bad_rows)}項目（先頭40件）:')
+    for who, media, label, v, g, gv, sv in sorted(bad_rows, key=lambda r: r[4]['_t'])[:40]:
+        print(f"    {g['_t'].strftime('%m/%d %H:%M')} {who} / {media} {label} {v}: "
+              f"シート「{str(gv or '')[:30] or '(空)'}」 / 記録「{str(sv or '')[:30] or '(空)'}」")
 
 # ── 逆方向 ──
 # シートに無いのに自動記録にあるもの。送っていないのに記録されていれば、
