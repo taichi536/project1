@@ -1645,16 +1645,26 @@ window.addEventListener('snowwe:request', e => {
       const ids = extractBulkCandidateIds(e.detail && e.detail.body);
       console.log(`[Snow-we] 一括送信を検知: ${ids.length}件`);
       if (ids.length === 0) {
-        // 取り出せなかった。中身の形だけを残して、次に直せるようにする。
-        // 値は残さず、キー名と数字の桁数だけにする
-        reportRecordFailure('一括送信の内容から候補者を取り出せない', {
-          buttonText: _lastButtonText,
-          path: `${describeBodyShape(e.detail && e.detail.body)} / `
-            + `${describeDigitRuns(e.detail && e.detail.body)}`,
-        });
-        try {
-          showAutoStatus('⚠️ 一括送信を検知しましたが、対象を特定できませんでした', 12000);
-        } catch (_) {}
+        // doda X は1人に送るときも bulkSendScout を使う。その場合は通常の経路が
+        // 約6秒後に記録するため、ここで警告すると送信のたびに誤った警告と失敗報告が
+        // 出ていた（10/30 の失敗報告6件すべてに、数秒後の記録があるのを確認）。
+        // 少し待って、その間に記録されていなければ本当に取りこぼしたとみなす
+        const reqAt = Date.now();
+        const body = e.detail && e.detail.body;
+        const btn = _lastButtonText;
+        setTimeout(() => {
+          const recorded = [..._recentlyRecorded.values()].some(t => t >= reqAt - 60 * 1000);
+          if (recorded) return;
+          // 取り出せなかった。中身の形だけを残して、次に直せるようにする。
+          // 値は残さず、キー名と数字の桁数だけにする
+          reportRecordFailure('一括送信の内容から候補者を取り出せない', {
+            buttonText: btn,
+            path: `${describeBodyShape(body)} / ${describeDigitRuns(body)}`,
+          });
+          try {
+            showAutoStatus('⚠️ 一括送信を検知しましたが、対象を特定できませんでした', 12000);
+          } catch (_) {}
+        }, 20 * 1000);
         return;
       }
       // 一括送信では候補者ごとの詳細が画面に出ていないため、年齢・会社名・大学は
